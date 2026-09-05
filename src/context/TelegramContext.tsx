@@ -58,6 +58,7 @@ import {
 } from '../core/messenger';
 import { io as createSocketIO, Socket } from 'socket.io-client';
 import { getTelegramEpoch, parseTelegramDate, formatTelegramTime } from '../utils/dateUtils';
+import { messageCache } from '../services/IndexedDBMessageCache';
 
 interface TelegramContextType {
   currentUser: User;
@@ -262,6 +263,9 @@ interface TelegramContextType {
 
   // Screenshot Protection & FLAG_SECURE
   triggerScreenshotBlocked: (reason?: string) => void;
+
+  // Local IndexedDB Message Cache
+  messageCache: typeof messageCache;
 }
 
 const TelegramContext = createContext<TelegramContextType | undefined>(undefined);
@@ -1525,6 +1529,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setIsAuthenticated(false);
       setActiveAccountId('');
       storageSyncManager.clearAllOnLogout();
+      messageCache.clearAll().catch(() => {});
       try {
         SecureSessionStorage.setItem('tg_explicitly_logged_out', 'true');
         SecureSessionStorage.removeItem('tg_auth_session_active');
@@ -1927,6 +1932,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     setReplyingTo(null);
 
+    // Persist to local IndexedDB Message Cache
+    messageCache.putMessage(activeChatId, newMessage).catch(() => {});
+
     // Mark as delivered / read
     setTimeout(() => {
       setMessages((prev) => {
@@ -1936,6 +1944,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           [activeChatId]: currentList.map((m) => (m.id === messageId ? { ...m, status: 'read' } : m)),
         };
       });
+      messageCache.updateMessageStatus(activeChatId, messageId, 'read').catch(() => {});
     }, 700);
 
     // Dispatch to real Telegram MTProto server
@@ -2242,12 +2251,18 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           return null;
         });
 
-        // Map Messages from MTProto
+        // Map Messages from MTProto & persist to IndexedDB cache
         if (data.messages && typeof data.messages === 'object' && Object.keys(data.messages).length > 0) {
           setMessages((prev) => ({
             ...prev,
             ...data.messages,
           }));
+          // Asynchronously persist all synced messages to local IndexedDB
+          for (const [cId, msgList] of Object.entries(data.messages)) {
+            if (Array.isArray(msgList) && msgList.length > 0) {
+              messageCache.putMessages(cId, msgList as Message[], { isNetworkFetch: true }).catch(() => {});
+            }
+          }
         } else {
           setMessages((prev) => ({
             ...INITIAL_MESSAGES,
@@ -3091,6 +3106,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       )
     );
     messagesController.deleteDialog(chatId, true);
+    messageCache.clearChat(chatId).catch(() => {});
     showToast(settings.language === 'ar' ? 'تم مسح سجل المحادثة' : 'Chat history cleared', '🧹');
   };
 
@@ -3129,6 +3145,43 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return { loadedCount: 0, hasMore: false };
       }
 
+      // 1. Check local IndexedDB Message Cache first to prevent redundant network request
+      if (oldestId) {
+        try {
+          const cachedOlder = await messageCache.getCachedMessages(chatId, {
+            offsetId: oldestId,
+            limit: 30,
+          });
+
+          if (cachedOlder && cachedOlder.length > 0) {
+            const existing = messages[chatId] || [];
+            const existingIdSet = new Set(existing.map((m) => m.id));
+            const newUniqueOlder = cachedOlder.filter((m) => !existingIdSet.has(m.id));
+
+            if (newUniqueOlder.length > 0) {
+              setMessages((prev) => {
+                const current = prev[chatId] || [];
+                const currentSet = new Set(current.map((m) => m.id));
+                const filtered = newUniqueOlder.filter((m) => !currentSet.has(m.id));
+                if (filtered.length === 0) return prev;
+                const combined = [...filtered, ...current].sort(
+                  (a, b) => getTelegramEpoch(a) - getTelegramEpoch(b)
+                );
+                return {
+                  ...prev,
+                  [chatId]: combined,
+                };
+              });
+
+              // Served directly from IndexedDB without network hit!
+              return { loadedCount: newUniqueOlder.length, hasMore: true };
+            }
+          }
+        } catch (cacheErr) {
+          console.warn('[Pagination] IndexedDB cache check error:', cacheErr);
+        }
+      }
+
       const activeSessionStr = SecureSessionStorage.getItem<string>('tg_session_string') || '';
       const activePhone = currentUser.phone || '';
 
@@ -3148,6 +3201,14 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
         const fetchedOlder: Message[] = data.messages;
+
+        // Persist newly fetched batch into IndexedDB cache
+        messageCache
+          .putMessages(chatId, fetchedOlder, {
+            isNetworkFetch: true,
+            hasMoreOlder: Boolean(data.hasMore),
+          })
+          .catch(() => {});
 
         setMessages((prev) => {
           const existing = prev[chatId] || [];
@@ -3310,6 +3371,40 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
 
+      if (
+        update.type === 'edit_message' ||
+        update.type === 'delete_messages' ||
+        update.type === 'read_history_inbox' ||
+        update.type === 'read_history_outbox'
+      ) {
+        import('../core/MessagesController').then(({ MessagesController }) => {
+          MessagesController.getInstance().processSingleUpdate(update);
+        }).catch(() => {});
+
+        if (update.type === 'edit_message' && update.message) {
+          const editedMsg = update.message;
+          const editChatId = update.chatId || editedMsg.chatId;
+          if (editChatId) {
+            setMessages((prev) => {
+              const currentList = prev[editChatId] || [];
+              const updatedList = currentList.map((m) => m.id === editedMsg.id ? { ...m, ...editedMsg } : m);
+              return { ...prev, [editChatId]: updatedList };
+            });
+          }
+        } else if (update.type === 'delete_messages') {
+          const deletedIds = new Set((update.messages || []).map(String));
+          setMessages((prev) => {
+            const next = { ...prev };
+            Object.keys(next).forEach((cId) => {
+              if (update.channelId && cId !== update.channelId) return;
+              next[cId] = next[cId].filter((m) => !deletedIds.has(String(m.id)));
+            });
+            return next;
+          });
+        }
+        return;
+      }
+
       if (update.type !== 'new_message' || !update.message) return;
       const msg: Message = update.message;
       const isOut = Boolean(msg.out || msg.isOutgoing || update.out);
@@ -3357,6 +3452,11 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           );
           nextState[cId] = merged;
           modified = true;
+        });
+
+        // Persist incoming message to IndexedDB cache
+        chatsToUpdate.forEach((cId) => {
+          messageCache.putMessage(cId, { ...msg, isOutgoing: isOut }, update).catch(() => {});
         });
 
         return modified ? nextState : prev;
@@ -3510,6 +3610,15 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         autoConnect: true,
       });
 
+      socket.on('connect', () => {
+        console.log('[Socket.IO] Connected/Reconnected to server. Triggering differences & offline recovery...');
+        import('../core/MessagesController').then(({ MessagesController }) => {
+          const controller = MessagesController.getInstance();
+          controller.getDifference();
+          controller.getChannelDifferenceService().handleLongOfflineRecovery();
+        }).catch(() => {});
+      });
+
       socket.on('telegram_update', (update: any) => {
         if (update?.type === 'new_alert' && update.alert) {
           handleIncomingAlert(update.alert);
@@ -3520,6 +3629,21 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       socket.on('new_message', (update: any) => {
         handleIncomingUpdate(update);
+      });
+
+      socket.on('raw_update', (rawUpdate: any) => {
+        try {
+          import('../core/MessagesController').then(({ MessagesController }) => {
+            const controller = MessagesController.getInstance();
+            if (rawUpdate?.update) {
+              controller.processUpdates(rawUpdate.update);
+            } else if (rawUpdate) {
+              controller.processUpdates(rawUpdate);
+            }
+          }).catch(() => {});
+        } catch (e) {
+          console.warn('[Socket.IO] raw_update processing error:', e);
+        }
       });
 
       socket.on('new_alert', (alertData: any) => {
@@ -3619,6 +3743,10 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!activeSessionStr && !activePhone) return;
 
       try {
+        // Redundant network request prevention: throttle active chat background polls if local cache is fresh
+        const shouldFetch = await messageCache.shouldFetchFromNetwork(activeChatId, 7000);
+        if (!shouldFetch) return;
+
         const currentList = messages[activeChatId] || [];
         const newestId = currentList.length > 0 ? currentList[currentList.length - 1]?.id : undefined;
 
@@ -3635,6 +3763,10 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
+          // Persist incoming messages to local IndexedDB
+          messageCache.putMessages(activeChatId, data.messages).catch(() => {});
+          messageCache.recordNetworkFetch(activeChatId).catch(() => {});
+
           setMessages((prev) => {
             const existing = prev[activeChatId] || [];
             const existingIds = new Set(existing.map((m) => m.id));
@@ -3697,6 +3829,54 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, [isAuthenticated, activeChatId, currentUser.phone, messages, settings.soundEffects]);
 
+  // Synchronize channel/supergroup difference whenever a supergroup is opened
+  useEffect(() => {
+    if (!activeChatId || !isAuthenticated) return;
+    const targetChat = chats.find((c) => c.id === activeChatId);
+    const isSupergroup =
+      targetChat &&
+      (targetChat.type === 'channel' ||
+        targetChat.isChannel ||
+        targetChat.megagroup ||
+        activeChatId.startsWith('chat_-100') ||
+        activeChatId.startsWith('-100'));
+
+    if (isSupergroup) {
+      import('../core/MessagesController').then(({ MessagesController }) => {
+        MessagesController.getInstance().checkChannelDifference(activeChatId);
+      }).catch(() => {});
+    }
+  }, [activeChatId, isAuthenticated, chats]);
+
+  // High-performance eager hydration from IndexedDB Message Cache for activeChatId
+  useEffect(() => {
+    if (!activeChatId) return;
+
+    let isSubscribed = true;
+    (async () => {
+      const curList = messages[activeChatId];
+      if (!curList || curList.length === 0) {
+        try {
+          const cached = await messageCache.getCachedMessages(activeChatId, { limit: 60 });
+          if (isSubscribed && cached && cached.length > 0) {
+            setMessages((prev) => {
+              const existing = prev[activeChatId] || [];
+              if (existing.length >= cached.length) return prev;
+              return {
+                ...prev,
+                [activeChatId]: cached,
+              };
+            });
+          }
+        } catch {}
+      }
+    })();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [activeChatId]);
+
   const deleteChat = (chatId: string) => {
     setChats((prev) => prev.filter((c) => c.id !== chatId));
     setMessages((prev) => {
@@ -3708,6 +3888,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setActiveChatId(null);
     }
     messagesController.deleteDialog(chatId, false);
+    messageCache.clearChat(chatId).catch(() => {});
     showToast(settings.language === 'ar' ? 'تم حذف المحادثة' : 'Chat deleted', '🗑️');
   };
 
@@ -4205,6 +4386,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         testSimulateFcmPush,
         clearFcmDiagnosticHistory,
         triggerScreenshotBlocked,
+        messageCache,
       }}
     >
       {children}

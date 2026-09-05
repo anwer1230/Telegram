@@ -646,16 +646,16 @@ async function startServer() {
 
   // ==========================================
   // FIREBASE ADMIN SDK & CLOUD MESSAGING (FCM)
-  // Secure Local Service Account Key Initialization
+  // Replicating configuration from local service account key file
   // ==========================================
   let firebaseServiceAccount: any = {
     projectId: 'telegramclone-de6f2',
     clientEmail: 'firebase-adminsdk-fbsvc@telegramclone-de6f2.iam.gserviceaccount.com',
-    privateKeyId: '455037d4ba603bf53a72a2e9e15c8b6ecea9b2c6',
+    privateKeyId: '944153e6d4fa17ac638a70ab6418cdaa199c0ec6',
     privateKey: undefined,
   };
 
-  // تحميل المفتاح مباشرة من الملف المحلي config/serviceAccountKey.json لضمان الأمان وعدم الاعتماد على متغيرات البيئة
+  // محاولة تحميل الملف من المجلد المحلي
   const serviceAccountFilePath = path.join(process.cwd(), 'config', 'serviceAccountKey.json');
   try {
     if (fs.existsSync(serviceAccountFilePath)) {
@@ -667,7 +667,7 @@ async function startServer() {
         privateKeyId: serviceAccount.private_key_id || firebaseServiceAccount.privateKeyId,
         privateKey: serviceAccount.private_key,
       };
-      console.log('[Firebase Admin] Successfully loaded service account key from config/serviceAccountKey.json');
+      console.log('[Firebase Admin] Loaded service account key from config/serviceAccountKey.json');
     } else {
       console.warn('[Firebase Admin] serviceAccountKey.json not found in config/ directory. FCM delivery is disabled.');
     }
@@ -675,35 +675,29 @@ async function startServer() {
     console.warn('[Firebase Admin] Error reading config/serviceAccountKey.json:', e?.message || e);
   }
 
+  // Fallback to environment variable if privateKey wasn't in file
+  if (!firebaseServiceAccount.privateKey && process.env.FIREBASE_PRIVATE_KEY) {
+    firebaseServiceAccount.privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+  }
+
   let firebaseAdminApp: any = null;
 
   const initFirebaseAdminApp = () => {
     if (firebaseAdminApp) return firebaseAdminApp;
-    const existingApps = (admin as any).apps || (admin as any).default?.apps || [];
+    const existingApps = (admin as any).apps || admin.getApps?.() || [];
     if (existingApps && existingApps.length > 0) {
       firebaseAdminApp = existingApps[0];
       return firebaseAdminApp;
     }
 
-    if (!firebaseServiceAccount.privateKey && !fs.existsSync(serviceAccountFilePath)) {
+    if (!firebaseServiceAccount.privateKey) {
       return null;
     }
 
     try {
-      const certCredential =
-        (admin as any).credential?.cert ||
-        (admin as any).default?.credential?.cert ||
-        (admin as any).cert;
-      const initializeAppFn =
-        (admin as any).initializeApp ||
-        (admin as any).default?.initializeApp;
-
-      const credential = fs.existsSync(serviceAccountFilePath)
-        ? certCredential(serviceAccountFilePath)
-        : certCredential(firebaseServiceAccount as any);
-
-      firebaseAdminApp = initializeAppFn({
-        credential,
+      const certCredential = (admin as any).credential?.cert || admin.cert;
+      firebaseAdminApp = admin.initializeApp({
+        credential: certCredential(firebaseServiceAccount as any),
         projectId: firebaseServiceAccount.projectId,
       });
       console.log('[Firebase Admin] FCM successfully initialized for project:', firebaseServiceAccount.projectId);
@@ -3968,7 +3962,7 @@ async function startServer() {
   // Backward-compatibility alias for /api/telegram/difference
   app.all('/api/telegram/difference', (req, res, next) => {
     req.url = '/api/telegram/updates/difference';
-    (app as any).handle(req, res, next);
+    app.handle(req, res, next);
   });
 
   // 8. Real MTProto Account & Dialogs Synchronization (updates.getState / messages.getDialogs / users.getUsers RPC)
@@ -7466,66 +7460,6 @@ async function startServer() {
       });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
-    }
-  });
-
-  // 2.1 Register FCM Device Token (from Android or Web devices)
-  app.post('/api/telegram/firebase/register-device-token', (req, res) => {
-    try {
-      const { token, platform = 'android', deviceName } = req.body;
-      if (!token || typeof token !== 'string') {
-        return res.status(400).json({ success: false, error: 'TOKEN_REQUIRED' });
-      }
-      const cleanToken = token.trim();
-      registeredFcmTokens.add(cleanToken);
-      saveFcmTokensToDisk(registeredFcmTokens);
-      console.log(`[FCM] Device token registered (${platform}, ${cleanToken.substring(0, 15)}..., total: ${registeredFcmTokens.size})`);
-      res.json({
-        success: true,
-        token: cleanToken,
-        platform,
-        deviceName: deviceName || 'Android Device',
-        totalRegisteredTokens: registeredFcmTokens.size,
-      });
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e?.message || e });
-    }
-  });
-
-  // 3. Test Firebase Push Delivery with Custom Ringtone & Real FCM Dispatch
-  app.post('/api/telegram/firebase/test-push', async (req, res) => {
-    try {
-      const { chatId, title = 'تجربة إشعار تليجرام', body = 'هذا إشعار تجريبي لاختبار النغمة المخصصة عبر Firebase Messaging', sound = 'default', token } = req.body;
-      const fcmChannelId = `tg_fcm_channel_${sound || 'default'}`;
-
-      const fcmLiveResult = await sendFirebaseNotification({
-        chatId,
-        title,
-        body,
-        sound,
-        token,
-      });
-
-      const fcmSimulation = {
-        success: true,
-        messageId: fcmLiveResult.messageId || `fcm_msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-        targetChatId: chatId,
-        deliveredSound: sound,
-        fcmChannelId,
-        firebaseServiceAccount: 'firebase-adminsdk-fbsvc@telegramclone-de6f2.iam.gserviceaccount.com',
-        timestamp: new Date().toISOString(),
-        liveDelivery: fcmLiveResult,
-        fcmResponse: {
-          canonical_ids: 1,
-          multicast_id: Math.floor(Math.random() * 1000000000000000),
-          success: 1,
-          failure: 0,
-        },
-      };
-
-      res.json(fcmSimulation);
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e?.message || e });
     }
   });
 

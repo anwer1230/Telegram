@@ -14,6 +14,7 @@ import { ConnectionsManager } from './ConnectionsManager';
 import { DialogsController } from './messenger/DialogsController';
 import { UserConfig } from './messenger/UserConfig';
 import { KeywordMonitor } from './messenger/KeywordMonitor';
+import { ChannelDifferenceService } from '../services/ChannelDifferenceService';
 
 export interface ChatParticipantInfo {
   userId: string;
@@ -70,6 +71,7 @@ export class MessagesController {
   public lastDate: number = 0;
   public qts: number = 0;
   private gettingDifference: boolean = false;
+  private channelDifferenceService?: ChannelDifferenceService;
 
   public static getInstance(accountNum: number = 0): MessagesController {
     if (!MessagesController.instances.has(accountNum)) {
@@ -80,15 +82,18 @@ export class MessagesController {
 
   private constructor(accountNum: number = 0) {
     this.currentAccount = accountNum;
-    try {
-      const syncState = ConnectionsManager.getInstance(accountNum).getSyncStateManager().getSyncState();
-      this.pts = syncState.pts;
-      this.seq = syncState.seq;
-      this.qts = syncState.qts;
-      this.lastDate = syncState.date;
-    } catch (e) {
-      console.warn('[MessagesController] Init sync state notice:', e);
+    this.channelDifferenceService = ChannelDifferenceService.getInstance(accountNum);
+  }
+
+  public getChannelDifferenceService(): ChannelDifferenceService {
+    if (!this.channelDifferenceService) {
+      this.channelDifferenceService = ChannelDifferenceService.getInstance(this.currentAccount);
     }
+    return this.channelDifferenceService;
+  }
+
+  public getDialogs(): Chat[] {
+    return this.dialogs;
   }
 
   /**
@@ -745,15 +750,6 @@ export class MessagesController {
     this.gettingDifference = true;
 
     try {
-      const conn = ConnectionsManager.getInstance(this.currentAccount);
-      const syncManager = conn.getSyncStateManager();
-      const currentSync = syncManager.getSyncState();
-
-      if (!this.pts && currentSync.pts) this.pts = currentSync.pts;
-      if (!this.seq && currentSync.seq) this.seq = currentSync.seq;
-      if (!this.qts && currentSync.qts) this.qts = currentSync.qts;
-      if (!this.lastDate && currentSync.date) this.lastDate = currentSync.date;
-
       const userConfig = UserConfig.getInstance(this.currentAccount);
       const user = userConfig.getCurrentUser();
       const phone = user?.phone || '';
@@ -761,66 +757,53 @@ export class MessagesController {
 
       const storage = MessagesStorage.getInstance(this.currentAccount);
 
-      // 1. Request real cloud differential sync slice from backend MTProto proxy (/api/telegram/difference with fallback to /api/telegram/sync)
-      let resp = await fetch('/api/telegram/difference', {
+      // 1. Request real cloud differential sync slice from backend MTProto proxy
+      const resp = await fetch('/api/telegram/updates/difference', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          accountIndex: this.currentAccount,
           phone,
           sessionString,
           pts: this.pts,
           date: this.lastDate,
           qts: this.qts,
-          ptsTotalLimit: currentSync.ptsTotalLimit || 1000,
         }),
-      }).catch(() => null);
-
-      if (!resp || !resp.ok) {
-        resp = await fetch('/api/telegram/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            phone,
-            sessionString,
-            pts: this.pts,
-            date: this.lastDate,
-            qts: this.qts,
-          }),
-        });
-      }
+      });
 
       const data = await resp.json();
 
       if (data && data.success) {
-        if (data.chats && Array.isArray(data.chats)) {
-          this.dialogs = data.chats;
-          data.chats.forEach((c: any) => this.chats.set(c.id, c));
-        }
-
-        if (data.messages && typeof data.messages === 'object') {
-          Object.keys(data.messages).forEach((chatId) => {
-            const chatMsgs = data.messages[chatId];
-            if (Array.isArray(chatMsgs) && chatMsgs.length > 0) {
-              storage.putMessages(chatMsgs, chatId);
+        if (data.newMessages && Array.isArray(data.newMessages) && data.newMessages.length > 0) {
+          const messagesByChat: { [chatId: string]: Message[] } = {};
+          data.newMessages.forEach((msg: any) => {
+            if (msg && msg.id && msg.chatId) {
+              if (!messagesByChat[msg.chatId]) messagesByChat[msg.chatId] = [];
+              messagesByChat[msg.chatId].push(msg);
             }
+          });
+
+          Object.keys(messagesByChat).forEach((chatId) => {
+            storage.putMessages(messagesByChat[chatId], chatId);
+            NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+              NotificationCenter.didReceiveNewMessages,
+              chatId,
+              messagesByChat[chatId]
+            );
           });
         }
 
-        const returnedState = data.state || data.difference?.state || data.difference?.intermediate_state || {};
-        this.pts = Number(returnedState.pts) || (this.pts > 0 ? this.pts + 1 : 1001);
-        this.seq = Number(returnedState.seq) || (this.seq > 0 ? this.seq + 1 : 1);
-        this.lastDate = Number(returnedState.date) || Math.floor(Date.now() / 1000);
-        this.qts = Number(returnedState.qts) || this.qts;
+        if (data.otherUpdates && Array.isArray(data.otherUpdates)) {
+          this.processUpdates(data.otherUpdates, true);
+        }
 
-        // Persist to SynchronizationStateManager (localStorage)
-        syncManager.updateSyncState({
-          pts: this.pts,
-          seq: this.seq,
-          qts: this.qts,
-          date: this.lastDate,
-        });
+        if (data.state) {
+          this.pts = data.state.pts || this.pts;
+          this.seq = data.state.seq || this.seq;
+          this.lastDate = data.state.date || this.lastDate;
+          this.qts = data.state.qts || this.qts;
+        }
 
-        // Persist to SQLite storage
         storage.saveDiffParams(this.pts, this.seq, this.lastDate, this.qts);
 
         NotificationCenter.getInstance(this.currentAccount).postNotificationName(
@@ -830,12 +813,36 @@ export class MessagesController {
           NotificationCenter.updateInterfaces,
           0
         );
+
+        // Resynchronize all supergroups and broadcast channels in background
+        this.getChannelDifferenceService().syncAllChannels();
+
+        // Chain fetch remaining slices if available
+        if (data.isSlice) {
+          this.gettingDifference = false;
+          return this.getDifference();
+        }
       }
     } catch (e) {
       console.error('[MessagesController] getDifference failed:', e);
     } finally {
       this.gettingDifference = false;
     }
+  }
+
+  /**
+   * Resynchronizes missed channel/supergroup updates via ChannelDifferenceService
+   * Specifically handles updates.getChannelDifference, slice chaining, and long offline periods.
+   */
+  public async getChannelDifference(channelId: string, pts?: number, force: boolean = true): Promise<any> {
+    return this.getChannelDifferenceService().getChannelDifference(channelId, force, 'controller_request');
+  }
+
+  /**
+   * Checks channel difference if gap is suspected or when supergroup is active
+   */
+  public async checkChannelDifference(channelId: string, force: boolean = false): Promise<any> {
+    return this.getChannelDifferenceService().getChannelDifference(channelId, force, 'check_channel');
   }
 
   /**
@@ -849,10 +856,6 @@ export class MessagesController {
       if (updates.seq) {
         this.seq = updates.seq;
         this.lastDate = updates.date || Math.floor(Date.now() / 1000);
-        ConnectionsManager.getInstance(this.currentAccount).getSyncStateManager().updateSyncState({
-          seq: this.seq,
-          date: this.lastDate,
-        });
       }
 
       for (const upd of updatesList) {
@@ -860,14 +863,12 @@ export class MessagesController {
           // If PTS was uninitialized (e.g. fresh login), initialize directly without dropping
           if (this.pts === 0) {
             this.pts = upd.pts;
-            ConnectionsManager.getInstance(this.currentAccount).getSyncStateManager().updatePts(this.pts);
           } else if (!isDifference && this.pts + upd.pts_count !== upd.pts) {
             // Sequence gap detected -> trigger fresh getDifference immediately
             this.getDifference();
             return;
           } else {
             this.pts = upd.pts;
-            ConnectionsManager.getInstance(this.currentAccount).getSyncStateManager().updatePts(this.pts);
           }
         }
         this.processSingleUpdate(upd);
@@ -883,6 +884,51 @@ export class MessagesController {
 
   public processSingleUpdate(update: any): void {
     if (!update) return;
+
+    // 1. Channel Gap / Channel Too Long Updates
+    if (
+      update._ === 'TL_updateChannelTooLong' ||
+      update._ === 'updateChannelTooLong' ||
+      update.type === 'channel_too_long'
+    ) {
+      const channelId = update.channel_id || update.channelId || update.chatId;
+      if (channelId) {
+        console.warn(`[MessagesController] Received UpdateChannelTooLong for ${channelId}. Triggering ChannelDifferenceService...`);
+        this.getChannelDifferenceService().getChannelDifference(String(channelId), true, 'updateChannelTooLong');
+      }
+      return;
+    }
+
+    // 2. New Channel/Supergroup Message with PTS gap detection
+    if (
+      update._ === 'TL_updateNewChannelMessage' ||
+      update._ === 'updateNewChannelMessage' ||
+      (update.type === 'new_message' && (String(update.message?.chatId || '').startsWith('chat_-100') || update.channelId))
+    ) {
+      const msg = update.message || update;
+      const channelId = update.channelId || update.channel_id || msg.chatId || msg.peer_id;
+      if (channelId && update.pts) {
+        this.getChannelDifferenceService().checkChannelPtsGap(String(channelId), update.pts, update.pts_count || 1);
+      }
+      const storage = MessagesStorage.getInstance(this.currentAccount);
+      if (msg.id && channelId) {
+        storage.saveMessage(msg);
+      }
+      KeywordMonitor.getInstance(this.currentAccount).inspectMessage(msg);
+      NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+        NotificationCenter.didReceiveNewMessages,
+        channelId,
+        [msg]
+      );
+      NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+        NotificationCenter.dialogsNeedReload
+      );
+      NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+        NotificationCenter.updateInterfaces,
+        0
+      );
+      return;
+    }
 
     if (update._ === 'TL_updateNewMessage' || update.type === 'new_message') {
       const msg = update.message || update;
@@ -905,6 +951,68 @@ export class MessagesController {
         NotificationCenter.updateInterfaces,
         0
       );
+    } else if (
+      update._ === 'TL_updateEditMessage' ||
+      update._ === 'updateEditMessage' ||
+      update._ === 'TL_updateEditChannelMessage' ||
+      update._ === 'updateEditChannelMessage' ||
+      update.type === 'edit_message'
+    ) {
+      const msg = update.message || update;
+      const storage = MessagesStorage.getInstance(this.currentAccount);
+      const chatId = msg.chatId || msg.peer_id || update.chatId;
+      if (msg && msg.id && chatId) {
+        storage.saveMessage(msg);
+        NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+          NotificationCenter.didReceiveNewMessages,
+          chatId,
+          [msg]
+        );
+        NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+          NotificationCenter.updateInterfaces,
+          0
+        );
+      }
+    } else if (
+      update._ === 'TL_updateDeleteMessages' ||
+      update._ === 'updateDeleteMessages' ||
+      update._ === 'TL_updateDeleteChannelMessages' ||
+      update._ === 'updateDeleteChannelMessages' ||
+      update.type === 'delete_messages'
+    ) {
+      const msgIds = update.messages || (update.messageIds ? update.messageIds : []);
+      const channelId = update.channelId || update.channel_id;
+      NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+        NotificationCenter.messagesDeleted,
+        msgIds,
+        channelId
+      );
+      NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+        NotificationCenter.updateInterfaces,
+        0
+      );
+    } else if (
+      update._ === 'TL_updateReadHistoryInbox' ||
+      update._ === 'updateReadHistoryInbox' ||
+      update._ === 'TL_updateReadChannelInbox' ||
+      update._ === 'updateReadChannelInbox' ||
+      update.type === 'read_history_inbox'
+    ) {
+      const chatId = update.chatId || update.peer_id || (update.peer ? `chat_${update.peer.channelId || update.peer.chatId || update.peer.userId}` : '');
+      const maxId = update.maxId || update.max_id;
+      if (chatId) {
+        const storage = MessagesStorage.getInstance(this.currentAccount);
+        storage.markMessagesAsRead(chatId, maxId);
+        NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+          NotificationCenter.messagesRead,
+          chatId,
+          maxId
+        );
+        NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+          NotificationCenter.updateInterfaces,
+          NotificationCenter.UPDATE_MASK_READ_DIALOG_MESSAGE
+        );
+      }
     } else if (update._ === 'TL_updateChannel' || update.type === 'update_channel') {
       const channelId = update.channel_id || update.chatId;
       if (channelId) {

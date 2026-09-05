@@ -9,6 +9,8 @@
 import { Chat, Message } from '../types';
 import { TLRPC } from './TLRPC';
 import { NotificationCenter } from './NotificationCenter';
+import { telegramDB } from '../utils/sqliteStorage';
+import { messageCache } from '../services/IndexedDBMessageCache';
 
 export interface SQLiteCursor {
   next(): boolean;
@@ -160,7 +162,33 @@ export class MessagesStorage {
     this.currentAccount = account;
     const dbName = account === 0 ? 'cache4.db' : `cache4_${account}.db`;
     this.database = new SQLiteDatabase(dbName);
-    this.loadFromLocalStorage();
+    this.initDatabaseFromSqlite();
+  }
+
+  /**
+   * Initializes SQLite backend from IndexedDB storage
+   */
+  public async initDatabaseFromSqlite(): Promise<void> {
+    try {
+      await telegramDB.init();
+      const storedChats = telegramDB.getChats();
+      if (storedChats && storedChats.length > 0) {
+        storedChats.forEach((c) => {
+          if (c && c.id) {
+            this.database.insertOrReplace('dialogs', {
+              dialog_id: c.id,
+              id: c.id,
+              unread_count: c.unreadCount || 0,
+              pinned: c.isPinned ? 1 : 0,
+              flags: (c.isPinned ? 1 : 0) | (c.isMuted ? 2 : 0) | (c.isArchived ? 4 : 0),
+              data: c,
+            });
+          }
+        });
+      }
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to initialize SQLite backend:`, e);
+    }
   }
 
   /**
@@ -172,12 +200,11 @@ export class MessagesStorage {
     this.database.execute('DELETE FROM users');
     this.database.execute('DELETE FROM chats');
     this.database.execute('DELETE FROM drafts');
-    if (typeof window !== 'undefined' && isLogout) {
-      localStorage.removeItem(`tg_persisted_chats_${this.currentAccount}`);
-      localStorage.removeItem(`tg_diff_params_${this.currentAccount}`);
-      if (this.currentAccount === 0) {
-        localStorage.removeItem('tg_persisted_chats');
-      }
+    try {
+      telegramDB.cleanUpDatabase();
+      messageCache.clearAll().catch(() => {});
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to clean SQLite DB:`, e);
     }
   }
 
@@ -202,6 +229,14 @@ export class MessagesStorage {
       }
     }
     cursor.dispose();
+
+    if (dialogs.length === 0) {
+      const sqliteChats = telegramDB.getChats();
+      if (sqliteChats && sqliteChats.length > 0) {
+        return sqliteChats.slice(offset, offset + count);
+      }
+    }
+
     return dialogs;
   }
 
@@ -220,7 +255,12 @@ export class MessagesStorage {
         });
       }
     });
-    this.saveToLocalStorage();
+    // Persist chats directly to IndexedDB SQLite table
+    try {
+      telegramDB.saveChats(dialogList);
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to persist chats to SQLite DB:`, e);
+    }
   }
 
   public putUsersAndChats(users: any[], chats: any[], withTransaction: boolean = false, fromQueue: boolean = false): void {
@@ -265,47 +305,6 @@ export class MessagesStorage {
     }
   }
 
-  private loadFromLocalStorage(): void {
-    if (typeof window === 'undefined') return;
-    try {
-      const storageKey = `tg_persisted_chats_${this.currentAccount}`;
-      let savedChats = localStorage.getItem(storageKey);
-      if (!savedChats && this.currentAccount === 0) {
-        savedChats = localStorage.getItem('tg_persisted_chats');
-      }
-
-      if (savedChats) {
-        const chats: Chat[] = JSON.parse(savedChats);
-        chats.forEach((c) => {
-          this.database.insertOrReplace('dialogs', {
-            dialog_id: c.id,
-            id: c.id,
-            unread_count: c.unreadCount || 0,
-            pinned: c.isPinned ? 1 : 0,
-            flags: (c.isPinned ? 1 : 0) | (c.isMuted ? 2 : 0) | (c.isArchived ? 4 : 0),
-            data: c,
-          });
-        });
-      }
-    } catch (e) {
-      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to restore from localStorage:`, e);
-    }
-  }
-
-  public saveToLocalStorage(): void {
-    if (typeof window === 'undefined') return;
-    try {
-      const dialogs = this.getDialogs(0, 500);
-      const storageKey = `tg_persisted_chats_${this.currentAccount}`;
-      localStorage.setItem(storageKey, JSON.stringify(dialogs));
-      if (this.currentAccount === 0) {
-        localStorage.setItem('tg_persisted_chats', JSON.stringify(dialogs));
-      }
-    } catch (e) {
-      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to save to localStorage:`, e);
-    }
-  }
-
   /**
    * DrKLO MessagesStorage.setDialogFlags
    * Updates flags (pinned, muted, archived) in SQLite storage
@@ -338,6 +337,13 @@ export class MessagesStorage {
     }
     this.database.execute('DELETE FROM messages WHERE dialog_id = ?', id);
 
+    try {
+      telegramDB.deleteDialog(id, messagesOnly !== 0);
+      messageCache.clearChat(id).catch(() => {});
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to delete dialog in SQLite DB:`, e);
+    }
+
     NotificationCenter.getInstance(this.currentAccount).postNotificationName(
       NotificationCenter.dialogsNeedReload
     );
@@ -345,10 +351,13 @@ export class MessagesStorage {
 
   /**
    * DrKLO MessagesStorage.putMessages
-   * Persists message objects batch
+   * Persists message objects batch to SQLite IndexedDB
    */
   public putMessages(messages: Message[], dialogId: string): void {
+    if (!Array.isArray(messages) || messages.length === 0) return;
+
     messages.forEach((msg) => {
+      if (!msg || !msg.id) return;
       this.database.insertOrReplace('messages', {
         id: msg.id,
         dialog_id: dialogId,
@@ -359,6 +368,14 @@ export class MessagesStorage {
         data: msg,
       });
     });
+
+    // Save batch to persistent SQLite IndexedDB & IndexedDB message cache
+    try {
+      telegramDB.saveMessages(messages);
+      messageCache.putMessages(dialogId, messages).catch(() => {});
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to persist messages to SQLite DB:`, e);
+    }
 
     NotificationCenter.getInstance(this.currentAccount).postNotificationName(
       NotificationCenter.messagesDidLoad,
@@ -377,6 +394,35 @@ export class MessagesStorage {
   }
 
   /**
+   * Retrieves messages for a specific dialog from SQLite storage
+   */
+  public getMessages(dialogId: string | number): Message[] {
+    const id = String(dialogId);
+    try {
+      const sqliteMsgs = telegramDB.getMessagesForChat(id);
+      if (sqliteMsgs && sqliteMsgs.length > 0) {
+        return sqliteMsgs;
+      }
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to read messages from SQLite DB:`, e);
+    }
+
+    // Fallback to in-memory cache
+    const cursor = this.database.queryFinalized('SELECT * FROM messages WHERE dialog_id = ? ORDER BY date ASC', id);
+    const msgs: Message[] = [];
+    while (cursor.next()) {
+      const dataStr = cursor.stringValue(6);
+      if (dataStr) {
+        try {
+          msgs.push(JSON.parse(dataStr));
+        } catch {}
+      }
+    }
+    cursor.dispose();
+    return msgs;
+  }
+
+  /**
    * Persists sync difference state parameters
    */
   public saveDiffParams(pts: number, seq: number, date: number, qts: number): void {
@@ -386,6 +432,54 @@ export class MessagesStorage {
         JSON.stringify({ pts, seq, date, qts })
       );
     } catch (e) {}
+  }
+
+  /**
+   * Persists channel/supergroup PTS to SQLite storage
+   */
+  public setChannelPts(channelId: string | number, pts: number): void {
+    const id = String(channelId);
+    try {
+      telegramDB.saveChannelPts(id, pts);
+      if (typeof window !== 'undefined') {
+        const key = `tg_channel_pts_${this.currentAccount}_${id}`;
+        localStorage.setItem(key, String(pts));
+      }
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to save channel pts:`, e);
+    }
+  }
+
+  /**
+   * Retrieves channel/supergroup PTS from SQLite storage
+   */
+  public getChannelPts(channelId: string | number): number {
+    const id = String(channelId);
+    try {
+      const sqlitePts = telegramDB.getChannelPts(id);
+      if (sqlitePts && sqlitePts > 0) {
+        return sqlitePts;
+      }
+      if (typeof window !== 'undefined') {
+        const key = `tg_channel_pts_${this.currentAccount}_${id}`;
+        const val = localStorage.getItem(key);
+        if (val) return Number(val) || 0;
+      }
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to get channel pts:`, e);
+    }
+    return 0;
+  }
+
+  /**
+   * Retrieves all known channel PTS values
+   */
+  public getAllChannelPts(): Record<string, number> {
+    try {
+      return telegramDB.getAllChannelPts();
+    } catch (e) {
+      return {};
+    }
   }
 
   /**

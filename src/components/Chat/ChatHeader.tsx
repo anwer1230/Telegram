@@ -23,6 +23,7 @@ import {
   Volume2,
   VolumeX,
   Share2,
+  Database,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { ChatInfoManager } from '../../core/ChatInfoManager';
@@ -44,6 +45,7 @@ export const ChatHeader: React.FC = () => {
     clearChatHistory,
     toggleMuteChat,
     showToast,
+    messageCache,
   } = useTelegram();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -325,6 +327,23 @@ export const ChatHeader: React.FC = () => {
               >
                 <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>{isArabic ? 'تطبيقات وألعاب (Mini Apps)' : 'Telegram Mini Apps'}</span>
+              </button>
+
+              {/* IndexedDB Cache Status */}
+              <button
+                onClick={async () => {
+                  const count = await messageCache.getCachedMessageCount(activeChat.id);
+                  showToast(
+                    isArabic
+                      ? `تم تخزين ${count} رسالة محلياً في IndexedDB بدون استهلاك شبكة`
+                      : `IndexedDB: ${count} cached messages offline`,
+                    '💾'
+                  );
+                }}
+                className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white"
+              >
+                <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{isArabic ? 'التخزين المؤقت المحلي (IndexedDB)' : 'Local Cache (IndexedDB)'}</span>
               </button>
 
               <div className="h-px bg-white/10 my-1" />
