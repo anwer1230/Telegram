@@ -11,6 +11,7 @@ import { NewMessage } from 'telegram/events';
 import webpush from 'web-push';
 import * as admin from 'firebase-admin';
 import { getMessaging } from 'firebase-admin/messaging';
+import { GoogleGenAI } from '@google/genai';
 import { telegramRPCRegistry } from './server/TelegramRPCRegistry';
 
 // Dynamic Environment & Credentials Resolution (from process.env)
@@ -4291,6 +4292,183 @@ async function startServer() {
     }
     return res.json({ success: false, avatar: '' });
   });
+
+  // ==========================================
+  // GEMINI AI CHAT SUMMARIZER (LAST 100 MESSAGES)
+  // ==========================================
+  let geminiClientInstance: GoogleGenAI | null = null;
+  const getGeminiClient = (): GoogleGenAI => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not configured in server environment.');
+    }
+    if (!geminiClientInstance) {
+      geminiClientInstance = new GoogleGenAI({ apiKey });
+    }
+    return geminiClientInstance;
+  };
+
+  const handleChatSummarize = async (req: express.Request, res: express.Response) => {
+    try {
+      const { chatId, chatTitle, messages = [], language = 'ar' } = req.body || {};
+
+      let threadToSummarize: any[] = Array.isArray(messages) ? [...messages] : [];
+
+      // If no messages sent in payload but chatId exists, attempt to pull from active MTProto client
+      if (threadToSummarize.length === 0 && chatId) {
+        const phone = req.body?.phone || (req.query?.phone as string);
+        const sessionString = req.body?.sessionString || (req.query?.sessionString as string);
+        try {
+          const client = await getClientForSession(sessionString, phone);
+          if (client && client.connected) {
+            const cleanId = String(chatId).replace('chat_', '');
+            let targetEntity: any = cleanId;
+            try {
+              targetEntity = await client.getInputEntity(cleanId).catch(() => null);
+              if (!targetEntity && !isNaN(Number(cleanId))) {
+                targetEntity = await client.getInputEntity(Number(cleanId)).catch(() => null);
+              }
+              if (!targetEntity) {
+                targetEntity = await client.getEntity(cleanId).catch(() => null);
+              }
+            } catch (_) {
+              targetEntity = cleanId;
+            }
+
+            const rawHistory: any = await client.getMessages(targetEntity, { limit: 100 });
+            if (Array.isArray(rawHistory) && rawHistory.length > 0) {
+              threadToSummarize = rawHistory.reverse().map((m: any) => ({
+                id: String(m.id),
+                senderName: m.out ? 'You' : (m.postAuthor || 'User'),
+                text: m.message || (m.media ? '[Media]' : ''),
+                timestamp: m.date ? new Date(m.date * 1000).toLocaleTimeString() : '',
+                out: Boolean(m.out),
+              }));
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('[Gemini Summarizer] Could not fetch remote MTProto history:', fetchErr);
+        }
+      }
+
+      // Strictly take the last 100 messages of the thread
+      const last100 = threadToSummarize.slice(-100);
+
+      // Build clean transcript
+      const transcriptLines = last100
+        .filter((m: any) => m && ((m.text && String(m.text).trim().length > 0) || m.media))
+        .map((m: any) => {
+          const sender = m.senderName || (m.out || m.isOutgoing ? 'User' : 'Contact');
+          const time = m.timestamp ? `[${m.timestamp}] ` : '';
+          const content = m.text || (m.media?.type ? `[${m.media.type}]` : '[محتوى وسائط]');
+          return `${time}${sender}: ${content}`;
+        });
+
+      if (transcriptLines.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'NO_MESSAGES',
+          message: language === 'ar' ? 'لا توجد رسائل نصية كافية في المحادثة لتلخيصها.' : 'Not enough text messages in this conversation to summarize.',
+        });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({
+          success: false,
+          error: 'GEMINI_API_KEY_NOT_CONFIGURED',
+          message: language === 'ar'
+            ? 'مفتاح Gemini API غير مهيأ في الخادم (GEMINI_API_KEY). يرجى التحقق من ملف .env.'
+            : 'Gemini API key is not configured in the server environment (GEMINI_API_KEY).',
+        });
+      }
+
+      const ai = getGeminiClient();
+      const isArabic = language === 'ar';
+
+      const systemInstruction = isArabic
+        ? `أنت مساعد ذكاء اصطناعي خبير ومحترف في تحليل وتلخيص محادثات تطبيق تيليجرام.
+مهمتك هي قراءة آخر 100 رسالة في هذه المحادثة وتقديم ملخص تنفيذي موجز، واضح جداً ومكتوب بعناية.
+القواعد التوجيهية:
+1. ابدأ بنبذة تمهيدية سريعة (سطر أو سطرين) توضح الهدف العام أو الفكرة المركزية للمحادثة.
+2. نسّق الملخص بنقاط رئيسية واضحة تشمل:
+   - 📌 المحاور والموضوعات التي نوقشت
+   - 🎯 القرارات والاتفاقات المتوصل إليها (إن وجدت)
+   - 📋 الإجراءات والمهام القادمة أو المواعيد المحددة
+3. استخدم لغة عربية فصحى أنيقة ومباشرة بدون إطالة أو حشو غير ضروري.`
+        : `You are an expert AI assistant specialized in analyzing and summarizing Telegram conversation threads.
+Your task is to analyze the last 100 messages in this thread and provide a concise, high-value executive summary.
+Guidelines:
+1. Start with a brief 1-2 sentence overview of the conversation's main context.
+2. Structure the summary with clear bullet points:
+   - 📌 Main topics & discussions
+   - 🎯 Decisions & agreements reached (if any)
+   - 📋 Action items, deadlines, or upcoming follow-ups
+3. Maintain a crisp, professional, and objective tone.`;
+
+      const prompt = `Conversation Title: "${chatTitle || 'Telegram Chat'}"
+Total messages analyzed: ${transcriptLines.length} (last up to 100 messages)
+
+--- CHAT TRANSCRIPT START ---
+${transcriptLines.join('\n')}
+--- CHAT TRANSCRIPT END ---
+
+Please provide the concise summary.`;
+
+      console.log(`[Gemini Summarizer] Generating summary for chat "${chatTitle || chatId}" using gemini-3.8-flash (${transcriptLines.length} messages)...`);
+
+      const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      let aiResponse: any = null;
+      let usedModel = candidateModels[0];
+      let lastError: any = null;
+
+      for (const m of candidateModels) {
+        try {
+          usedModel = m;
+          console.log(`[Gemini Summarizer] Requesting summary with model: ${m}...`);
+          aiResponse = await ai.models.generateContent({
+            model: m,
+            contents: prompt,
+            config: {
+              systemInstruction,
+            },
+          });
+          if (aiResponse && aiResponse.text) {
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`[Gemini Summarizer] Model ${m} failed:`, err?.message || err);
+          lastError = err;
+        }
+      }
+
+      if (!aiResponse || !aiResponse.text) {
+        throw lastError || new Error('No response received from Gemini models');
+      }
+
+      const summaryText = aiResponse?.text || '';
+      console.log(`[Gemini Summarizer] Successfully generated summary (${summaryText.length} characters) using ${usedModel}.`);
+
+      return res.json({
+        success: true,
+        summary: summaryText,
+        messageCount: transcriptLines.length,
+        model: usedModel,
+        chatTitle: chatTitle || 'Chat',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error('[Gemini Summarizer] Summarization error:', err?.message || err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'SUMMARIZATION_FAILED',
+        message: 'تعذر إنشاء الملخص بواسطة الذكاء الاصطناعي: ' + (err?.message || 'خطأ غير معروف'),
+      });
+    }
+  };
+
+  app.post('/api/telegram/chat/summarize', handleChatSummarize);
+  app.post('/api/chat/summarize', handleChatSummarize);
 
   // Global Plus Settings Store for Multi-Session Cloud Sync
   let globalPlusSettingsStore: Record<string, any> = {};
