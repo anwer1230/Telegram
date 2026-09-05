@@ -1,3 +1,4 @@
+import { chatStore } from '../../store/chatStore';
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { ArrowDown, Pin, X, Loader2, Shield, Lock, ChevronUp } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
@@ -96,13 +97,16 @@ export const MessageList: React.FC = () => {
       visibleCount,
       unreadDividerMaxId: readInboxMaxId,
     });
-  }, [visibleCount, readInboxMaxId]);
-
-  // Handle Chat Switching & Initialization (Exact logic from Telegram Android ChatActivity)
+  }, [visibleCount, readInboxMaxId]);  // Handle Chat Switching & Initialization
+  // Rule 1: Default on opening chat is ALWAYS scroll completely to the bottom (scrollToBottom)
+  // Rule 2: Disable restoring old scroll position across sessions; only restore if returning to same chat in current session
   useEffect(() => {
     const prevChatId = activeChatIdRef.current;
-    if (prevChatId && prevChatId !== activeChatId) {
+    if (prevChatId && prevChatId !== activeChatId && scrollContainerRef.current) {
       saveCurrentScrollState(prevChatId);
+      const container = scrollContainerRef.current;
+      const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+      chatStore.saveSessionScrollPosition(prevChatId, container.scrollTop, container.scrollHeight, distance <= 120);
     }
     activeChatIdRef.current = activeChatId;
 
@@ -111,70 +115,49 @@ export const MessageList: React.FC = () => {
     isInitialScrollDoneRef.current = false;
     setShowScrollBottom(false);
     setUnreadStreamCount(0);
+    setReadInboxMaxId(undefined);
     prevMessagesLengthRef.current = currentMessages.length;
 
-    const savedState = chatScrollRegistry.get(activeChatId);
-    const unreadCount = activeChat?.unreadCount || 0;
+    // Check if user previously visited this chat in the CURRENT active session
+    const sessionState = chatStore.getSessionScrollPosition(activeChatId);
 
-    let unreadDividerId: string | undefined = undefined;
-    let targetMsgIdToScroll: string | undefined = undefined;
-
-    if (unreadCount > 0 && currentMessages.length > 0) {
-      const firstUnreadIndex = Math.max(0, currentMessages.length - unreadCount);
-      if (firstUnreadIndex > 0 && currentMessages[firstUnreadIndex - 1]) {
-        unreadDividerId = currentMessages[firstUnreadIndex - 1].id;
-      }
-      targetMsgIdToScroll = currentMessages[firstUnreadIndex]?.id;
-      setReadInboxMaxId(unreadDividerId);
-      // Ensure visible window covers all unread messages plus context
-      setVisibleCount(Math.max(PAGE_CHUNK_SIZE, unreadCount + 20, currentMessages.length - firstUnreadIndex + 10));
-    } else if (savedState) {
-      setReadInboxMaxId(savedState.unreadDividerMaxId);
-      setVisibleCount(Math.max(PAGE_CHUNK_SIZE, savedState.visibleCount));
+    if (sessionState && !sessionState.isNearBottom && sessionState.scrollTop > 0) {
+      // User was intentionally reading higher up during this active session
+      setVisibleCount(Math.max(PAGE_CHUNK_SIZE, Math.min(currentMessages.length, 80)));
     } else {
-      setReadInboxMaxId(undefined);
+      // Default: ensure chunk covers newest messages
       setVisibleCount(Math.max(PAGE_CHUNK_SIZE, Math.min(currentMessages.length, 60)));
     }
 
-    // Perform exact and resilient scroll positioning
     const performInitialScroll = () => {
       if (!scrollContainerRef.current) return;
       const container = scrollContainerRef.current;
 
-      if (unreadCount > 0 && targetMsgIdToScroll) {
-        const targetEl = container.querySelector(`[data-msg-id="${targetMsgIdToScroll}"]`) as HTMLElement;
-        if (targetEl) {
-          targetEl.scrollIntoView({ block: 'center', behavior: 'auto' });
-          isUserNearBottomRef.current = false;
-          setShowScrollBottom(true);
+      // Only restore scroll if returning to the same chat in current session where user was scrolled up
+      if (sessionState && !sessionState.isNearBottom && sessionState.scrollTop > 0) {
+        if (sessionState.scrollHeight > 0 && container.scrollHeight > 0) {
+          const heightDiff = container.scrollHeight - sessionState.scrollHeight;
+          container.scrollTop = Math.max(0, sessionState.scrollTop + heightDiff);
         } else {
-          container.scrollTop = container.scrollHeight;
-          isUserNearBottomRef.current = true;
+          container.scrollTop = sessionState.scrollTop;
         }
-      } else if (savedState && !savedState.isNearBottom && savedState.anchorMessageId) {
-        const anchorEl = container.querySelector(`[data-msg-id="${savedState.anchorMessageId}"]`) as HTMLElement;
-        if (anchorEl) {
-          const containerRect = container.getBoundingClientRect();
-          const anchorRect = anchorEl.getBoundingClientRect();
-          container.scrollTop += (anchorRect.top - containerRect.top) - (savedState.anchorOffsetTop || 0);
-          isUserNearBottomRef.current = false;
-          setShowScrollBottom(true);
-        } else {
-          container.scrollTop = savedState.scrollTop;
-          isUserNearBottomRef.current = false;
-          setShowScrollBottom(true);
-        }
+        isUserNearBottomRef.current = false;
+        setShowScrollBottom(true);
       } else {
+        // DEFAULT REQUIREMENT: ALWAYS scroll completely to bottom on opening chat!
         container.scrollTop = container.scrollHeight;
         isUserNearBottomRef.current = true;
         setShowScrollBottom(false);
       }
-
       isInitialScrollDoneRef.current = true;
     };
 
-    // Multi-pass execution to ensure DOM, fonts and bubble layouts are stabilized
-    const t1 = setTimeout(performInitialScroll, 20);
+    // Mark as visited in current session
+    chatStore.markChatVisitedInCurrentSession(activeChatId);
+
+    // Multi-pass execution to guarantee bottom scroll after DOM, fonts, and images render
+    requestAnimationFrame(performInitialScroll);
+    const t1 = setTimeout(performInitialScroll, 30);
     const t2 = setTimeout(performInitialScroll, 120);
 
     // Auto mark chat history as read upon opening
@@ -224,9 +207,7 @@ export const MessageList: React.FC = () => {
       container.scrollTop = scrollAnchorRef.current.previousScrollTop + heightDifference;
       scrollAnchorRef.current.shouldRestore = false;
     }
-  }, [visibleMessages.length]);
-
-  // Handle incoming stream updates & outgoing messages
+  }, [visibleMessages.length]);  // Handle incoming stream updates & outgoing messages with smart auto-scroll
   useEffect(() => {
     const prevCount = prevMessagesLengthRef.current;
     const currentCount = currentMessages.length;
@@ -236,10 +217,17 @@ export const MessageList: React.FC = () => {
       const addedCount = currentCount - prevCount;
       setVisibleCount((prev) => prev + addedCount);
 
-      if (isUserNearBottomRef.current) {
+      const latestMsg = currentMessages[currentMessages.length - 1];
+      const isOutgoing = Boolean(latestMsg?.isOutgoing);
+
+      // Smart scroll rule:
+      // If user is near bottom (or message is outgoing by current user), scroll down immediately!
+      // If user is reading older messages higher up, preserve their scroll position and update unread count.
+      if (isUserNearBottomRef.current || isOutgoing) {
         requestAnimationFrame(() => {
           if (scrollContainerRef.current) {
             scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+            isUserNearBottomRef.current = true;
           }
         });
       } else {
@@ -271,18 +259,22 @@ export const MessageList: React.FC = () => {
     return () => observer.disconnect();
   }, [handleLoadOlder, hasMore, isLoadingOlder]);
 
-  // Track scroll position to update bottom button & near-bottom state
+  // Track scroll position to update bottom button & near-bottom state  // Track scroll position to update bottom button & near-bottom state
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
     const distanceToBottom = scrollHeight - scrollTop - clientHeight;
-    const isNearBottom = distanceToBottom < 90;
+    const isNearBottom = distanceToBottom <= 120;
     isUserNearBottomRef.current = isNearBottom;
 
     setShowScrollBottom(!isNearBottom);
 
     if (isNearBottom && unreadStreamCount > 0) {
       setUnreadStreamCount(0);
+    }
+
+    if (activeChatId) {
+      chatStore.saveSessionScrollPosition(activeChatId, scrollTop, scrollHeight, isNearBottom);
     }
 
     if (scrollTop < 80 && !isLoadingOlder && hasMore) {
@@ -296,6 +288,14 @@ export const MessageList: React.FC = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       } else {
         scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      }
+      if (activeChatId) {
+        chatStore.saveSessionScrollPosition(
+          activeChatId,
+          scrollContainerRef.current.scrollHeight,
+          scrollContainerRef.current.scrollHeight,
+          true
+        );
       }
     }
     setUnreadStreamCount(0);

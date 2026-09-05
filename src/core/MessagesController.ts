@@ -254,10 +254,11 @@ export class MessagesController {
     }
   }
 
-  private getMessageEpoch(msg: Message | { date?: string; timestamp?: string; epoch?: number; rawDate?: number }): number {
+  private getMessageEpoch(msg: Message | { date?: string | number; timestamp?: string | number; epoch?: number; rawDate?: number }): number {
     if (!msg) return 0;
     if (typeof (msg as any).epoch === 'number' && (msg as any).epoch > 0) {
-      return (msg as any).epoch;
+      const ep = (msg as any).epoch;
+      return ep < 1e11 ? ep * 1000 : ep;
     }
     if (typeof (msg as any).rawDate === 'number' && (msg as any).rawDate > 0) {
       const rd = (msg as any).rawDate;
@@ -268,16 +269,36 @@ export class MessagesController {
       return n < 1e11 ? n * 1000 : n;
     }
     if (msg.date) {
-      const parsedFull = Date.parse(`${msg.date} ${msg.timestamp || '00:00'}`);
-      if (!isNaN(parsedFull)) return parsedFull;
-      const parsedDateOnly = Date.parse(msg.date);
-      if (!isNaN(parsedDateOnly)) return parsedDateOnly;
+      if (typeof msg.date === 'number') {
+        const d = msg.date as number;
+        return d < 1e11 ? d * 1000 : d;
+      }
+      if (typeof msg.date === 'string') {
+        const trimmed = msg.date.trim();
+        if (/^\d+$/.test(trimmed)) {
+          const num = Number(trimmed);
+          if (!isNaN(num) && num > 0) {
+            return num < 1e11 ? num * 1000 : num;
+          }
+        }
+        const parsedFull = Date.parse(`${trimmed} ${msg.timestamp || '00:00'}`);
+        if (!isNaN(parsedFull)) return parsedFull;
+        const parsedDateOnly = Date.parse(trimmed);
+        if (!isNaN(parsedDateOnly)) return parsedDateOnly;
+      }
     }
     if (msg.timestamp && typeof msg.timestamp === 'string') {
-      const parsedDirect = Date.parse(msg.timestamp);
+      const trimmedTs = msg.timestamp.trim();
+      if (/^\d+$/.test(trimmedTs)) {
+        const num = Number(trimmedTs);
+        if (!isNaN(num) && num > 0) {
+          return num < 1e11 ? num * 1000 : num;
+        }
+      }
+      const parsedDirect = Date.parse(trimmedTs);
       if (!isNaN(parsedDirect)) return parsedDirect;
       // Handle "10:30 AM" or "22:15" format relative to today
-      const timeMatch = msg.timestamp.match(/(\d{1,2}):(\d{2})(?:\s*(AM|PM|ص|م))?/i);
+      const timeMatch = trimmedTs.match(/(\d{1,2}):(\d{2})(?:\s*(AM|PM|ص|م))?/i);
       if (timeMatch) {
         let hours = parseInt(timeMatch[1], 10);
         const minutes = parseInt(timeMatch[2], 10);
@@ -478,7 +499,8 @@ export class MessagesController {
       const prevMsg = i > 0 ? sorted[i - 1] : null;
       const nextMsg = i < sorted.length - 1 ? sorted[i + 1] : null;
 
-      const dateStr = msg.date || this.formatDateDivider(new Date(this.getMessageEpoch(msg) || Date.now()));
+      const msgEpoch = this.getMessageEpoch(msg);
+      const dateStr = this.formatDateDivider(new Date(msgEpoch > 0 ? msgEpoch : Date.now()));
       if (dateStr !== lastDateStr) {
         result.push({
           type: 'date_divider',

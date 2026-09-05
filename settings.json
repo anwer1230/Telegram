@@ -1,0 +1,25 @@
+{
+  "auto_replies": [
+    {
+      "id": "rule_1",
+      "keyword": "السلام عليكم",
+      "reply": "وعليكم السلام ورحمة الله وبركاته، مرحباً بك! كيف يمكنني مساعدتك؟ 🌸",
+      "scope": "all",
+      "match": "contains",
+      "used_count": 0,
+      "last_used": 0,
+      "isEnabled": true
+    },
+    {
+      "id": "rule_2",
+      "keyword": "الأسعار",
+      "reply": "أهلاً بك! يمكنك الاطلاع على باقاتنا وعروضنا الحالية عبر الرابط المثبت أو إرسال تفاصيل طلبك مباشرة ✨",
+      "scope": "all",
+      "match": "contains",
+      "used_count": 0,
+      "last_used": 0,
+      "isEnabled": true
+    }
+  ],
+  "auto_replies_enabled": true
+}

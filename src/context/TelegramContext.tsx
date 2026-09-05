@@ -20,6 +20,7 @@ import {
   ProfileUserInfo,
   FcmDiagnosticInfo,
   FcmPushPacket,
+  MonitorAlert,
 } from '../types';
 import {
   CURRENT_USER,
@@ -30,6 +31,7 @@ import {
   INITIAL_MESSAGES,
 } from '../data/mockTelegramData';
 import { telegramAudio } from '../utils/audioNotification';
+import { NotificationCenter } from '../core/NotificationCenter';
 import { notificationsController } from '../core/NotificationsController';
 import { notificationsService } from '../core/NotificationsService';
 import { backgroundSyncService } from '../core/BackgroundSyncService';
@@ -54,6 +56,8 @@ import {
   ConnectionsManager,
   AccountInstance,
 } from '../core/messenger';
+import { io as createSocketIO, Socket } from 'socket.io-client';
+import { getTelegramEpoch, parseTelegramDate, formatTelegramTime } from '../utils/dateUtils';
 
 interface TelegramContextType {
   currentUser: User;
@@ -64,6 +68,7 @@ interface TelegramContextType {
   activeFolderId: string;
   folders: Folder[];
   searchQuery: string;
+  refreshDialogs: () => Promise<void>;
   isDrawerOpen: boolean;
   isRightPanelOpen: boolean;
   activeModal:
@@ -96,7 +101,8 @@ interface TelegramContextType {
     | 'live-link-discover'
     | 'user-profile'
     | 'android-notification-shade'
-    | 'restricted-content';
+    | 'restricted-content'
+    | 'salam-activity-log';
   selectedProfileUser: ProfileUserInfo | null;
   setSelectedProfileUser: (user: ProfileUserInfo | null) => void;
   openUserProfile: (user: ProfileUserInfo) => void;
@@ -182,6 +188,7 @@ interface TelegramContextType {
       | 'user-profile'
       | 'android-notification-shade'
       | 'restricted-content'
+      | 'salam-activity-log'
   ) => void;
   setViewerMedia: (media: { url: string; title?: string; sender?: string; timestamp?: string } | null) => void;
   setReplyingTo: (reply: ReplyInfo | null) => void;
@@ -418,6 +425,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     | 'user-profile'
     | 'android-notification-shade'
     | 'restricted-content'
+    | 'salam-activity-log'
   >('none');
   const [selectedProfileUser, setSelectedProfileUser] = useState<ProfileUserInfo | null>(null);
 
@@ -1872,7 +1880,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!activeChatId) return;
 
     const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = formatTelegramTime(now);
     const dateStr = now.toISOString().split('T')[0];
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -1885,6 +1893,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       text: text.trim(),
       timestamp: timeStr,
       date: dateStr,
+      epoch: now.getTime(),
+      rawDate: Math.floor(now.getTime() / 1000),
       isOutgoing: true,
       status: 'sent',
       media,
@@ -1940,9 +1950,37 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         phone: currentUser.phone,
         sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
       }),
-    }).catch((err) => {
-      console.warn('[MTProto] Send message background error:', err);
-    });
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (data && data.success && data.result) {
+          const realMsgId = String(data.result.id || '');
+          if (realMsgId) {
+            setMessages((prev) => {
+              const currentList = prev[activeChatId] || [];
+              return {
+                ...prev,
+                [activeChatId]: currentList.map((m) =>
+                  m.id === messageId
+                    ? {
+                        ...m,
+                        id: realMsgId,
+                        status: 'sent',
+                        date: data.result.date || m.date,
+                        timestamp: data.result.timestamp || m.timestamp,
+                      }
+                    : m
+                ),
+              };
+            });
+          }
+        }
+        // Auto-refresh dialogs after message transmission
+        await syncInitializationRoutine().catch(() => {});
+      })
+      .catch((err) => {
+        console.warn('[MTProto] Send message background error:', err);
+      });
 
     // Automatic Link Radar & Scanner on Outgoing / Incoming Messages
     extractAndProcessLinks(text, activeChatId, activeChat?.title || 'Chat', currentUser.name);
@@ -3067,11 +3105,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const currentList = messages[chatId] || [];
       let oldestId: string | undefined = undefined;
       if (currentList.length > 0) {
-        const sorted = [...currentList].sort((a, b) => {
-          const epochA = Number(a.rawDate || a.epoch) || (new Date(a.date + ' ' + (a.timestamp || '00:00')).getTime() || 0);
-          const epochB = Number(b.rawDate || b.epoch) || (new Date(b.date + ' ' + (b.timestamp || '00:00')).getTime() || 0);
-          return epochA - epochB;
-        });
+        const sorted = [...currentList].sort((a, b) => getTelegramEpoch(a) - getTelegramEpoch(b));
         oldestId = sorted[0]?.id;
       }
 
@@ -3124,11 +3158,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             return prev;
           }
 
-          const combined = [...newUniqueOlder, ...existing].sort((a, b) => {
-            const epochA = Number(a.rawDate || a.epoch) || (new Date(a.date + ' ' + (a.timestamp || '00:00')).getTime() || 0);
-            const epochB = Number(b.rawDate || b.epoch) || (new Date(b.date + ' ' + (b.timestamp || '00:00')).getTime() || 0);
-            return epochA - epochB;
-          });
+          const combined = [...newUniqueOlder, ...existing].sort(
+            (a, b) => getTelegramEpoch(a) - getTelegramEpoch(b)
+          );
 
           return {
             ...prev,
@@ -3168,6 +3200,36 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           setActiveChatId(data.chatId);
         } else if (data.type === 'MARK_CHAT_AS_READ' && data.chatId) {
           markChatReadUnread(data.chatId);
+        } else if (data.type === 'NEW_KEYWORD_ALERT' && data.alert) {
+          const alert = data.alert;
+          notificationsService.addMonitorAlert({
+            id: alert.id || `alert_${Date.now()}`,
+            keyword: alert.keyword || 'مراقبة',
+            sourceChatId: alert.chatId || '',
+            sourceChatTitle: alert.group || 'المجموعة',
+            senderName: alert.sender || 'مستخدم',
+            messageText: alert.text || '',
+            timestamp: alert.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            groupUrl: alert.groupUrl,
+            senderUrl: alert.senderUrl,
+            messageId: alert.messageId,
+            peerId: alert.peerId,
+          });
+          if (settings.soundEffects) {
+            telegramAudio.playMessageChime();
+          }
+          triggerNotification({
+            category: 'keyword_alert',
+            title: `🔔 تنبيه: ${alert.keyword || 'مراقبة'}`,
+            body: `في ${alert.group || 'المجموعة'} من ${alert.sender || 'مستخدم'}`,
+            chatId: alert.chatId,
+            chatTitle: alert.group,
+            messageId: alert.messageId,
+            senderName: alert.sender,
+            keyword: alert.keyword,
+            messageText: alert.text,
+            replyAction: true,
+          });
         } else if (data.type === 'BACKGROUND_PUSH_RECEIVED' && data.remoteMessage) {
           const remoteData = data.remoteMessage.data || {};
           const chatId = remoteData.chat_id || remoteData.chatId || 'chat_general';
@@ -3250,69 +3312,100 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (update.type !== 'new_message' || !update.message) return;
       const msg: Message = update.message;
-      const targetChatId = msg.chatId || update.chatId;
-      if (!targetChatId) return;
+      const isOut = Boolean(msg.out || msg.isOutgoing || update.out);
+      msg.isOutgoing = isOut;
+      if (isOut && (!msg.senderName || msg.senderName === 'User')) {
+        msg.senderName = 'أنت';
+      }
+
+      const peerIdStr = String(msg.peerId || update.peerId || '').replace(/^chat_/, '');
+      const targetChatId = msg.chatId || update.chatId || (peerIdStr ? `chat_${peerIdStr}` : '');
+      if (!targetChatId && !activeChatId) return;
 
       lastUpdateEpoch = Math.max(lastUpdateEpoch, update.epoch || Date.now());
 
-      // 1. Update messages state for the target chat
-      setMessages((prev) => {
-        const existing = prev[targetChatId] || [];
-        if (existing.some((m) => m.id === msg.id)) return prev;
+      const isCurrentChat = Boolean(
+        activeChatId && (
+          targetChatId === activeChatId ||
+          `chat_${peerIdStr}` === activeChatId ||
+          (peerIdStr && activeChatId.replace(/^chat_/, '') === peerIdStr)
+        )
+      );
 
-        const merged = [...existing, msg].sort((a, b) => {
-          const epochA = Number(a.rawDate || a.epoch) || (new Date(a.date + ' ' + (a.timestamp || '00:00')).getTime() || 0);
-          const epochB = Number(b.rawDate || b.epoch) || (new Date(b.date + ' ' + (b.timestamp || '00:00')).getTime() || 0);
-          return epochA - epochB;
+      // 1. Update messages state for the target chat and active chat
+      setMessages((prev) => {
+        const chatsToUpdate = new Set<string>();
+        if (targetChatId) chatsToUpdate.add(targetChatId);
+        if (isCurrentChat && activeChatId) chatsToUpdate.add(activeChatId);
+
+        let nextState = { ...prev };
+        let modified = false;
+
+        chatsToUpdate.forEach((cId) => {
+          const existing = nextState[cId] || [];
+          if (existing.some((m) => m.id === msg.id)) {
+            // Already present, update status/fields if changed
+            nextState[cId] = existing.map((m) =>
+              m.id === msg.id ? { ...m, ...msg, isOutgoing: isOut } : m
+            );
+            modified = true;
+            return;
+          }
+
+          const merged = [...existing, { ...msg, isOutgoing: isOut }].sort(
+            (a, b) => getTelegramEpoch(a) - getTelegramEpoch(b)
+          );
+          nextState[cId] = merged;
+          modified = true;
         });
 
-        return {
-          ...prev,
-          [targetChatId]: merged,
-        };
+        return modified ? nextState : prev;
       });
 
-      // 2. Update chat item in chats list
+      // 2. Update chat item in chats list and reorder to top
       setChats((prev) => {
-        const chatExists = prev.some((c) => c.id === targetChatId || c.peerId === update.peerId);
-        if (!chatExists) {
+        const matchingChat = prev.find(
+          (c) =>
+            c.id === targetChatId ||
+            (peerIdStr && String(c.peerId) === peerIdStr) ||
+            (isCurrentChat && c.id === activeChatId)
+        );
+
+        if (!matchingChat) {
           syncInitializationRoutine().catch(() => {});
           return prev;
         }
 
-        return prev.map((c) => {
-          if (c.id === targetChatId || c.peerId === update.peerId) {
-            const isCurrentChat = activeChatId === c.id;
-            return {
-              ...c,
-              unreadCount: isCurrentChat ? 0 : (c.unreadCount || 0) + 1,
-              lastMessage: {
-                id: msg.id,
-                senderName: msg.senderName,
-                text: msg.text,
-                timestamp: msg.timestamp,
-                isOutgoing: msg.isOutgoing,
-                status: msg.status,
-              },
-            };
-          }
-          return c;
+        const resolvedChatId = matchingChat.id;
+        const isChatOpen = activeChatId === resolvedChatId;
+
+        return reorderChatsWithUpdate(prev, resolvedChatId, {
+          unreadCount: isChatOpen || isOut ? matchingChat.unreadCount : (matchingChat.unreadCount || 0) + 1,
+          lastMessage: {
+            id: msg.id,
+            senderName: msg.senderName || (isOut ? 'أنت' : matchingChat.title),
+            text: msg.text,
+            timestamp: msg.timestamp,
+            isOutgoing: isOut,
+            status: msg.status || (isOut ? 'sent' : 'read'),
+            mediaType: msg.media?.type,
+          },
         });
       });
 
       // 3. If incoming (not sent by us), trigger audio and notifications
-      if (!msg.isOutgoing) {
+      if (!isOut) {
         if (settings.soundEffects) {
           telegramAudio.playMessageChime();
         }
 
-        const isViewingChat = activeChatId === targetChatId && !document.hidden;
+        const isViewingChat = isCurrentChat && !document.hidden;
         if (!isViewingChat) {
           triggerNotification({
             category: 'message',
             title: msg.senderName || 'رسالة جديدة',
             body: msg.text || 'رسالة جديدة من تيليجرام',
-            chatId: targetChatId,
+            chatId: targetChatId || activeChatId || '',
             senderName: msg.senderName,
           });
 
@@ -3321,7 +3414,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               new Notification(msg.senderName || 'Telegram', {
                 body: msg.text || 'رسالة جديدة',
                 icon: '/telegram-logo.svg',
-                tag: `chat_${targetChatId}`,
+                tag: `chat_${targetChatId || activeChatId}`,
               });
             } catch (_) {}
           }
@@ -3329,14 +3422,154 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     };
 
-    // Establish SSE Connection
+    // ==========================================
+    // KEYWORD MONITORING REAL-TIME ALERT HANDLER
+    // ==========================================
+    const handleIncomingAlert = (alertData: any) => {
+      if (!alertData) return;
+      const alertItem: MonitorAlert = {
+        id: alertData.id || `alert_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        keyword: alertData.keyword || 'مراقبة',
+        sourceChatId: alertData.chatId || alertData.sourceChatId || '',
+        sourceChatTitle: alertData.group || alertData.sourceChatTitle || 'المجموعة',
+        senderName: alertData.sender || alertData.senderName || 'مستخدم',
+        messageText: alertData.text || alertData.messageText || '',
+        timestamp: alertData.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        groupUrl: alertData.groupUrl,
+        senderUrl: alertData.senderUrl,
+        messageId: alertData.messageId,
+        peerId: alertData.peerId,
+      };
+
+      // 1. Immediately update NotificationsService store for the Monitor UI
+      notificationsService.addMonitorAlert(alertItem);
+
+      // 2. Play alert chime
+      if (settings.soundEffects) {
+        telegramAudio.playMessageChime();
+      }
+
+      // 3. Show In-App Notification Banner
+      triggerNotification({
+        category: 'keyword_alert',
+        title: `🔔 تنبيه: ${alertItem.keyword}`,
+        body: `في ${alertItem.sourceChatTitle} من ${alertItem.senderName}\n${alertItem.messageText}`,
+        chatId: alertItem.sourceChatId,
+        chatTitle: alertItem.sourceChatTitle,
+        messageId: alertItem.messageId,
+        senderName: alertItem.senderName,
+        keyword: alertItem.keyword,
+        messageText: alertItem.messageText,
+        replyAction: true,
+      });
+
+      // 4. In-App Toast
+      showToast(`🚨 رصد "${alertItem.keyword}" في ${alertItem.sourceChatTitle}`, '🔔');
+
+      // 5. Browser Native Notification if page is hidden
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(`🔔 تنبيه: ${alertItem.keyword}`, {
+            body: `في ${alertItem.sourceChatTitle} من ${alertItem.senderName}\n${alertItem.messageText}`,
+            icon: '/telegram-logo.svg',
+            tag: `tg_alert_${alertItem.id}`,
+          });
+        } catch (_) {}
+      }
+    };
+
+    // Initial fetch of historical alerts from backend to populate UI instantly
+    fetch('/api/alerts/history')
+      .then((r) => r.json())
+      .then((res) => {
+        if (res?.success && Array.isArray(res.alerts)) {
+          res.alerts.forEach((a: any) => {
+            notificationsService.addMonitorAlert({
+              id: a.id,
+              keyword: a.keyword,
+              sourceChatId: a.chatId,
+              sourceChatTitle: a.group,
+              senderName: a.sender,
+              messageText: a.text,
+              timestamp: a.time,
+              groupUrl: a.groupUrl,
+              senderUrl: a.senderUrl,
+              messageId: a.messageId,
+              peerId: a.peerId,
+            });
+          });
+        }
+      })
+      .catch(() => {});
+
+    // 1. Establish Socket.IO Connection for Instant Full-Duplex Real-Time Updates
+    let socket: Socket | null = null;
+    try {
+      socket = createSocketIO({
+        transports: ['websocket', 'polling'],
+        autoConnect: true,
+      });
+
+      socket.on('telegram_update', (update: any) => {
+        if (update?.type === 'new_alert' && update.alert) {
+          handleIncomingAlert(update.alert);
+        } else {
+          handleIncomingUpdate(update);
+        }
+      });
+
+      socket.on('new_message', (update: any) => {
+        handleIncomingUpdate(update);
+      });
+
+      socket.on('new_alert', (alertData: any) => {
+        handleIncomingAlert(alertData);
+      });
+
+      socket.on('auto_join_progress', (data: any) => {
+        if (data?.task) {
+          showToast(`انضمام: ${data.task.title || data.task.url} (${data.current}/${data.total})`, '🔗');
+        }
+      });
+
+      socket.on('auto_join_result', (data: any) => {
+        if (data?.message) {
+          showToast(data.message, data.success ? '✅' : '⚠️');
+        }
+      });
+
+      socket.on('new_batch_sent', (batchData: any) => {
+        showToast(`تم إرسال دفعة جديدة إلى ${batchData?.groupsCount || 0} مجموعة بنجاح`, '🚀');
+      });
+
+      socket.on('scheduled_sender_status', (schedData: any) => {
+        if (schedData?.active) {
+          console.log('[Scheduler] Active round:', schedData.roundsExecuted);
+        }
+      });
+
+      socket.on('salam_activity', (salamData: any) => {
+        NotificationCenter.getGlobalInstance().postNotificationName(
+          NotificationCenter.salamActivityReceived,
+          salamData
+        );
+      });
+    } catch (sockErr) {
+      console.warn('[Socket.IO] Client connection error:', sockErr);
+    }
+
+    // 2. Establish SSE Connection as Persistent Stream Channel
     try {
       eventSource = new EventSource('/api/telegram/updates/stream');
 
       eventSource.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
-          handleIncomingUpdate(parsed);
+          if (parsed?.type === 'new_alert' && parsed.alert) {
+            handleIncomingAlert(parsed.alert);
+          } else {
+            handleIncomingUpdate(parsed);
+          }
         } catch (_) {}
       };
 
@@ -3408,11 +3641,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             const newIncoming = data.messages.filter((m: Message) => !existingIds.has(m.id));
             if (newIncoming.length === 0) return prev;
 
-            const merged = [...existing, ...newIncoming].sort((a, b) => {
-              const epochA = Number(a.rawDate || a.epoch) || (new Date(a.date + ' ' + (a.timestamp || '00:00')).getTime() || 0);
-              const epochB = Number(b.rawDate || b.epoch) || (new Date(b.date + ' ' + (b.timestamp || '00:00')).getTime() || 0);
-              return epochA - epochB;
-            });
+            const merged = [...existing, ...newIncoming].sort(
+              (a, b) => getTelegramEpoch(a) - getTelegramEpoch(b)
+            );
 
             return {
               ...prev,
@@ -3453,6 +3684,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     return () => {
       window.removeEventListener('telegram:session_revoked', handleForcedLogout);
+      if (socket) {
+        socket.disconnect();
+      }
       if (eventSource) {
         eventSource.close();
       }
@@ -3957,6 +4191,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         resolveTelegramLink,
         syncCloudData,
         syncInitializationRoutine,
+        refreshDialogs: syncInitializationRoutine,
         validateSessionProactively,
         isSyncing,
         isSessionValidating,

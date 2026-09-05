@@ -490,6 +490,36 @@ export const NavigationDrawer: React.FC = () => {
                   );
                 })()}
 
+                {/* 1.1 سجل نشاط السلام */}
+                {(() => {
+                  const isActive = activeModal === 'salam-activity-log';
+                  return (
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      id="drawer-salam-activity-log"
+                      onClick={() => handleItemClick(() => setActiveModal('salam-activity-log'))}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
+                        isActive
+                          ? 'active bg-emerald-500/20 text-emerald-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-emerald-400'
+                          : 'hover:bg-emerald-500/10 text-gray-100 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <Radio className={`w-5 h-5 shrink-0 ${isActive ? 'text-emerald-300' : 'text-emerald-400'} group-hover:scale-110 transition-transform`} />
+                        <div className="flex flex-col text-left rtl:text-right">
+                          <span className="font-semibold">{isArabic ? 'سجل نشاط السلام' : 'Salam Activity Log'}</span>
+                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
+                            {isArabic ? 'رصد فوري لشفافية وضع السلام (تعديل/حذف)' : 'Real-time Salam mode status'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-emerald-500/25 text-emerald-200 border border-emerald-400/30 rounded font-mono">
+                        LIVE
+                      </span>
+                    </motion.button>
+                  );
+                })()}
+
                 {/* 2. رسائلي */}
                 {(() => {
                   const isActive = activeModal === 'my-messages';

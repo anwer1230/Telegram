@@ -17,6 +17,7 @@ import {
   AtSign,
   KeyRound,
   Hash,
+  RotateCw,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { parseMultipleGroupLinks, ResolvedGroupTarget } from '../../utils/telegramLinkResolver';
@@ -29,10 +30,19 @@ interface UploadedImage {
 }
 
 export const SendOnlyModal: React.FC = () => {
-  const { activeModal, setActiveModal, showToast } = useTelegram();
+  const {
+    activeModal,
+    setActiveModal,
+    showToast,
+    currentUser,
+    accounts,
+    activeAccountId,
+    chats,
+  } = useTelegram();
 
   const [message, setMessage] = useState('');
   const [groups, setGroups] = useState('');
+  const [isFetchingGroups, setIsFetchingGroups] = useState(false);
   const [sendMode, setSendMode] = useState<'specific' | 'all'>('specific');
   const [dispatchType, setDispatchType] = useState<'manual' | 'scheduled'>('manual');
   const [scheduleTime, setScheduleTime] = useState<string>(() => {
@@ -114,6 +124,66 @@ export const SendOnlyModal: React.FC = () => {
           if (parsed.auto_repeat) setAutoRepeat(parsed.auto_repeat);
         } catch {}
       }
+    }
+  };
+
+  // استدعاء فعلي وحقيقي 100% لجلب جميع المجموعات والقنوات عبر خادم GramJS
+  const handleFetchAllGroups = async () => {
+    try {
+      setIsFetchingGroups(true);
+      showToast('⏳ جاري جلب جميع المجموعات والقنوات من حسابك الفعلي...', '🔄');
+
+      const activeAcc = accounts?.find((a) => a.id === activeAccountId) || accounts?.[0];
+      const sessionString =
+        currentUser?.sessionString ||
+        activeAcc?.sessionString ||
+        localStorage.getItem('tg_session_string') ||
+        localStorage.getItem('telegram_session') ||
+        '';
+      const phone = currentUser?.phone || activeAcc?.user?.phone || '';
+
+      const res = await fetch('/api/get_all_groups', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-telegram-session': sessionString,
+          'x-telegram-phone': phone,
+        },
+        body: JSON.stringify({
+          sessionString,
+          phone,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && Array.isArray(data.groups) && data.groups.length > 0) {
+        const directLinks = data.groups.join('\n');
+        setGroups(directLinks);
+        showToast(`✅ تم جلب ${data.groups.length} رابط حقيقي للمجموعات والقنوات بنجاح`, '🎯');
+      } else if (data.groups && data.groups.length === 0) {
+        showToast('ℹ️ لم يتم العثور على أي مجموعات أو قنوات في الحساب', '⚠️');
+      } else {
+        throw new Error(data.message || 'تعذر جلب المجموعات من تيليجرام');
+      }
+    } catch (err: any) {
+      console.error('[SendOnlyModal] Error fetching all groups:', err);
+      const fallbackGroups = chats
+        .filter((c) => c.type === 'group' || c.type === 'channel')
+        .map((c) =>
+          c.username
+            ? `https://t.me/${c.username}`
+            : `https://t.me/c/${String(c.id).replace(/^-100/, '').replace(/^-/, '')}`
+        );
+
+      if (fallbackGroups.length > 0) {
+        const directLinks = fallbackGroups.join('\n');
+        setGroups(directLinks);
+        showToast(`⚠️ تم جلب ${fallbackGroups.length} رابط مجموعة: ${err?.message || ''}`, 'ℹ️');
+      } else {
+        showToast(`❌ تعذر جلب المجموعات: ${err?.message || 'خطأ في الاتصال'}`, '⚠️');
+      }
+    } finally {
+      setIsFetchingGroups(false);
     }
   };
 
@@ -635,12 +705,25 @@ export const SendOnlyModal: React.FC = () => {
                     <LinkIcon className="w-3.5 h-3.5 text-indigo-400" />
                     <span>مجموعات الإرسال (روابط مباشرة أو معرفات)</span>
                   </label>
-                  {sendMode === 'specific' && resolvedTargets.length > 0 && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                      <span>{resolvedTargets.length} وجهة تم التعرف عليها</span>
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {sendMode === 'specific' && resolvedTargets.length > 0 && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        <span>{resolvedTargets.length} وجهة</span>
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      id="fetchDialogsBtnSendOnly"
+                      onClick={handleFetchAllGroups}
+                      disabled={isFetchingGroups || sendMode === 'all'}
+                      className="text-[0.7rem] py-0.5 px-2 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/20 transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="جلب جميع المجموعات والقنوات الحقيقية التي اشتركت بها من حسابك في تيليجرام"
+                    >
+                      <RotateCw className={`w-3 h-3 ${isFetchingGroups ? 'animate-spin' : ''}`} />
+                      <span>{isFetchingGroups ? 'جاري جلب المجموعات...' : 'جلب كل المجموعات'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 <textarea

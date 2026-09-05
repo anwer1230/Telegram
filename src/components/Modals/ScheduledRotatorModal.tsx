@@ -20,11 +20,12 @@ import {
 import { useTelegram } from '../../context/TelegramContext';
 import { notificationsService } from '../../core/NotificationsService';
 import { RotatingSendLog } from '../../types';
+import { MESSAGE_DRAFTS } from './SenderModal';
 
 export const ScheduledRotatorModal: React.FC = () => {
   const { activeModal, setActiveModal, chats, showToast } = useTelegram();
 
-  const [messages, setMessages] = useState<string[]>(['', '', '', '', '']);
+  const [messages, setMessages] = useState<string[]>(() => MESSAGE_DRAFTS.map((d) => d.text));
   const [selectedMsgTab, setSelectedMsgTab] = useState(0);
   const [rawGroups, setRawGroups] = useState('');
   const [intervalMinutes, setIntervalMinutes] = useState(5);

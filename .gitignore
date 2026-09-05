@@ -8,3 +8,8 @@ coverage/
 !.env.example
 config/firebase-service-account.json
 config/release.keystore
+-e 
+# Isolated Telegram Account Sessions
+sessions/*.json
+!sessions/.gitkeep
+

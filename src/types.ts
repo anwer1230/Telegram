@@ -131,6 +131,8 @@ export interface Message {
   scheduledDate?: string;
   rawDate?: number;
   epoch?: number;
+  out?: boolean;
+  peerId?: string;
 }
 
 export interface Chat {
@@ -170,6 +172,9 @@ export interface Chat {
     isOutgoing: boolean;
     status?: 'sending' | 'sent' | 'delivered' | 'read' | 'error';
     mediaType?: string;
+    rawDate?: number;
+    epoch?: number;
+    date?: string;
   };
   memberCount?: number;
   onlineCount?: number;
@@ -409,6 +414,34 @@ export interface CapturedLink {
 // 1. Sender & Scheduler Types
 export type ProtectionMode = 'salam' | 'skip' | 'smart_clean' | 'permanent_clean' | 'disabled';
 
+export type SalamActivityStatus =
+  | 'greeting_sent'
+  | 'waiting_interaction'
+  | 'interaction_detected'
+  | 'message_edited'
+  | 'message_deleted'
+  | 'error';
+
+export interface SalamActivityItem {
+  id: string;
+  chatId: string | number;
+  chatTitle?: string;
+  greetingMsgId?: number | string;
+  status: SalamActivityStatus;
+  statusLabel: string;
+  interactionCount: number;
+  requiredInteractions: number;
+  remainingSeconds: number;
+  totalWaitSeconds: number;
+  lastMessageSnippet?: string;
+  lastMessageSender?: string;
+  originalText?: string;
+  details?: string;
+  timestamp: string;
+  decision?: 'edit' | 'delete' | 'pending';
+  messages?: any[];
+}
+
 export interface SenderBatch {
   id: string;
   text: string;
@@ -444,6 +477,10 @@ export interface MonitorAlert {
   senderName: string;
   messageText: string;
   timestamp: string;
+  groupUrl?: string;
+  senderUrl?: string;
+  messageId?: string;
+  peerId?: string;
 }
 
 // 3. My Messages (Batch Log)

@@ -37,6 +37,7 @@ import { SmartAiLearnModal } from './components/Modals/SmartAiLearnModal';
 import { ScheduledRotatorModal } from './components/Modals/ScheduledRotatorModal';
 import { LiveLinkDiscoverModal } from './components/Modals/LiveLinkDiscoverModal';
 import { UserProfileModal } from './components/Modals/UserProfileModal';
+import { SalamActivityLog } from './components/SalamActivityLog';
 import { ForwardModal } from './components/Interactions/ForwardModal';
 import { ChatContextMenuView } from './components/Interactions/ChatContextMenu';
 import { MessageContextMenuView } from './components/Interactions/MessageContextMenu';
@@ -167,6 +168,12 @@ const TelegramAppContent: React.FC = () => {
       <ScheduledRotatorModal />
       <LiveLinkDiscoverModal />
       <UserProfileModal />
+
+      {/* Salam Mode Real-Time Activity Log */}
+      <SalamActivityLog
+        isOpen={activeModal === 'salam-activity-log'}
+        onClose={() => setActiveModal('none')}
+      />
 
       <ForwardModal />
 

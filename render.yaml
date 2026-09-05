@@ -24,7 +24,7 @@ services:
       - key: VAPID_PRIVATE_KEY
         value: "13NU1_GmeL7bDQcVtlFyuKqsnnsX3XkOyE--2rAQJw4"
       - key: VAPID_SUBJECT
-        value: "mailto:admin@telegram-anwer.app"
+        value: "mailto:anwrsaifanwr@gmail.com"
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY

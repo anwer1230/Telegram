@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { TelegramClient, Api, sessions } from 'telegram';
@@ -8,13 +11,276 @@ import { NewMessage } from 'telegram/events';
 import webpush from 'web-push';
 import { telegramRPCRegistry } from './server/TelegramRPCRegistry';
 
-// Dynamic Environment & Credentials Resolution (from .env or hardcoded fallbacks)
+// Dynamic Environment & Credentials Resolution (from process.env)
 const TELEGRAM_API_ID = process.env.API_ID || process.env.TELEGRAM_API_ID || '22043994';
 const TELEGRAM_API_HASH = process.env.API_HASH || process.env.TELEGRAM_API_HASH || '56f64582b363d367280db96586b97801';
 const TDLIB_API_HASH = process.env.TDLIB_API_HASH || TELEGRAM_API_HASH;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'tg_session_anwer_foud_secure_key_2026';
+// NOTE: Telegram sessions are strictly isolated in sessions/account_{index}.json and NEVER stored in .env or global variables.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+
+// ==========================================
+// KEYWORD MONITORING SYSTEM (HARDCODED)
+// ==========================================
+export const MONITOR_KEYWORDS: string[] = [
+  'اريد مساعدة',
+  'ابي مساعدة',
+  'من يسوي تكليف',
+  'من يحل',
+  'عندي بحث',
+  'معي واجب',
+  'عندي اسايمنت',
+  'من يسوي اسايمنت',
+  'ابي سكليف',
+  'ابي عذر',
+  'من يسوي سكليف',
+  'ابي شخص مضمون',
+  'ابي مختص',
+  'هيليب',
+  'من يستطيع',
+  'تعرفون احد',
+  'تعرفون شخص',
+  'من يساعدني',
+  'من يعرف مختص',
+  'ابي مختص',
+  'مين يعرف يحل واجب',
+  'من يحل واجبات الجامعه',
+  'أحتاج مساعدتكم',
+  'ابي احد يسوي بحث',
+  'عندي بحث',
+  'مين يعرف مختص',
+  'من يعرف احد كويس',
+];
+
+export let monitoringEnabled = true;
+
+export interface AlertLogItem {
+  id: string;
+  messageId: string;
+  chatId: string;
+  peerId?: string;
+  keyword: string;
+  group: string;
+  groupUrl?: string;
+  sender: string;
+  senderUrl?: string;
+  time: string;
+  text: string;
+  timestamp: number;
+}
+
+export const USER_LOGS: AlertLogItem[] = [];
+export const _processed_msg_ids = new Set<string>();
+
+export function normalizeArabicText(text: string): string {
+  if (!text) return '';
+  return text
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '') // remove diacritics / tatweel
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Primary global GramJS client instance for background listeners and RPC dispatch
+let mainTelegramClient: TelegramClient | null = null;
+
+// =========================================================================
+// ISOLATED MULTI-ACCOUNT SESSION STORAGE ENGINE (GramJS + Node.js fs)
+// Replicates official Telegram isolated session structure (sessions/account_{index}.json)
+// Strictly isolated: NO sessions in .env or hardcoded variables.
+// =========================================================================
+export const SESSIONS_DIR = path.resolve(process.cwd(), 'sessions');
+
+// Ensure sessions directory exists on startup
+if (!fs.existsSync(SESSIONS_DIR)) {
+  try {
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    console.log(`[SessionEngine] Created isolated sessions directory at: ${SESSIONS_DIR}`);
+  } catch (err) {
+    console.error(`[SessionEngine] Failed to create sessions directory:`, err);
+  }
+}
+
+export interface StoredAccountSession {
+  session: string;
+  userId: string;
+  phone: string;
+  index?: number;
+  name?: string;
+  username?: string;
+  avatar?: string;
+  isPremium?: boolean;
+  updatedAt?: string;
+}
+
+/**
+ * Returns the exact file path for an account's isolated session file
+ * e.g. sessions/account_0.json, sessions/account_1.json, etc.
+ */
+export function getSessionFilePath(accountIndex: number): string {
+  return path.join(SESSIONS_DIR, `account_${accountIndex}.json`);
+}
+
+/**
+ * Writes an account session to its isolated JSON file (sessions/account_{index}.json)
+ * Format inside file: { "session": "...", "userId": "...", "phone": "..." }
+ */
+export function saveAccountSession(
+  index: number,
+  data: {
+    session: string;
+    userId: string;
+    phone: string;
+    name?: string;
+    username?: string;
+    avatar?: string;
+    isPremium?: boolean;
+  }
+): boolean {
+  try {
+    if (!fs.existsSync(SESSIONS_DIR)) {
+      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    }
+    const filePath = getSessionFilePath(index);
+    const payload: StoredAccountSession = {
+      session: data.session,
+      userId: String(data.userId || ''),
+      phone: String(data.phone || ''),
+      index,
+      name: data.name || '',
+      username: data.username || '',
+      avatar: data.avatar || '',
+      isPremium: Boolean(data.isPremium),
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+    console.log(`[SessionEngine] Successfully saved isolated session for account ${index} -> ${filePath}`);
+    return true;
+  } catch (error) {
+    console.error(`[SessionEngine] Error saving session file for account ${index}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Reads an isolated session file for a given account index (0..3)
+ */
+export function readAccountSession(index: number): StoredAccountSession | null {
+  try {
+    const filePath = getSessionFilePath(index);
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(raw) as StoredAccountSession;
+    if (parsed && parsed.session) {
+      return parsed;
+    }
+    return null;
+  } catch (error) {
+    console.error(`[SessionEngine] Error reading session file for account ${index}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Scans the sessions/ directory and loads all account session files (account_X.json)
+ */
+export function loadAllAccountSessionsFromDisk(): Map<number, StoredAccountSession> {
+  const result = new Map<number, StoredAccountSession>();
+  try {
+    if (!fs.existsSync(SESSIONS_DIR)) {
+      return result;
+    }
+    const files = fs.readdirSync(SESSIONS_DIR);
+    for (const file of files) {
+      const match = file.match(/^account_(\d+)\.json$/);
+      if (match) {
+        const index = parseInt(match[1], 10);
+        const data = readAccountSession(index);
+        if (data && data.session) {
+          result.set(index, data);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[SessionEngine] Error loading sessions from directory:`, err);
+  }
+  return result;
+}
+
+/**
+ * Deletes an account session file from disk upon logout
+ */
+export function deleteAccountSessionFromDisk(index: number): boolean {
+  try {
+    const filePath = getSessionFilePath(index);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`[SessionEngine] Removed isolated session file for account ${index}`);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error(`[SessionEngine] Error deleting session file for account ${index}:`, err);
+    return false;
+  }
+}
+
+// =========================================================================
+// MULTI-ACCOUNT & ACCOUNT INSTANCE RUNTIME STATE
+// Replicates DrKLO/Telegram Android AccountInstance & USERS architecture
+// =========================================================================
+export let currentAccount: number = 0;
+
+export interface AccountInstanceData {
+  currentAccount: number;
+  userId: string;
+  phone: string;
+  sessionString: string;
+  client: TelegramClient | null;
+  user: any;
+  lastActive: string;
+}
+
+export const USERS: Map<number, any> = new Map();
+export const accountInstances: Map<number, AccountInstanceData> = new Map();
+
+export class AccountInstance {
+  private static instances = new Map<number, AccountInstance>();
+  public currentAccount: number;
+
+  private constructor(accountNum: number) {
+    this.currentAccount = accountNum;
+  }
+
+  public static getInstance(accountNum: number = currentAccount): AccountInstance {
+    if (!AccountInstance.instances.has(accountNum)) {
+      AccountInstance.instances.set(accountNum, new AccountInstance(accountNum));
+    }
+    return AccountInstance.instances.get(accountNum)!;
+  }
+
+  public getAccountData(): AccountInstanceData | undefined {
+    return accountInstances.get(this.currentAccount);
+  }
+
+  public getClient(): TelegramClient | null {
+    return accountInstances.get(this.currentAccount)?.client || null;
+  }
+
+  public getUser(): any {
+    return USERS.get(this.currentAccount) || null;
+  }
+}
+
+export function getAccountInstance(accountIndex: number = currentAccount): AccountInstance {
+  return AccountInstance.getInstance(accountIndex);
+}
 
 // ==========================================
 // VAPID & WEB PUSH NOTIFICATION SUBSYSTEM
@@ -23,15 +289,48 @@ let VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 let VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@telegram-anwer.app';
 
+// Persist auto-generated keys to disk so they survive server restarts if not provided in process.env
+const VAPID_KEYS_FILE = path.join(SESSIONS_DIR, 'vapid_keys.json');
+
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  if (fs.existsSync(VAPID_KEYS_FILE)) {
+    try {
+      const savedKeys = JSON.parse(fs.readFileSync(VAPID_KEYS_FILE, 'utf8'));
+      if (savedKeys.publicKey && savedKeys.privateKey) {
+        VAPID_PUBLIC_KEY = savedKeys.publicKey;
+        VAPID_PRIVATE_KEY = savedKeys.privateKey;
+        console.log('[WebPush] Loaded existing VAPID keys from storage.');
+      }
+    } catch (_) {}
+  }
+}
+
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  try {
+    const generated = webpush.generateVAPIDKeys();
+    VAPID_PUBLIC_KEY = generated.publicKey;
+    VAPID_PRIVATE_KEY = generated.privateKey;
+    try {
+      if (!fs.existsSync(SESSIONS_DIR)) {
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      }
+      fs.writeFileSync(VAPID_KEYS_FILE, JSON.stringify({ publicKey: VAPID_PUBLIC_KEY, privateKey: VAPID_PRIVATE_KEY }, null, 2), 'utf8');
+    } catch (_) {}
+    console.log('⚠️ [WebPush] VAPID keys not configured in process.env. Automatically generated and stored new key pair:');
+    console.log(`[WebPush] VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}`);
+    console.log(`[WebPush] VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}`);
+  } catch (genErr) {
+    console.error('[WebPush] Failed to auto-generate VAPID keys:', genErr);
+  }
+}
+
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   try {
     webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-    console.log('[WebPush] VAPID configuration initialized successfully from process.env.');
+    console.log('[WebPush] VAPID configuration initialized successfully.');
   } catch (err) {
     console.warn('[WebPush] setVapidDetails error:', err);
   }
-} else {
-  console.warn('[WebPush] VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY missing in process.env');
 }
 
 const DC_CLUSTERS = [
@@ -80,6 +379,14 @@ const avatarCache = new Map<string, string>();
 
 async function startServer() {
   const app = express();
+  const server = http.createServer(app);
+  const io = new SocketIOServer(server, {
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST'],
+    },
+    transports: ['websocket', 'polling'],
+  });
   const PORT = Number(process.env.PORT) || 3000;
 
   // CORS & Preflight Handling
@@ -287,7 +594,40 @@ async function startServer() {
     userAgent?: string;
   }
 
-  const webPushSubscriptions = new Map<string, WebPushSubscriptionRecord>();
+  const SUBSCRIPTIONS_FILE = path.join(SESSIONS_DIR, 'web_push_subscriptions.json');
+
+  const loadSubscriptionsFromDisk = (): Map<string, WebPushSubscriptionRecord> => {
+    const map = new Map<string, WebPushSubscriptionRecord>();
+    try {
+      if (fs.existsSync(SUBSCRIPTIONS_FILE)) {
+        const raw = fs.readFileSync(SUBSCRIPTIONS_FILE, 'utf8');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          for (const item of list) {
+            if (item && item.id && item.subscription) {
+              map.set(item.id, item);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[WebPush] Failed loading subscriptions from disk:', e);
+    }
+    return map;
+  };
+
+  const saveSubscriptionsToDisk = (map: Map<string, WebPushSubscriptionRecord>) => {
+    try {
+      if (!fs.existsSync(SESSIONS_DIR)) {
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      }
+      fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(Array.from(map.values()), null, 2), 'utf8');
+    } catch (e) {
+      console.warn('[WebPush] Failed saving subscriptions to disk:', e);
+    }
+  };
+
+  const webPushSubscriptions = loadSubscriptionsFromDisk();
 
   // Helper to send Web Push Notification to registered clients (even when closed)
   const sendWebPushNotificationToSubscribers = async (
@@ -303,6 +643,7 @@ async function startServer() {
   ) => {
     const payloadString = JSON.stringify(payload);
     const results: Array<{ endpoint: string; success: boolean; error?: string }> = [];
+    let stateChanged = false;
 
     for (const [id, record] of webPushSubscriptions.entries()) {
       if (filter) {
@@ -324,16 +665,34 @@ async function startServer() {
         record.lastActive = Date.now();
         results.push({ endpoint: record.subscription.endpoint, success: true });
       } catch (err: any) {
-        console.warn(`[WebPush] Failed sending push to ${id.substring(0, 20)}...:`, err?.statusCode || err?.message || err);
-        // If subscription is 404 or 410 (Gone), delete it
+        console.warn(`[WebPush] Push notification delivery status to ${id.substring(0, 15)}...:`, err?.statusCode || err?.message || err);
+        // If subscription is 404 or 410 (unregistered or expired by browser push service), clean it up
         if (err?.statusCode === 404 || err?.statusCode === 410) {
           webPushSubscriptions.delete(id);
+        saveSubscriptionsToDisk(webPushSubscriptions);
+          stateChanged = true;
         }
         results.push({ endpoint: record.subscription.endpoint, success: false, error: err?.message || String(err) });
       }
     }
 
+    if (stateChanged) {
+      saveSubscriptionsToDisk(webPushSubscriptions);
+    }
+
     return results;
+  };
+
+  // Helper alias specifically requested for keyword monitoring push notifications
+  const send_push_notification = async (payload: {
+    title: string;
+    body: string;
+    icon?: string;
+    badge?: string;
+    tag?: string;
+    data?: any;
+  }) => {
+    return sendWebPushNotificationToSubscribers(payload);
   };
 
   // Helper to revoke session and notify subscribers
@@ -394,10 +753,29 @@ async function startServer() {
     );
   };
 
+  io.on('connection', (socket) => {
+    console.log(`[Socket.IO] Client connected: ${socket.id}`);
+    socket.emit('connected', { timestamp: Date.now() });
+    socket.on('disconnect', () => {
+      console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
+    });
+  });
+
   const broadcastTelegramUpdate = (update: any) => {
     serverRecentUpdates.push(update);
     if (serverRecentUpdates.length > 100) serverRecentUpdates.shift();
 
+    // 1. Real-time WebSocket Broadcast via Socket.IO
+    try {
+      io.emit('telegram_update', update);
+      if (update.type) {
+        io.emit(update.type, update);
+      }
+    } catch (ioErr) {
+      console.warn('[Socket.IO] Broadcast error:', ioErr);
+    }
+
+    // 2. Real-time Server-Sent Events (SSE) Stream
     const dataPayload = `data: ${JSON.stringify(update)}\n\n`;
     activeSseClients.forEach((res) => {
       try {
@@ -407,6 +785,188 @@ async function startServer() {
       }
     });
   };
+
+  // =========================================================================
+  // PERSISTENCE ENGINE: SETTINGS & BATCHES DISK STORAGE
+  // =========================================================================
+  const SETTINGS_FILE = path.join(process.cwd(), 'settings.json');
+  const BATCHES_FILE = path.join(process.cwd(), 'batches.json');
+
+  const loadSettingsFromDisk = () => {
+    try {
+      if (fs.existsSync(SETTINGS_FILE)) {
+        const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('[Settings] Failed to load settings.json:', e);
+    }
+    return { auto_replies: [], auto_replies_enabled: true };
+  };
+
+  const saveSettingsToDisk = (data: any) => {
+    try {
+      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+      console.warn('[Settings] Failed to save settings.json:', e);
+    }
+  };
+
+  const loadBatchesFromDisk = (): any[] => {
+    try {
+      if (fs.existsSync(BATCHES_FILE)) {
+        const raw = fs.readFileSync(BATCHES_FILE, 'utf8');
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('[Batches] Failed to load batches.json:', e);
+    }
+    return [];
+  };
+
+  const saveBatchesToDisk = (batches: any[]) => {
+    try {
+      fs.writeFileSync(BATCHES_FILE, JSON.stringify(batches, null, 2), 'utf8');
+    } catch (e) {
+      console.warn('[Batches] Failed to save batches.json:', e);
+    }
+  };
+
+  // Initial state from disk
+  const initialSettings = loadSettingsFromDisk();
+  let autoRepliesEnabled: boolean = initialSettings.auto_replies_enabled !== false;
+  let autoReplyRulesStore: any[] = Array.isArray(initialSettings.auto_replies) && initialSettings.auto_replies.length > 0
+    ? initialSettings.auto_replies
+    : [
+        {
+          id: 'rule_1',
+          keyword: 'السلام عليكم',
+          replyText: 'وعليكم السلام ورحمة الله وبركاته، مرحباً بك! كيف يمكنني مساعدتك؟ 🌸',
+          reply: 'وعليكم السلام ورحمة الله وبركاته، مرحباً بك! كيف يمكنني مساعدتك؟ 🌸',
+          matchType: 'contains',
+          match: 'contains',
+          scope: 'all',
+          isEnabled: true,
+          timesTriggered: 0,
+          used_count: 0,
+          last_used: 0,
+        },
+        {
+          id: 'rule_2',
+          keyword: 'الأسعار',
+          replyText: 'أهلاً بك! يمكنك الاطلاع على باقاتنا وعروضنا الحالية عبر الرابط المثبت أو إرسال تفاصيل طلبك مباشرة ✨',
+          reply: 'أهلاً بك! يمكنك الاطلاع على باقاتنا وعروضنا الحالية عبر الرابط المثبت أو إرسال تفاصيل طلبك مباشرة ✨',
+          matchType: 'contains',
+          match: 'contains',
+          scope: 'all',
+          isEnabled: true,
+          timesTriggered: 0,
+          used_count: 0,
+          last_used: 0,
+        },
+      ];
+
+  const persistAutoReplies = () => {
+    const curr = loadSettingsFromDisk();
+    curr.auto_replies = autoReplyRulesStore;
+    curr.auto_replies_enabled = autoRepliesEnabled;
+    saveSettingsToDisk(curr);
+  };
+
+  let sentBatchesStore: any[] = loadBatchesFromDisk();
+  if (!sentBatchesStore || sentBatchesStore.length === 0) {
+    sentBatchesStore = [
+      {
+        id: 'batch_101',
+        text: 'السلام عليكم ورحمة الله، يتوفر لدينا خدمات دعم أكاديمي متخصصة 📚',
+        hasImages: false,
+        imagesCount: 0,
+        groupsCount: 3,
+        targets: [
+          { chatId: '-1001749201928', chatTitle: 'قروب المطورين العربي', messageId: '8901' },
+          { chatId: '-1001594839201', chatTitle: 'منصة التقنية والذكاء الاصطناعي', messageId: '8902' },
+          { chatId: '-1001892019283', chatTitle: 'ملتقى رواد الأعمال', messageId: '8903' },
+        ],
+        date: '2026-09-04',
+        timestamp: '10:45 AM',
+      },
+    ];
+    saveBatchesToDisk(sentBatchesStore);
+  }
+
+  // Real Auto Reply Handler Function
+  async function handleAutoReplyForMessage(
+    client: TelegramClient,
+    msg: any,
+    meta: { chatId: string; peerIdStr: string; senderId: string; senderName: string; text: string }
+  ) {
+    if (!autoRepliesEnabled) return;
+    const rawText = (meta.text || '').trim();
+    if (!rawText) return;
+    const normalizedText = normalizeArabicText(rawText);
+
+    // Determine chat scope
+    const isPrivate = !meta.chatId.startsWith('chat_-') && !meta.peerIdStr.startsWith('-') && !msg.isGroup && !msg.isChannel;
+    const isGroup = !isPrivate;
+
+    for (const rule of autoReplyRulesStore) {
+      if (!rule.isEnabled) continue;
+
+      // Scope check
+      if (rule.scope === 'private' && !isPrivate) continue;
+      if (rule.scope === 'groups' && !isGroup) continue;
+
+      let isMatch = false;
+      const ruleKw = (rule.keyword || '').trim();
+      const normalizedKw = normalizeArabicText(ruleKw);
+
+      if (rule.matchType === 'exact' || rule.match === 'exact') {
+        isMatch = normalizedText === normalizedKw || rawText.toLowerCase() === ruleKw.toLowerCase();
+      } else if (rule.matchType === 'regex' || rule.match === 'regex') {
+        try {
+          const re = new RegExp(ruleKw, 'i');
+          isMatch = re.test(rawText);
+        } catch (_) {
+          isMatch = false;
+        }
+      } else {
+        // contains
+        isMatch = normalizedText.includes(normalizedKw) || rawText.toLowerCase().includes(ruleKw.toLowerCase());
+      }
+
+      if (isMatch) {
+        console.log(`[AutoReply] 🤖 Triggered rule "${rule.keyword}" for chat "${meta.chatId}"`);
+        try {
+          const replyContent = rule.replyText || rule.reply || '';
+          if (!replyContent) continue;
+
+          const peer = await resolvePeerTarget(client, meta.chatId);
+          await client.sendMessage(peer, {
+            message: replyContent,
+            replyTo: msg.id,
+          });
+
+          // Update usage statistics
+          rule.timesTriggered = (rule.timesTriggered || 0) + 1;
+          rule.used_count = (rule.used_count || 0) + 1;
+          rule.last_used = Date.now();
+          persistAutoReplies();
+
+          io.emit('auto_reply_triggered', {
+            ruleId: rule.id,
+            chatId: meta.chatId,
+            messageId: msg.id,
+            replyText: replyContent,
+            chatTitle: meta.senderName,
+            timestamp: Date.now(),
+          });
+          break; // One auto-reply per incoming message
+        } catch (replyErr: any) {
+          console.warn(`[AutoReply] Failed to send auto-reply to ${meta.chatId}:`, replyErr?.message || replyErr);
+        }
+      }
+    }
+  }
 
   // Helper to safely configure TelegramClient with log level, error boundary, and updates listeners
   const configureTelegramClient = (client: TelegramClient, sessionKey?: string): TelegramClient => {
@@ -484,18 +1044,20 @@ async function startServer() {
 
           const msgTimestampSec = msg.date || Math.floor(Date.now() / 1000);
           const msgDate = new Date(msgTimestampSec * 1000);
+          const isOut = Boolean(msg.out);
           const formattedMsg = {
             id: String(msg.id),
             chatId,
             peerId: peerIdStr,
             senderId,
-            senderName,
+            senderName: isOut ? 'أنت' : senderName,
             text: textSnippet,
-            timestamp: msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timestamp: msgDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }),
             date: msgDate.toISOString().split('T')[0],
             epoch: msgDate.getTime(),
             rawDate: msgTimestampSec,
-            isOutgoing: Boolean(msg.out),
+            out: isOut,
+            isOutgoing: isOut,
             status: 'read',
             mediaType,
           };
@@ -504,30 +1066,201 @@ async function startServer() {
             type: 'new_message',
             chatId,
             peerId: peerIdStr,
+            out: isOut,
             message: formattedMsg,
             epoch: Date.now(),
           });
 
-          // Dispatch Web Push notification to subscribers for background delivery
+          // Dispatch Web Push notification to all subscribers for background delivery
           if (!msg.out) {
-            sendWebPushNotificationToSubscribers(
-              {
+            sendWebPushNotificationToSubscribers({
+              title: senderName || 'رسالة جديدة في تيليجرام',
+              body: textSnippet || 'رسالة جديدة',
+              icon: 'https://telegram.org/img/t_logo.png',
+              badge: '/telegram-logo.svg',
+              tag: `tg_chat_${chatId}`,
+              data: {
                 title: senderName || 'رسالة جديدة في تيليجرام',
                 body: textSnippet || 'رسالة جديدة',
-                icon: 'https://telegram.org/img/t_logo.png',
-                badge: '/telegram-logo.svg',
-                tag: `tg_chat_${chatId}`,
-                data: {
-                  dialog_id: chatId,
+                dialog_id: chatId,
+                chatId,
+                peerId: peerIdStr,
+                messageId: String(msg.id),
+                timestamp: Date.now(),
+                url: `/?dialog_id=${encodeURIComponent(chatId)}#/chat/${encodeURIComponent(chatId)}`,
+              },
+            }).catch((err) => {
+              console.warn('[WebPush] Incoming message push dispatch error:', err);
+            });
+          }
+
+          // ==============================================================
+          // KEYWORD MONITORING ENGINE (AUTOMATIC, REAL-TIME & PERSISTENT)
+          // ==============================================================
+          // 1. Strictly ignore outgoing messages (out === true)
+          if (!isOut && !msg.out && monitoringEnabled && textSnippet) {
+            // 2. Prevent duplicate processing using _processed_msg_ids
+            const msgUniqueKey = `${chatId}_${msg.id}`;
+            if (!_processed_msg_ids.has(msgUniqueKey)) {
+              _processed_msg_ids.add(msgUniqueKey);
+              if (_processed_msg_ids.size > 10000) {
+                const it = _processed_msg_ids.values();
+                for (let i = 0; i < 2000; i++) {
+                  const n = it.next();
+                  if (n.done) break;
+                  _processed_msg_ids.delete(n.value);
+                }
+              }
+
+              // 3. Normalize text and check for compound sentences/phrases
+              const rawMsgText = textSnippet.trim();
+              const normalizedMsgText = normalizeArabicText(rawMsgText);
+
+              let matchedKeyword: string | null = null;
+              for (const kw of MONITOR_KEYWORDS) {
+                const trimmedKw = kw.trim();
+                if (!trimmedKw) continue;
+                const normalizedKw = normalizeArabicText(trimmedKw);
+                if (
+                  rawMsgText.toLowerCase().includes(trimmedKw.toLowerCase()) ||
+                  normalizedMsgText.includes(normalizedKw)
+                ) {
+                  matchedKeyword = trimmedKw;
+                  break;
+                }
+              }
+
+              if (matchedKeyword) {
+                console.log(`[Monitoring] 🚨 Matched keyword: "${matchedKeyword}" in message: "${rawMsgText.substring(0, 50)}"`);
+
+                // Resolve group / chat metadata
+                let groupTitle = senderName || 'المحادثة';
+                let groupUrl = '';
+                try {
+                  const chat = await msg.getChat().catch(() => null);
+                  if (chat) {
+                    groupTitle = chat.title || chat.firstName || groupTitle;
+                    if (chat.username) {
+                      groupUrl = `https://t.me/${chat.username}/${msg.id}`;
+                    } else if (chat.id) {
+                      const rawPeer = String(chat.id).replace(/^-100/, '').replace(/^-/, '');
+                      groupUrl = `https://t.me/c/${rawPeer}/${msg.id}`;
+                    }
+                  }
+                } catch (_) {}
+
+                // Resolve sender metadata
+                let senderTitle = senderName || 'مستخدم';
+                let senderUsername = '';
+                let senderUrl = '';
+                try {
+                  const sender = await msg.getSender().catch(() => null);
+                  if (sender) {
+                    senderTitle =
+                      [sender.firstName || sender.first_name, sender.lastName || sender.last_name]
+                        .filter(Boolean)
+                        .join(' ') ||
+                      sender.username ||
+                      senderTitle;
+                    if (sender.username) {
+                      senderUsername = sender.username;
+                      senderUrl = `https://t.me/${sender.username}`;
+                    }
+                  }
+                } catch (_) {}
+
+                const formattedTime = msgDate.toLocaleTimeString('ar-EG', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: true,
+                });
+
+                const alertId = `alert_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                const alertItem: AlertLogItem = {
+                  id: alertId,
+                  messageId: String(msg.id),
                   chatId,
                   peerId: peerIdStr,
-                  messageId: String(msg.id),
+                  keyword: matchedKeyword,
+                  group: groupTitle,
+                  groupUrl: groupUrl || undefined,
+                  sender: senderTitle,
+                  senderUrl: senderUrl || undefined,
+                  time: formattedTime,
+                  text: rawMsgText,
                   timestamp: Date.now(),
-                  url: `/#/chat/${chatId}`,
-                },
-              },
-              sessionKey ? { sessionString: sessionKey, phone: sessionKey } : undefined
-            ).catch(() => {});
+                };
+
+                // Store in USER_LOGS (keep last 200)
+                USER_LOGS.unshift(alertItem);
+                if (USER_LOGS.length > 200) {
+                  USER_LOGS.length = 200;
+                }
+
+                // أ. إشعار تيليجرام: إرسال رسالة منسقة إلى Saved Messages ('me')
+                try {
+                  const savedMsgContent =
+                    `🚨 *تنبيه رصد كلمة مفتاحية* 🚨\n\n` +
+                    `🔍 *العبارة المرصودة:* ${matchedKeyword}\n` +
+                    `👥 *المجموعة:* ${groupTitle}${groupUrl ? `\n🔗 رابط المجموعة: ${groupUrl}` : ''}\n` +
+                    `👤 *المرسل:* ${senderTitle}${senderUrl ? `\n🔗 حساب المرسل: ${senderUrl}` : (senderUsername ? ` (@${senderUsername})` : '')}\n` +
+                    `🕒 *الوقت:* ${formattedTime}\n` +
+                    `💬 *نص الرسالة:*\n${rawMsgText}\n`;
+
+                  client.sendMessage('me', {
+                    message: savedMsgContent,
+                  }).catch((err: any) => {
+                    console.warn('[Monitoring] Saved Messages dispatch error:', err?.message || err);
+                  });
+                } catch (savedErr) {
+                  console.warn('[Monitoring] Saved Messages error:', savedErr);
+                }
+
+                // ب. إشعار ويب (Socket.IO): بث حدث new_alert مع كائن JSON كامل
+                try {
+                  io.emit('new_alert', alertItem);
+                  broadcastTelegramUpdate({
+                    type: 'new_alert',
+                    alert: alertItem,
+                  });
+                } catch (sockErr) {
+                  console.warn('[Monitoring] Socket.IO broadcast error:', sockErr);
+                }
+
+                // ج. إشعار Web Push: استدعاء send_push_notification
+                try {
+                  await send_push_notification({
+                    title: `🔔 تنبيه: ${matchedKeyword}`,
+                    body: `في ${groupTitle} من ${senderTitle}`,
+                    icon: 'https://telegram.org/img/t_logo.png',
+                    badge: '/telegram-logo.svg',
+                    tag: `tg_alert_${alertId}`,
+                    data: {
+                      type: 'new_alert',
+                      ...alertItem,
+                      url: `/#/chat/${chatId}`,
+                    },
+                  });
+                } catch (pushErr) {
+                  console.warn('[Monitoring] Web Push alert error:', pushErr);
+                }
+              }
+            }
+          }
+
+          // ==============================================================
+          // AUTO REPLIES ENGINE (AUTOMATIC, REAL GRAMJS RESPONSE)
+          // ==============================================================
+          if (!isOut && !msg.out && autoRepliesEnabled && textSnippet) {
+            handleAutoReplyForMessage(client, msg, {
+              chatId,
+              peerIdStr,
+              senderId,
+              senderName,
+              text: textSnippet,
+            }).catch((err) => {
+              console.warn('[AutoReply] Handler error:', err);
+            });
           }
         } catch (eventErr) {
           console.warn('[TelegramClient] Event handler error:', eventErr);
@@ -694,7 +1427,35 @@ async function startServer() {
   };
 
   // Helper to obtain or reconnect live TelegramClient for an authenticated user session
-  const getClientForSession = async (sessionString?: string, phone?: string): Promise<TelegramClient | null> => {
+  const getClientForSession = async (sessionString?: string, phone?: string, accountIndex?: number): Promise<TelegramClient | null> => {
+    // 0. If accountIndex is provided, prioritize loading from isolated sessions/account_{accountIndex}.json
+    if (typeof accountIndex === 'number' && accountIndex >= 0 && accountIndex < 4) {
+      const activeInstance = accountInstances.get(accountIndex);
+      if (activeInstance && activeInstance.client) {
+        if (activeInstance.client.connected) return activeInstance.client;
+        const ok = await connectWithTimeout(activeInstance.client, 2500);
+        if (ok) return activeInstance.client;
+      }
+      const stored = readAccountSession(accountIndex);
+      if (stored && stored.session) {
+        sessionString = stored.session;
+      }
+    }
+
+    // Fallback to active currentAccount if no specific session or phone was passed
+    if (!sessionString && !phone) {
+      const curInst = accountInstances.get(currentAccount);
+      if (curInst && curInst.client && curInst.client.connected) {
+        return curInst.client;
+      }
+      if (mainTelegramClient && mainTelegramClient.connected) {
+        return mainTelegramClient;
+      }
+      const storedCur = readAccountSession(currentAccount);
+      if (storedCur && storedCur.session) {
+        sessionString = storedCur.session;
+      }
+    }
     const sessionKey = sessionString?.trim() || (phone ? formatE164Phone(phone) : '');
     if (sessionKey) {
       const lastFailed = sessionFailureCooldowns.get(sessionKey);
@@ -848,13 +1609,22 @@ async function startServer() {
       sessionFailureCooldowns.set(sessionKey, Date.now());
     }
 
-    // 3. Fallback to any active authenticated client in memory if only 1 exists
-    if (authenticatedTelegramClients.size === 1) {
-      const singleClient = authenticatedTelegramClients.values().next().value;
-      if (singleClient && singleClient.connected) {
-        const isAuth = await singleClient.checkAuthorization().catch(() => false);
-        if (isAuth) return singleClient;
+    // 3. Fallback to any active authenticated client in memory
+    for (const client of authenticatedTelegramClients.values()) {
+      if (client && client.connected) {
+        const isAuth = await client.checkAuthorization().catch(() => false);
+        if (isAuth) return client;
       }
+    }
+    for (const sess of realTelegramSessions.values()) {
+      if (sess.client && sess.client.connected) {
+        const isAuth = await sess.client.checkAuthorization().catch(() => false);
+        if (isAuth) return sess.client;
+      }
+    }
+    if (mainTelegramClient && mainTelegramClient.connected) {
+      const isAuth = await mainTelegramClient.checkAuthorization().catch(() => false);
+      if (isAuth) return mainTelegramClient;
     }
 
     return null;
@@ -1021,7 +1791,7 @@ async function startServer() {
         const msg = dialog.message;
         const msgTimestampSec = msg.date || Math.floor(Date.now() / 1000);
         const msgDate = new Date(msgTimestampSec * 1000);
-        const timeStr = msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const timeStr = msgDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true });
         const dateStr = msgDate.toISOString().split('T')[0];
 
         let msgSnippet = msg.message || '';
@@ -1080,7 +1850,7 @@ async function startServer() {
         memberCount: entity?.participantsCount || entity?.participants_count || (isChatGroup || isBroadcast ? 120 : undefined),
         description: entity?.about || '',
         draft: dialog.draft?.text || undefined,
-        draftTimestamp: dialog.draft?.date ? new Date(dialog.draft.date * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined,
+        draftTimestamp: dialog.draft?.date ? new Date(dialog.draft.date * 1000).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }) : undefined,
         lastMessage: lastMsgFormatted,
         isChannel: isBroadcast,
         isGroup: isChatGroup,
@@ -1224,7 +1994,7 @@ async function startServer() {
         for (const m of (rawMessages || []).reverse()) {
           const msgTimestampSec = m.date || Math.floor(Date.now() / 1000);
           const mDate = new Date(msgTimestampSec * 1000);
-          const timeStr = mDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const timeStr = mDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true });
           const dateStr = mDate.toISOString().split('T')[0];
 
           let mediaData: any = undefined;
@@ -1372,54 +2142,7 @@ async function startServer() {
       } catch (mtprotoErr: any) {
         const errStr = mtprotoErr?.message || mtprotoErr?.errorMessage || String(mtprotoErr);
         console.warn('[MTProto] Direct connection/sendCode notice:', errStr);
-
-        // If it's a specific Telegram validation/flood error, rethrow to report accurately
-        if (
-          errStr.includes('PHONE_NUMBER_INVALID') ||
-          errStr.includes('FLOOD_WAIT') ||
-          errStr.includes('PHONE_NUMBER_FLOOD') ||
-          errStr.includes('API_ID_INVALID')
-        ) {
-          throw mtprotoErr;
-        }
-
-        // In restricted network or sandbox environment, provide smooth demo verification fallback
-        console.log('[MTProto] Providing graceful sandbox session fallback for uninterrupted testing');
-        const fallbackCode = '77700';
-        const phoneCodeHash = `hash_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-
-        realTelegramSessions.set(formattedPhone, {
-          client: undefined,
-          phone: formattedPhone,
-          phoneCodeHash,
-          deliveryType: 'app',
-          apiId: numericApiId,
-          apiHash: stringApiHash,
-          createdAt: Date.now(),
-          fallbackCode,
-          isSandboxFallback: true,
-        });
-
-        return res.json({
-          success: true,
-          phone: formattedPhone,
-          phoneCodeHash,
-          deliveryType: 'app',
-          isRealTelegramMTProto: false,
-          isSandboxDemo: true,
-          loginCodeHint: fallbackCode,
-          codeLength: 5,
-          timeout: 60,
-          expiresInSeconds: 300,
-          message: 'تم إرسال رمز تسجيل الدخول (77700) بنجاح عبر سحابة تيليجرام.',
-          mtproto: {
-            layer: 184,
-            dcId: 4,
-            apiId: numericApiId,
-            type: 'auth.sentCodeTypeApp',
-            officialTelegramDelivery: false,
-          },
-        });
+        throw mtprotoErr;
       }
 
       const resultAny = sendCodeResult as any;
@@ -1496,40 +2219,10 @@ async function startServer() {
         });
       }
       if (errMsg.includes('TIMEOUT') || errMsg.includes('ETIMEDOUT') || errMsg.includes('timeout') || errMsg.includes('CONNECT_FAILED')) {
-        // Provide graceful session response
-        const fallbackCode = '77700';
-        const phoneCodeHash = `hash_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-        realTelegramSessions.set(formattedPhone, {
-          client: undefined,
-          phone: formattedPhone,
-          phoneCodeHash,
-          deliveryType: 'app',
-          apiId: numericApiId,
-          apiHash: stringApiHash,
-          createdAt: Date.now(),
-          fallbackCode,
-          isSandboxFallback: true,
-        });
-
-        return res.json({
-          success: true,
-          phone: formattedPhone,
-          phoneCodeHash,
-          deliveryType: 'app',
-          isRealTelegramMTProto: false,
-          isSandboxDemo: true,
-          loginCodeHint: fallbackCode,
-          codeLength: 5,
-          timeout: 60,
-          expiresInSeconds: 300,
-          message: 'تم إرسال رمز تسجيل الدخول (77700) بنجاح عبر سحابة تيليجرام.',
-          mtproto: {
-            layer: 184,
-            dcId: 4,
-            apiId: numericApiId,
-            type: 'auth.sentCodeTypeApp',
-            officialTelegramDelivery: false,
-          },
+        return res.status(504).json({
+          success: false,
+          error: 'TIMEOUT',
+          message: 'انتهت مهلة الاتصال بخوادم تيليجرام أثناء إرسال الرمز. يرجى التحقق من اتصال الإنترنت وإعادة المحاولة.',
         });
       }
 
@@ -1594,27 +2287,19 @@ async function startServer() {
             message: 'تمت إعادة إرسال رمز التحقق الرسمي من خوادم تيليجرام بنجاح.',
           });
         } catch (error: any) {
-          console.error('[MTProto] Real resendCode fallback notice:', error);
-          sessionData.createdAt = Date.now();
-          return res.json({
-            success: true,
-            phone: formattedPhone,
-            phoneCodeHash: sessionData.phoneCodeHash,
-            isRealTelegramMTProto: false,
-            timeout: 60,
-            message: 'تمت إعادة إرسال رمز التحقق بنجاح.',
+          const errMsg = error?.errorMessage || error?.message || String(error);
+          console.error('[MTProto] Real resendCode failed:', errMsg);
+          return res.status(400).json({
+            success: false,
+            error: error?.errorMessage || 'RESEND_CODE_FAILED',
+            message: `فشلت إعادة إرسال الرمز: ${errMsg}`,
           });
         }
       } else {
-        // Fallback / Sandbox resend
-        sessionData.createdAt = Date.now();
-        return res.json({
-          success: true,
-          phone: formattedPhone,
-          phoneCodeHash: sessionData.phoneCodeHash,
-          isRealTelegramMTProto: false,
-          timeout: 60,
-          message: 'تمت إعادة إرسال رمز التحقق (77700) بنجاح.',
+        return res.status(400).json({
+          success: false,
+          error: 'SESSION_EXPIRED',
+          message: 'انتهت صلاحية الجلسة أو تعذر العثور على عميل تيليجرام نشط، يرجى طلب الرمز من جديد.',
         });
       }
     }
@@ -1632,36 +2317,11 @@ async function startServer() {
     const cleanCode = (code || '').trim();
 
     const sessionData = realTelegramSessions.get(formattedPhone);
-    if (!sessionData) {
+    if (!sessionData || !sessionData.client) {
       return res.status(400).json({
         success: false,
+        error: 'SESSION_NOT_FOUND',
         message: 'انتهت صلاحية الجلسة أو لم يتم طلب رمز مسبقاً، يرجى طلب الرمز من جديد.',
-      });
-    }
-
-    // If sandbox / fallback session
-    if (sessionData.isSandboxFallback || !sessionData.client) {
-      const sessionId = `tg_sess_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-      const mockSessionString = `1BAAA${crypto.randomBytes(32).toString('base64')}`;
-      return res.json({
-        success: true,
-        verified: true,
-        isRealTelegramMTProto: false,
-        phone: formattedPhone,
-        sessionId,
-        sessionString: mockSessionString,
-        user: {
-          id: String(Math.floor(100000000 + Math.random() * 900000000)),
-          name: 'مستخدم تيليجرام',
-          firstName: 'مستخدم',
-          lastName: 'تيليجرام',
-          username: `user_${formattedPhone.replace(/\D/g, '').slice(-4)}`,
-          phone: formattedPhone,
-          avatar: '',
-          isVerified: false,
-          isPremium: false,
-        },
-        message: 'تم تسجيل الدخول بنجاح عبر بروتوكول تيليجرام السحابي.',
       });
     }
 
@@ -1720,15 +2380,11 @@ async function startServer() {
           clearTimeout(signInTimer);
 
           if (!signInResult) {
-            console.warn('[MTProto] Direct auth.signIn timed out, providing authorized session fallback.');
-            authorizedUser = {
-              id: Date.now(),
-              firstName: 'مستخدم تيليجرام',
-              username: `user_${formattedPhone.replace(/\D/g, '').slice(-4)}`,
-              phone: formattedPhone,
-            };
-          } else {
-            authorizedUser = signInResult.user || (await sessionData.client.getMe().catch(() => null)) || {};
+            throw new Error('SIGN_IN_TIMEOUT');
+          }
+          authorizedUser = signInResult.user || (await sessionData.client.getMe().catch(() => null));
+          if (!authorizedUser) {
+            throw new Error('AUTH_KEY_UNREGISTERED');
           }
         } catch (signInErr: any) {
           const signMsg = signInErr.message || signInErr.errorMessage || String(signInErr);
@@ -1762,9 +2418,35 @@ async function startServer() {
       const savedSessionString = sessionData.client.session.save() as unknown as string;
       const sessionId = `tg_sess_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-      // Save client in active authenticated clients map
-      if (savedSessionString) {
-        authenticatedTelegramClients.set(savedSessionString, sessionData.client);
+      // 1. Determine target account index (0, 1, 2, or 3)
+      let targetAccountIndex = 0;
+      if (typeof req.body.currentAccount === 'number' && req.body.currentAccount >= 0 && req.body.currentAccount < 4) {
+        targetAccountIndex = req.body.currentAccount;
+      } else if (typeof req.body.accountIndex === 'number' && req.body.accountIndex >= 0 && req.body.accountIndex < 4) {
+        targetAccountIndex = req.body.accountIndex;
+      } else if (typeof req.body.index === 'number' && req.body.index >= 0 && req.body.index < 4) {
+        targetAccountIndex = req.body.index;
+      } else {
+        const diskSessions = loadAllAccountSessionsFromDisk();
+        let foundExisting = -1;
+        let firstFree = -1;
+        for (let i = 0; i < 4; i++) {
+          const s = diskSessions.get(i);
+          if (s && s.phone === formattedPhone) {
+            foundExisting = i;
+            break;
+          }
+          if (!s && firstFree === -1) {
+            firstFree = i;
+          }
+        }
+        if (foundExisting !== -1) {
+          targetAccountIndex = foundExisting;
+        } else if (firstFree !== -1) {
+          targetAccountIndex = firstFree;
+        } else {
+          targetAccountIndex = currentAccount;
+        }
       }
 
       // Download user's real avatar immediately with strict timeout
@@ -1783,6 +2465,39 @@ async function startServer() {
         }
       } catch (avErr: any) {
         console.warn('[MTProto] Profile photo download skipped at login (safe fallback):', avErr?.message || avErr);
+      }
+
+
+      // 2. Save session strictly to isolated file: sessions/account_{targetAccountIndex}.json
+      // Format inside file: { "session": "...", "userId": "...", "phone": "..." }
+      saveAccountSession(targetAccountIndex, {
+        session: savedSessionString,
+        userId: String(authorizedUser.id || Date.now()),
+        phone: formattedPhone,
+        name: [authorizedUser.firstName || authorizedUser.first_name, authorizedUser.lastName || authorizedUser.last_name].filter(Boolean).join(' ') || 'مستخدم تيليجرام',
+        username: authorizedUser.username || '',
+        avatar: userAvatar,
+        isPremium: Boolean(authorizedUser.premium),
+      });
+
+      // 3. Update runtime USERS and AccountInstance
+      USERS.set(targetAccountIndex, authorizedUser);
+      accountInstances.set(targetAccountIndex, {
+        currentAccount: targetAccountIndex,
+        userId: String(authorizedUser.id || Date.now()),
+        phone: formattedPhone,
+        sessionString: savedSessionString,
+        client: sessionData.client,
+        user: authorizedUser,
+        lastActive: new Date().toISOString(),
+      });
+
+      currentAccount = targetAccountIndex;
+      mainTelegramClient = sessionData.client;
+
+      // Save client in active authenticated clients map
+      if (savedSessionString) {
+        authenticatedTelegramClients.set(savedSessionString, sessionData.client);
       }
 
       return res.json({
@@ -1903,61 +2618,384 @@ async function startServer() {
     });
   });
 
+  // Robust helper to sanitize and resolve any Telegram peer target (usernames, links, channel IDs, invite links, bullet items)
+  async function resolvePeerTarget(client: TelegramClient, rawChatId: any): Promise<any> {
+    if (!rawChatId || rawChatId === 'me' || rawChatId === 'chat_saved_messages' || rawChatId === 'saved_messages') {
+      return 'me';
+    }
+
+    if (typeof rawChatId === 'object' && rawChatId !== null) {
+      return rawChatId;
+    }
+
+    let clean = String(rawChatId).trim();
+    // Strip common prefixes: custom_, chat_, user_, channel_
+    clean = clean.replace(/^(?:custom_|chat_|user_|channel_)+/i, '').trim();
+
+    // Strip bullet markers (·, •, -, *, etc.), list numbers (1., 2-), quotes, and whitespace
+    clean = clean.replace(/^[\s·•\-\*\u2022\u00B7\u2023\u25E6\u2043\u2219]+/, '').trim();
+    clean = clean.replace(/^(\d+[\.\)\-]\s*)/, '').trim();
+    clean = clean.replace(/^['"`]+|['"`]+$/g, '').trim();
+    clean = clean.replace(/^(?:custom_|chat_|user_|channel_)+/i, '').trim();
+
+    if (!clean || clean === 'me') {
+      return 'me';
+    }
+
+    // 1. Private Invite Link: https://t.me/+hash, t.me/joinchat/hash, tg://join?invite=hash, or raw +hash
+    const inviteMatch = clean.match(/^(?:\+|https?:\/\/t(?:elegram)?\.me\/\+|https?:\/\/t(?:elegram)?\.me\/joinchat\/|tg:\/\/join\?invite=)([a-zA-Z0-9_-]+)/i) ||
+                        clean.match(/(?:https?:\/\/)?(?:t(?:elegram)?\.me\/(?:\+|joinchat\/)|tg:\/\/join\?invite=)([a-zA-Z0-9_-]+)/i);
+    if (inviteMatch) {
+      const inviteHash = inviteMatch[1];
+      try {
+        const joinRes: any = await client.invoke(new Api.messages.ImportChatInvite({ hash: inviteHash }));
+        if (joinRes && joinRes.chats && joinRes.chats[0]) {
+          return joinRes.chats[0];
+        }
+      } catch (invErr: any) {
+        const invMsg = invErr?.errorMessage || invErr?.message || '';
+        if (invMsg.includes('USER_ALREADY_PARTICIPANT')) {
+          const checkRes: any = await client.invoke(new Api.messages.CheckChatInvite({ hash: inviteHash })).catch(() => null);
+          if (checkRes && checkRes.chat) {
+            return checkRes.chat;
+          }
+        }
+      }
+    }
+
+    // 2. Channel Post / Topic Link: https://t.me/username/1234 -> username
+    const postMatch = clean.match(/(?:https?:\/\/)?(?:t(?:elegram)?\.me\/)([a-zA-Z0-9_]{3,32})\/(\d+)/i);
+    if (postMatch && postMatch[1] !== 'c' && postMatch[1] !== 'joinchat') {
+      clean = postMatch[1];
+    }
+
+    // 3. Channel internal ID: https://t.me/c/1234567890 -> -1001234567890
+    const internalMatch = clean.match(/(?:https?:\/\/)?(?:t(?:elegram)?\.me\/c\/)(\d+)/i);
+    if (internalMatch) {
+      clean = `-100${internalMatch[1]}`;
+    }
+
+    // 4. Standard Public Link: https://t.me/username or t.me/username
+    const urlMatch = clean.match(/(?:https?:\/\/)?(?:t(?:elegram)?\.me\/)([a-zA-Z0-9_]{3,32})\/?$/i);
+    if (urlMatch) {
+      clean = urlMatch[1];
+    }
+
+    // 5. Remove @ prefix for username
+    if (clean.startsWith('@')) {
+      clean = clean.substring(1);
+    }
+
+    // 6. Numeric IDs: -1001234567890 or 123456789
+    if (/^-?\d{5,19}$/.test(clean)) {
+      try {
+        const numId = Number(clean);
+        const entity = await client.getEntity(numId).catch(() => null);
+        if (entity) return entity;
+      } catch {}
+      try {
+        const bigId = BigInt(clean);
+        const entity = await client.getEntity(bigId as any).catch(() => null);
+        if (entity) return entity;
+      } catch {}
+    }
+
+    // 7. Resolve entity from Telegram Cloud (contacts.resolveUsername)
+    try {
+      const entity = await client.getEntity(clean);
+      if (entity) return entity;
+    } catch (entityErr: any) {
+      // If getEntity threw an error (e.g. CHANNEL_PRIVATE or username lookup failure), check user's loaded dialogs
+      try {
+        const dialogs = await client.getDialogs({ limit: 200 }).catch(() => []);
+        const targetCleanNum = clean.replace(/^-100/, '').replace(/^-/, '');
+        const found = dialogs.find((d: any) => {
+          const title = (d.title || '').toLowerCase();
+          const uname = (d.entity?.username || '').toLowerCase();
+          const targetLower = clean.toLowerCase();
+          const dCleanId = String((d.entity as any)?.id || d.id || '').replace(/^-100/, '').replace(/^-/, '');
+          return (
+            uname === targetLower ||
+            title === targetLower ||
+            String(d.id) === clean ||
+            String((d.entity as any)?.id) === clean ||
+            (targetCleanNum && dCleanId === targetCleanNum)
+          );
+        });
+        if (found && found.entity) {
+          return found.entity;
+        }
+      } catch {}
+      throw entityErr;
+    }
+
+    return clean;
+  }
+
+  // =========================================================================
+  // وظيفة فحص الحماية الذكية (Group Bot Protection Scanner - isGroupProtected)
+  // =========================================================================
+  async function isGroupProtected(client: any, chatId: any): Promise<boolean> {
+    if (!client || !chatId) return false;
+    try {
+      // 1. Resolve peer to valid GramJS target entity
+      const peer = await resolvePeerTarget(client, chatId).catch(() => chatId);
+      const targetPeer = peer || chatId;
+
+      // 2. Fetch up to 200 participants from Telegram
+      let participants: any[] = [];
+      try {
+        participants = await client.getParticipants(targetPeer, { limit: 200 });
+      } catch (partErr: any) {
+        // Fallback: If regular participants list is restricted or hidden by group admins,
+        // inspect administrators where protection bots (Rose, Shieldy, etc.) reside
+        try {
+          participants = await client.getParticipants(targetPeer, {
+            filter: new Api.ChannelParticipantsAdmins(),
+            limit: 100,
+          });
+        } catch {
+          try {
+            participants = await client.getParticipants(chatId, { limit: 200 });
+          } catch {
+            participants = [];
+          }
+        }
+      }
+
+      if (!Array.isArray(participants) || participants.length === 0) {
+        console.log(`[isGroupProtected] No participants accessible for ${chatId}. Treating as unprotected.`);
+        return false;
+      }
+
+      // 3. Comprehensive list of protection and security bot keywords
+      const protectionKeywords = [
+        'rose',
+        'missrose',
+        'shieldy',
+        'guard',
+        'groupguard',
+        'combot',
+        'antispam',
+        'spamwatch',
+        'safety',
+        'cleaner',
+        'police',
+        'defender',
+        'security',
+        'protect',
+        'banhammer',
+        'grouphelp',
+        'botfather',
+        'shield',
+        'anti',
+        'spam',
+        'clean',
+      ];
+
+      // 4. Iterate over members and check bot === true and name/username matches
+      for (const member of participants) {
+        const isBot = Boolean(member?.bot || (member?.className === 'User' && member?.bot));
+        if (isBot) {
+          const username = (member.username || '').toLowerCase();
+          const firstName = (member.firstName || '').toLowerCase();
+          const lastName = (member.lastName || '').toLowerCase();
+          const fullName = `${firstName} ${lastName}`.trim();
+
+          for (const kw of protectionKeywords) {
+            if (
+              username.includes(kw) ||
+              firstName.includes(kw) ||
+              fullName.includes(kw)
+            ) {
+              console.log(`[isGroupProtected] 🛡️ Detected protection bot in group (${chatId}): @${member.username || member.firstName} matching keyword "${kw}"`);
+              return true;
+            }
+          }
+        }
+      }
+
+      console.log(`[isGroupProtected] ✅ Group (${chatId}) is NOT protected (inspected ${participants.length} participants, no protection bots found)`);
+      return false;
+    } catch (err: any) {
+      console.warn(`[isGroupProtected] Could not check protection for ${chatId}:`, err?.message || err);
+      return false;
+    }
+  }
+
   // 5. Send Message Dispatcher (Real messages.sendMessage RPC)
   app.post('/api/telegram/messages/send', async (req, res) => {
     const { chatId, text, media, replyToMsgId, phone, sessionString } = req.body;
-    const messageId = `msg_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    console.log(`[MTProto] Sending message to chat ${chatId}: "${text?.slice(0, 30)}..."`);
+    console.log(`[MTProto] Sending message to chat "${chatId}": "${text?.slice(0, 30)}..."`);
 
     try {
-      const client = await getClientForSession(sessionString, phone);
-      if (client && client.connected) {
-        // Resolve Peer
-        let peerTarget: any = 'me';
-        if (chatId && chatId !== 'chat_saved_messages') {
-          peerTarget = chatId.startsWith('chat_') ? chatId.replace('chat_', '') : chatId;
-        }
-
-        const sentMsg: any = await client.sendMessage(peerTarget, {
-          message: text || '',
-          replyTo: replyToMsgId ? Number(replyToMsgId) : undefined,
-        });
-
-        console.log(`[MTProto] Message sent successfully via Telegram cloud! ID: ${sentMsg?.id}`);
-
-        return res.json({
-          success: true,
-          isRealTelegramMTProto: true,
-          result: {
-            id: String(sentMsg?.id || messageId),
-            chatId,
-            text,
-            media,
-            replyToMsgId,
-            timestamp,
-            status: 'sent',
-          },
+      const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
+      if (!client || !client.connected) {
+        return res.status(401).json({
+          success: false,
+          error: 'AUTH_KEY_UNREGISTERED',
+          message: 'جلسة تيليجرام غير متصلة أو غير مصادق عليها. يرجى تسجيل الدخول أولاً.',
         });
       }
-    } catch (sendErr) {
-      console.warn('[MTProto] Real Telegram send message failed, returning local state:', sendErr);
-    }
 
-    // Fallback response if offline or mock
-    res.json({
-      success: true,
-      result: {
-        id: messageId,
-        chatId,
-        text,
-        media,
-        replyToMsgId,
-        timestamp,
+      // Resolve Real Entity from Telegram without invalid custom_ or markdown prefixes
+      const peerTarget = await resolvePeerTarget(client, chatId);
+
+      let sentMsg: any = null;
+      try {
+        sentMsg = await client.sendMessage(peerTarget, {
+          message: text || '',
+          parseMode: 'md',
+          replyTo: replyToMsgId ? Number(replyToMsgId) : undefined,
+        });
+      } catch (sendError: any) {
+        const sendErrMsg = sendError?.errorMessage || sendError?.message || '';
+        // If user is not yet a participant of a public channel/supergroup, attempt to join first
+        if (
+          (sendErrMsg.includes('USER_NOT_PARTICIPANT') || sendErrMsg.includes('CHAT_WRITE_FORBIDDEN')) &&
+          (peerTarget?.className === 'Channel' || peerTarget?.broadcast || peerTarget?.megagroup)
+        ) {
+          try {
+            console.log(`[MTProto] Attempting to join channel/group before sending message...`);
+            await client.invoke(new Api.channels.JoinChannel({ channel: peerTarget }));
+            sentMsg = await client.sendMessage(peerTarget, {
+              message: text || '',
+              parseMode: 'md',
+              replyTo: replyToMsgId ? Number(replyToMsgId) : undefined,
+            });
+          } catch (retryErr) {
+            throw sendError;
+          }
+        } else {
+          throw sendError;
+        }
+      }
+
+      console.log(`[MTProto] Message sent successfully via Telegram cloud! ID: ${sentMsg?.id}`);
+
+      // Extract accurate peerId and message timestamps
+      const msgTimestampSec = sentMsg?.date || Math.floor(Date.now() / 1000);
+      const msgDate = new Date(msgTimestampSec * 1000);
+      const peerIdClean = String(
+        peerTarget?.id ||
+        peerTarget?.userId ||
+        peerTarget?.channelId ||
+        peerTarget?.chatId ||
+        chatId.replace(/^chat_/, '')
+      );
+      const fullChatId = chatId.startsWith('chat_') ? chatId : `chat_${peerIdClean}`;
+
+      const outgoingMessageObj = {
+        id: String(sentMsg?.id || Date.now()),
+        chatId: fullChatId,
+        peerId: peerIdClean,
+        senderId: 'me',
+        senderName: 'أنت',
+        text: text || sentMsg?.message || '',
+        timestamp: msgDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        date: msgDate.toISOString().split('T')[0],
+        epoch: msgDate.getTime(),
+        rawDate: msgTimestampSec,
+        out: true,
+        isOutgoing: true,
         status: 'sent',
-      },
-    });
+        media,
+      };
+
+      // Broadcast outgoing message to all WebSocket / Socket.IO & SSE clients
+      broadcastTelegramUpdate({
+        type: 'new_message',
+        chatId: fullChatId,
+        peerId: peerIdClean,
+        out: true,
+        message: outgoingMessageObj,
+        epoch: Date.now(),
+      });
+
+      return res.json({
+        success: true,
+        isRealTelegramMTProto: true,
+        result: {
+          id: outgoingMessageObj.id,
+          chatId: fullChatId,
+          peerId: peerIdClean,
+          text: outgoingMessageObj.text,
+          media,
+          replyToMsgId,
+          timestamp: outgoingMessageObj.timestamp,
+          date: outgoingMessageObj.date,
+          epoch: outgoingMessageObj.epoch,
+          rawDate: outgoingMessageObj.rawDate,
+          out: true,
+          status: 'sent',
+        },
+      });
+    } catch (sendErr: any) {
+      const errMsg = sendErr?.errorMessage || sendErr?.message || String(sendErr);
+
+      // Known Telegram permission/privacy constraints are expected client rejections, not server crashes
+      const isExpectedTelegramConstraint =
+        errMsg.includes('USER_BANNED_IN_CHANNEL') ||
+        errMsg.includes('CHANNEL_PRIVATE') ||
+        errMsg.includes('CHAT_WRITE_FORBIDDEN') ||
+        errMsg.includes('USER_NOT_PARTICIPANT') ||
+        errMsg.includes('FLOOD_WAIT') ||
+        errMsg.includes('SLOWMODE_WAIT') ||
+        errMsg.includes('PEER_ID_INVALID') ||
+        errMsg.includes('USERNAME_NOT_OCCUPIED') ||
+        errMsg.includes('USERNAME_INVALID') ||
+        errMsg.includes('Cannot find any entity') ||
+        errMsg.includes('No user has') ||
+        errMsg.includes('AUTH_KEY_UNREGISTERED');
+
+      if (isExpectedTelegramConstraint) {
+        console.warn(`[MTProto] Telegram send message restricted by peer policy (${errMsg}) for chat "${chatId}"`);
+      } else {
+        console.error('[MTProto] Real Telegram send message failed with unexpected exception:', errMsg);
+      }
+
+      let errorCode = errMsg;
+      let arabicMsg = `فشل إرسال الرسالة عبر خوادم تيليجرام: ${errMsg}`;
+
+      if (errMsg.includes('USER_BANNED_IN_CHANNEL')) {
+        errorCode = 'USER_BANNED_IN_CHANNEL';
+        arabicMsg = 'أنت محظور أو مقيّد من إرسال الرسائل في هذه المجموعة أو القناة بواسطة المشرفين (USER_BANNED_IN_CHANNEL).';
+      } else if (errMsg.includes('CHANNEL_PRIVATE')) {
+        errorCode = 'CHANNEL_PRIVATE';
+        arabicMsg = 'هذه القناة أو المجموعة خاصة ولا يمكن إرسال الرسائل إليها دون أن تكون عضواً منضماً إليها عبر رابط دعوة صالح (CHANNEL_PRIVATE).';
+      } else if (errMsg.includes('CHAT_WRITE_FORBIDDEN')) {
+        errorCode = 'CHAT_WRITE_FORBIDDEN';
+        arabicMsg = 'لا تملك صلاحية النشر في هذه القناة أو المجموعة (مقتصرة على المشرفين فقط).';
+      } else if (errMsg.includes('USER_NOT_PARTICIPANT')) {
+        errorCode = 'USER_NOT_PARTICIPANT';
+        arabicMsg = 'يجب الانضمام إلى المجموعة أولاً لتتمكن من إرسال الرسائل فيها.';
+      } else if (errMsg.includes('FLOOD_WAIT')) {
+        errorCode = 'FLOOD_WAIT';
+        arabicMsg = 'تم حظر الإرسال مؤقتاً من تيليجرام لتفادي التكرار المفرط (Flood Wait). يرجى الانتظار قليلاً.';
+      } else if (errMsg.includes('SLOWMODE_WAIT')) {
+        errorCode = 'SLOWMODE_WAIT';
+        arabicMsg = 'تم تفعيل وضع الإرسال البطيء في هذه المجموعة. يرجى الانتظار قبل إرسال الرسالة التالية.';
+      } else if (errMsg.includes('No user has') || errMsg.includes('USERNAME_NOT_OCCUPIED') || errMsg.includes('Cannot find any entity')) {
+        errorCode = 'PEER_NOT_FOUND';
+        arabicMsg = `لم يتم العثور على أي مستخدم أو قناة تطابق المعرف المدخل على تيليجرام: ${errMsg}`;
+      } else if (errMsg.includes('AUTH_KEY_UNREGISTERED')) {
+        errorCode = 'AUTH_KEY_UNREGISTERED';
+        arabicMsg = 'جلسة تيليجرام غير متصلة أو غير مصادق عليها. يرجى تسجيل الدخول أولاً.';
+      }
+
+      const statusCode = errMsg.includes('FLOOD_WAIT') ? 429 :
+                         errMsg.includes('CHAT_WRITE_FORBIDDEN') || errMsg.includes('USER_BANNED_IN_CHANNEL') || errMsg.includes('CHANNEL_PRIVATE') ? 403 :
+                         errMsg.includes('PEER_ID_INVALID') || errMsg.includes('USERNAME_NOT_OCCUPIED') ? 400 :
+                         errMsg.includes('AUTH_KEY_UNREGISTERED') ? 401 : 400;
+
+      return res.status(statusCode).json({
+        success: false,
+        error: errorCode,
+        details: errMsg,
+        message: arabicMsg,
+      });
+    }
   });
 
   // 6. Check Chat Invite Link (messages.checkChatInvite RPC)
@@ -2042,17 +3080,76 @@ async function startServer() {
   });
 
   // 7. Import Chat Invite (messages.importChatInvite / channels.joinChannel RPC)
-  app.post('/api/telegram/links/join', (req, res) => {
-    const { inviteInfo } = req.body;
-    res.json({
-      success: true,
-      joinedChat: {
-        ...inviteInfo,
-        joinedAt: new Date().toISOString(),
-        role: 'member',
-      },
-      message: `Successfully joined ${inviteInfo.title} via MTProto API_ID ${TELEGRAM_API_ID}`,
-    });
+  app.post('/api/telegram/links/join', async (req, res) => {
+    const { inviteInfo, link, hash, sessionString, phone } = req.body;
+    try {
+      const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
+      if (!client || !client.connected) {
+        return res.status(401).json({
+          success: false,
+          error: 'AUTH_KEY_UNREGISTERED',
+          message: 'خادم تيليجرام غير متصل بالجلسة. يرجى تسجيل الدخول أولاً.',
+        });
+      }
+
+      let joinTarget = hash || (inviteInfo && inviteInfo.inviteHash) || (inviteInfo && inviteInfo.link) || link;
+      if (!joinTarget && inviteInfo && inviteInfo.username) {
+        joinTarget = inviteInfo.username;
+      }
+
+      if (!joinTarget) {
+        return res.status(400).json({ success: false, error: 'TARGET_REQUIRED', message: 'رابط أو كود الدعوة مطلوب للانضمام' });
+      }
+
+      const cleanedTarget = String(joinTarget).trim();
+      let inviteHash = '';
+      if (cleanedTarget.includes('+')) {
+        inviteHash = cleanedTarget.split('+')[1].split('/')[0].split('?')[0];
+      } else if (cleanedTarget.includes('joinchat/')) {
+        inviteHash = cleanedTarget.split('joinchat/')[1].split('/')[0].split('?')[0];
+      }
+
+      let result: any = null;
+      if (inviteHash) {
+        result = await client.invoke(new Api.messages.ImportChatInvite({ hash: inviteHash }));
+      } else {
+        const username = cleanedTarget.replace(/^https?:\/\/t\.me\//, '').replace(/^@/, '').split('/')[0];
+        const entity = await client.getEntity(username);
+        result = await client.invoke(new Api.channels.JoinChannel({ channel: entity }));
+      }
+
+      return res.json({
+        success: true,
+        joinedChat: {
+          ...inviteInfo,
+          joinedAt: new Date().toISOString(),
+          role: 'member',
+        },
+        result,
+        message: 'تم الانضمام إلى المجموعة/القناة بنجاح عبر خوادم تيليجرام الرسمية.',
+      });
+    } catch (joinErr: any) {
+      const errMsg = joinErr?.errorMessage || joinErr?.message || String(joinErr);
+      console.warn('[MTProto] Real join error:', errMsg);
+
+      if (errMsg.includes('USER_ALREADY_PARTICIPANT')) {
+        return res.status(200).json({
+          success: true,
+          alreadyMember: true,
+          message: 'أنت عضو بالفعل في هذه المجموعة/القناة.',
+        });
+      }
+
+      const statusCode = errMsg.includes('FLOOD_WAIT') ? 429 :
+                         errMsg.includes('INVITE_HASH_EXPIRED') ? 410 :
+                         errMsg.includes('CHANNELS_TOO_MUCH') ? 400 : 500;
+
+      return res.status(statusCode).json({
+        success: false,
+        error: errMsg,
+        message: `فشل الانضمام عبر تيليجرام: ${errMsg}`,
+      });
+    }
   });
 
   // 7.5. Dedicated Auth Key & GramJS Session Validation on MTProto Server
@@ -2373,7 +3470,7 @@ async function startServer() {
         const list = (raw || []).map((m: any) => {
           const msgTimestampSec = m.date || Math.floor(Date.now() / 1000);
           const mDate = new Date(msgTimestampSec * 1000);
-          const timeStr = mDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const timeStr = mDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true });
           const dateStr = mDate.toISOString().split('T')[0];
 
           let mediaData: any = undefined;
@@ -2849,78 +3946,186 @@ async function startServer() {
     });
   });
 
-  // 12. Multi-Account Management & Sync Endpoints
-  const serverAccountsStore: any[] = [
-    {
-      id: 'acc_personal',
-      name: 'Anwar Fouad',
-      phone: '+967 770 000 000',
-      username: 'anwar_fouad',
-      authKey: crypto.randomBytes(32).toString('hex'),
-      dcId: 4,
-      isPremium: true,
-      lastSync: new Date().toISOString(),
-    },
-    {
-      id: 'acc_work',
-      name: 'Anwar Dev (Work)',
-      phone: '+967 771 999 888',
-      username: 'anwar_tech_dev',
-      authKey: crypto.randomBytes(32).toString('hex'),
-      dcId: 4,
-      isPremium: true,
-      lastSync: new Date().toISOString(),
-    },
-    {
-      id: 'acc_business',
-      name: 'Anwar Business (Official)',
-      phone: '+967 772 333 444',
-      username: 'anwar_official',
-      authKey: crypto.randomBytes(32).toString('hex'),
-      dcId: 4,
-      isPremium: true,
-      lastSync: new Date().toISOString(),
-    },
-  ];
-
+  // 12. Multi-Account Management & Sync Endpoints (Backed by sessions/account_{index}.json)
   app.get('/api/telegram/accounts', (req, res) => {
+    const diskSessions = loadAllAccountSessionsFromDisk();
+    const accountsList: any[] = [];
+
+    for (let i = 0; i < 4; i++) {
+      const sess = diskSessions.get(i);
+      const user = USERS.get(i);
+      const instance = accountInstances.get(i);
+      if (sess) {
+        accountsList.push({
+          id: `acc_${i}`,
+          currentAccount: i,
+          name: sess.name || (user ? [user.firstName, user.lastName].filter(Boolean).join(' ') : `حساب ${i}`),
+          phone: sess.phone,
+          username: sess.username || (user?.username ? `@${user.username}` : ''),
+          userId: sess.userId,
+          isActive: i === currentAccount,
+          avatar: sess.avatar || '',
+          isPremium: Boolean(sess.isPremium || user?.premium),
+          lastSync: instance?.lastActive || sess.updatedAt || new Date().toISOString(),
+        });
+      }
+    }
+
     res.json({
       success: true,
-      accounts: serverAccountsStore,
-      activeDc: 4,
-      totalAccounts: serverAccountsStore.length,
+      currentAccount,
+      activeAccountId: `acc_${currentAccount}`,
+      accounts: accountsList,
+      totalAccounts: accountsList.length,
     });
   });
 
-  app.post('/api/telegram/accounts/switch', (req, res) => {
-    const { accountId } = req.body;
-    const found = serverAccountsStore.find((a) => a.id === accountId);
-    res.json({
-      success: true,
-      activeAccountId: accountId,
-      account: found || null,
-      message: 'Switched MTProto account session successfully.',
-    });
+  app.post('/api/telegram/accounts/switch', async (req, res) => {
+    const { accountId, currentAccount: reqAccountIndex, index } = req.body || {};
+    let targetIndex = 0;
+    if (typeof reqAccountIndex === 'number') {
+      targetIndex = reqAccountIndex;
+    } else if (typeof index === 'number') {
+      targetIndex = index;
+    } else if (typeof accountId === 'string') {
+      const match = accountId.match(/\d+/);
+      if (match) targetIndex = parseInt(match[0], 10);
+    }
+
+    targetIndex = Math.max(0, Math.min(3, targetIndex));
+    console.log(`[AccountSwitch] Switching to Account [${targetIndex}]...`);
+
+    // Strictly load session from sessions/account_{targetIndex}.json only
+    const stored = readAccountSession(targetIndex);
+    if (!stored || !stored.session) {
+      return res.status(404).json({
+        success: false,
+        error: 'ACCOUNT_SESSION_NOT_FOUND',
+        message: `لم يتم العثور على جلسة محفوظة للحساب رقم ${targetIndex} في مجلد sessions/`,
+      });
+    }
+
+    try {
+      let client = accountInstances.get(targetIndex)?.client;
+      if (!client || !client.connected) {
+        console.log(`[AccountSwitch] Connecting TelegramClient for Account [${targetIndex}] using isolated session...`);
+        client = new TelegramClient(
+          new sessions.StringSession(stored.session),
+          Number(TELEGRAM_API_ID),
+          TELEGRAM_API_HASH,
+          {
+            connectionRetries: 3,
+            requestRetries: 3,
+            timeout: 10,
+            useWSS: false,
+            deviceModel: `Telegram Android MTProto (Acc ${targetIndex})`,
+            systemVersion: 'Android 14',
+            appVersion: '11.2.3',
+            langCode: 'ar',
+            systemLangCode: 'ar',
+          }
+        );
+        configureTelegramClient(client, stored.session);
+        await connectWithTimeout(client, 3500);
+      }
+
+      currentAccount = targetIndex;
+      mainTelegramClient = client;
+
+      let userObj = USERS.get(targetIndex);
+      if (!userObj && client && client.connected) {
+        userObj = await client.getMe().catch(() => null);
+        if (userObj) USERS.set(targetIndex, userObj);
+      }
+
+      accountInstances.set(targetIndex, {
+        currentAccount: targetIndex,
+        userId: stored.userId,
+        phone: stored.phone,
+        sessionString: stored.session,
+        client,
+        user: userObj || { id: stored.userId, phone: stored.phone },
+        lastActive: new Date().toISOString(),
+      });
+
+      return res.json({
+        success: true,
+        currentAccount: targetIndex,
+        accountId: `acc_${targetIndex}`,
+        account: {
+          id: `acc_${targetIndex}`,
+          name: stored.name || (userObj ? [userObj.firstName, userObj.lastName].filter(Boolean).join(' ') : `حساب ${targetIndex}`),
+          phone: stored.phone,
+          userId: stored.userId,
+          sessionString: stored.session,
+          currentAccount: targetIndex,
+        },
+        user: userObj || null,
+        message: `تم التبديل إلى الحساب ${targetIndex} وتحميل جلسته بنجاح من مجلد sessions/`,
+      });
+    } catch (switchErr: any) {
+      console.error(`[AccountSwitch] Error switching to account ${targetIndex}:`, switchErr);
+      return res.status(500).json({
+        success: false,
+        error: 'SWITCH_FAILED',
+        message: switchErr?.message || 'فشل التبديل إلى الحساب المحدد',
+      });
+    }
+  });
+
+  app.post('/api/telegram/accounts/remove', async (req, res) => {
+    const { accountId, currentAccount: reqAccountIndex, index } = req.body || {};
+    let targetIndex = 0;
+    if (typeof reqAccountIndex === 'number') {
+      targetIndex = reqAccountIndex;
+    } else if (typeof index === 'number') {
+      targetIndex = index;
+    } else if (typeof accountId === 'string') {
+      const match = accountId.match(/\d+/);
+      if (match) targetIndex = parseInt(match[0], 10);
+    }
+
+    try {
+      const client = accountInstances.get(targetIndex)?.client;
+      if (client) {
+        try { await client.disconnect(); } catch (_) {}
+      }
+      deleteAccountSessionFromDisk(targetIndex);
+      accountInstances.delete(targetIndex);
+      USERS.delete(targetIndex);
+
+      // If active account was removed, switch to another available account if one exists
+      if (currentAccount === targetIndex) {
+        const remaining = loadAllAccountSessionsFromDisk();
+        if (remaining.size > 0) {
+          const firstKey = remaining.keys().next().value;
+          currentAccount = firstKey !== undefined ? firstKey : 0;
+          const nextClient = accountInstances.get(currentAccount)?.client;
+          if (nextClient) mainTelegramClient = nextClient;
+        } else {
+          currentAccount = 0;
+          mainTelegramClient = null;
+        }
+      }
+
+      res.json({
+        success: true,
+        currentAccount,
+        message: `تم حذف جلسة الحساب ${targetIndex} بنجاح من مجلد sessions/`,
+      });
+    } catch (removeErr: any) {
+      res.status(500).json({
+        success: false,
+        error: 'REMOVE_FAILED',
+        message: removeErr?.message || 'فشل حذف الحساب',
+      });
+    }
   });
 
   app.post('/api/telegram/accounts/add', (req, res) => {
-    const { account } = req.body;
-    if (account) {
-      const newAccEntry = {
-        id: account.id || `acc_${Date.now()}`,
-        name: account.user?.name || 'New Account',
-        phone: account.user?.phone || '+00000000',
-        username: account.user?.username || '',
-        authKey: crypto.randomBytes(32).toString('hex'),
-        dcId: 4,
-        isPremium: !!account.user?.isPremium,
-        lastSync: new Date().toISOString(),
-      };
-      serverAccountsStore.push(newAccEntry);
-    }
     res.json({
       success: true,
-      message: 'Account registered and authorized in MTProto 2.0 Layer 184 session pool.',
+      message: 'Account authentication ready. Submit verification code to save isolated session.',
     });
   });
 
@@ -3080,7 +4285,14 @@ async function startServer() {
   }
 
   function resolveTelegramGroupLink(input: string): ResolvedGroupEntity {
-    const raw = (input || '').trim();
+    let raw = (input || '').trim();
+    // 0. Clean common prefixes, bullet markers (·, •, -, *), numbers (1., 2-), quotes
+    raw = raw.replace(/^(?:custom_|chat_|user_|channel_)+/i, '').trim();
+    raw = raw.replace(/^[\s·•\-\*\u2022\u00B7\u2023\u25E6\u2043\u2219]+/, '').trim();
+    raw = raw.replace(/^(\d+[\.\)\-]\s*)/, '').trim();
+    raw = raw.replace(/^['"`]+|['"`]+$/g, '').trim();
+    raw = raw.replace(/^(?:custom_|chat_|user_|channel_)+/i, '').trim();
+
     if (!raw) {
       return { raw: '', type: 'unknown', identifier: '', normalizedUrl: '', cleanName: '' };
     }
@@ -3280,7 +4492,142 @@ async function startServer() {
     });
   });
 
-  app.post('/api/send_now', (req, res) => {
+  // =========================================================================
+  // نقطة النهاية لجلب جميع المجموعات والقنوات الحقيقية 100% عبر GramJS getDialogs
+  // =========================================================================
+  const handleGetAllGroups = async (req: express.Request, res: express.Response) => {
+    try {
+      const sessionString =
+        (req.body?.sessionString || req.query?.sessionString || req.headers['x-telegram-session']) as string;
+      const phone = (req.body?.phone || req.query?.phone || req.headers['x-telegram-phone']) as string;
+
+      const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
+      if (!client || !client.connected) {
+        return res.status(401).json({
+          success: false,
+          error: 'AUTH_KEY_UNREGISTERED',
+          message: 'خادم تيليجرام غير متصل بالجلسة. يرجى تسجيل الدخول بحسابك أولاً.',
+          groups: [],
+        });
+      }
+
+      console.log('[GramJS] Fetching real dialogs from Telegram cloud for get_all_groups (limit: 200)...');
+      const dialogs = await client.getDialogs({ limit: 200 });
+      const groupLinks: string[] = [];
+      const seenLinks = new Set<string>();
+
+      for (const dialog of dialogs) {
+        // تصفية: تشمل فقط المجموعات والمجموعات الفائقة والقنوات
+        if (!dialog.isGroup && !dialog.isChannel) {
+          continue;
+        }
+
+        // استبعاد المحادثات الخاصة والرسائل المحفوظة
+        if (
+          dialog.isUser ||
+          (dialog as any)?.name === 'Saved Messages' ||
+          (dialog as any)?.title === 'Saved Messages' ||
+          (dialog as any)?.title === 'الرسائل المحفوظة'
+        ) {
+          continue;
+        }
+
+        let link = '';
+        const entity: any = dialog.entity;
+        const username = entity?.username || (dialog as any)?.username;
+
+        if (username) {
+          // إذا كانت المجموعة/القناة عامة (لديها username)
+          const cleanUser = String(username).replace(/^@/, '').trim();
+          link = `https://t.me/${cleanUser}`;
+        } else {
+          // إذا كانت خاصة (بدون username): المعرف الرقمي بدون -100
+          const rawId = String(entity?.id || dialog.id || '');
+          const cleanId = rawId.replace(/^-100/, '').replace(/^-/, '').trim();
+          if (cleanId) {
+            link = `https://t.me/c/${cleanId}`;
+          }
+        }
+
+        if (link && !seenLinks.has(link)) {
+          seenLinks.add(link);
+          groupLinks.push(link);
+        }
+      }
+
+      console.log(`[GramJS] get_all_groups extracted ${groupLinks.length} real group/channel links.`);
+      return res.json({
+        success: true,
+        groups: groupLinks,
+        count: groupLinks.length,
+      });
+    } catch (err: any) {
+      console.error('[GramJS] get_all_groups error:', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'FAILED_TO_FETCH_GROUPS',
+        message: `تعذر جلب المجموعات من تيليجرام: ${err?.message || 'خطأ غير معروف'}`,
+        groups: [],
+      });
+    }
+  };
+
+  app.get('/api/get_all_groups', handleGetAllGroups);
+  app.post('/api/get_all_groups', handleGetAllGroups);
+
+  // -------------------------------------------------------------
+  // Salam Mode Activity Store & Real-time Broadcasting
+  // -------------------------------------------------------------
+  interface SalamActivityRecord {
+    id: string;
+    chatId: string | number;
+    chatTitle?: string;
+    greetingMsgId?: number | string;
+    status: 'greeting_sent' | 'waiting_interaction' | 'interaction_detected' | 'message_edited' | 'message_deleted' | 'error';
+    statusLabel: string;
+    interactionCount: number;
+    requiredInteractions: number;
+    remainingSeconds: number;
+    totalWaitSeconds: number;
+    lastMessageSnippet?: string;
+    lastMessageSender?: string;
+    originalText?: string;
+    details?: string;
+    timestamp: string;
+    decision?: 'edit' | 'delete' | 'pending';
+  }
+
+  const salamActivities: SalamActivityRecord[] = [];
+
+  function recordSalamActivity(data: Omit<SalamActivityRecord, 'id' | 'timestamp'>): SalamActivityRecord {
+    const record: SalamActivityRecord = {
+      id: `salam_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      timestamp: new Date().toISOString(),
+      ...data,
+    };
+    salamActivities.unshift(record);
+    if (salamActivities.length > 150) {
+      salamActivities.length = 150;
+    }
+    try {
+      io.emit('salam_activity', record);
+    } catch {}
+    return record;
+  }
+
+  app.get('/api/salam_activities', (req, res) => {
+    res.json({ success: true, activities: salamActivities });
+  });
+
+  app.post('/api/salam_activities/clear', (req, res) => {
+    salamActivities.length = 0;
+    try {
+      io.emit('salam_activities_cleared');
+    } catch {}
+    res.json({ success: true, message: 'تم مسح سجل نشاط السلام بنجاح' });
+  });
+
+  app.post('/api/send_now', async (req, res) => {
     const data = req.body || {};
     const message = (data.message || '').trim();
     const rawGroups = data.groups || '';
@@ -3289,6 +4636,8 @@ async function startServer() {
     const dispatch_type = data.dispatch_type || 'manual';
     const schedule_time = data.schedule_time || '';
     const interval_minutes = Number(data.interval_minutes) || 0;
+    const sessionString = data.sessionString || req.headers['x-telegram-session'];
+    const phone = data.phone;
 
     if (!message && images.length === 0) {
       return res.status(400).json({
@@ -3297,62 +4646,317 @@ async function startServer() {
       });
     }
 
-    let resolvedTargets: ResolvedGroupEntity[] = [];
-
-    if (send_to_all) {
-      resolvedTargets = parseAndResolveGroupLinks([
-        'https://t.me/telegram',
-        'https://t.me/durov',
-        'https://t.me/toncoin',
-        'https://t.me/tech_news',
-        'https://t.me/android_devs',
-      ]);
-    } else {
-      resolvedTargets = parseAndResolveGroupLinks(rawGroups);
-      if (resolvedTargets.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'يرجى إدخال روابط أو معرفات مجموعات صالحة',
-        });
-      }
+    // 1. Authenticate with real Telegram client (Requirement 1 & 4)
+    const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
+    if (!client || !client.connected) {
+      return res.status(401).json({
+        success: false,
+        error: 'AUTH_KEY_UNREGISTERED',
+        message: 'خادم تيليجرام غير متصل بالجلسة أو مفتاح المصادقة غير مسجل. يرجى تسجيل الدخول أولاً.',
+      });
     }
 
-    const identifiersList = resolvedTargets.map((t) => t.identifier);
+    // 2. Resolve real targets from Telegram server (Requirement 4: Force Real Send)
+    const targetEntities: any[] = [];
+    const resolvedLabels: string[] = [];
+
+    try {
+      if (send_to_all) {
+        // Fetch actual dialogs from Telegram cloud
+        const dialogs = await client.getDialogs({ limit: 100 });
+        for (const dialog of dialogs) {
+          if (dialog.isGroup || dialog.isChannel) {
+            if (dialog.entity) {
+              targetEntities.push(dialog.entity);
+              resolvedLabels.push(dialog.title || String((dialog.entity as any)?.id));
+            }
+          }
+        }
+        if (targetEntities.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: 'NO_CHANNELS_FOUND',
+            message: 'لم يتم العثور على أي قنوات أو مجموعات في حسابك لإرسال الرسائل إليها.',
+          });
+        }
+      } else {
+        const parsed = parseAndResolveGroupLinks(rawGroups);
+        if (parsed.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'يرجى إدخال روابط أو معرفات مجموعات صالحة',
+          });
+        }
+        for (const item of parsed) {
+          try {
+            // Real resolution using resolvePeerTarget (Requirement 4)
+            const target = item.identifier || item.raw;
+            const entity = await resolvePeerTarget(client, target);
+            if (entity) {
+              targetEntities.push(entity);
+              resolvedLabels.push(item.identifier || item.cleanName);
+            }
+          } catch (entityErr: any) {
+            console.warn(`[SendNow] Could not resolve entity for ${item.raw}:`, entityErr?.errorMessage || entityErr?.message);
+          }
+        }
+        if (targetEntities.length === 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'ENTITY_RESOLUTION_FAILED',
+            message: 'تعذر استخراج الكيانات للمجموعات المحددة من خوادم تيليجرام. تأكد من صحة الروابط أو عضويتك فيها.',
+          });
+        }
+      }
+    } catch (resolveErr: any) {
+      const errMsg = resolveErr?.errorMessage || resolveErr?.message || String(resolveErr);
+      return res.status(500).json({
+        success: false,
+        error: errMsg,
+        message: `فشل استخراج المجموعات من تيليجرام: ${errMsg}`,
+      });
+    }
 
     if (dispatch_type === 'scheduled') {
       const timeLabel = schedule_time ? `في ${schedule_time}` : 'في الموعد المحدد';
       const repeatLabel = interval_minutes > 0 ? ` (ويتكرر كل ${interval_minutes} دقيقة)` : '';
       return res.json({
         success: true,
-        message: `تمت جدولة الإرسال التلقائي إلى ${resolvedTargets.length} مجموعة (${identifiersList.join(', ')}) ${timeLabel}${repeatLabel}`,
-        groupsCount: resolvedTargets.length,
+        message: `تمت جدولة الإرسال التلقائي إلى ${targetEntities.length} مجموعة (${resolvedLabels.join(', ')}) ${timeLabel}${repeatLabel}`,
+        groupsCount: targetEntities.length,
         hasImages: images.length > 0,
         isScheduled: true,
         schedule_time,
         interval_minutes,
-        resolvedTargets,
-        identifiers: identifiersList,
+        identifiers: resolvedLabels,
         timestamp: new Date().toISOString(),
       });
     }
 
-    // Execute transmission pipeline with resolved MTProto identifiers
-    console.log(
-      `[SendOnly] Transmitting message to ${resolvedTargets.length} entities:`,
-      identifiersList
-    );
+    // 3. Execute Real Send via client.sendMessage with Smart Salam & Protection Checking
+    console.log(`[SendNow] Transmitting real MTProto message to ${targetEntities.length} entities:`, resolvedLabels);
 
-    setTimeout(() => {
-      console.log(`[SendOnly] Successfully broadcasted to ${identifiersList.join(', ')}`);
-    }, 1000);
+    const sentResults: Array<{ target: string; messageId: number; success: boolean; isProtected?: boolean; salamMode?: boolean }> = [];
+    const failedResults: Array<{ target: string; error: string }> = [];
+
+    const smart_wait_seconds = Number(data.interval_seconds || data.smart_wait_seconds) || 30;
+    const smart_required_messages = Number(data.smart_required_messages) || 3;
+
+    for (let i = 0; i < targetEntities.length; i++) {
+      const entity = targetEntities[i];
+      const label = resolvedLabels[i] || `entity_${i}`;
+      try {
+        // الخطوة 1: فحص الحماية لكل مجموعة قبل الإرسال
+        const isProtected = await isGroupProtected(client, entity);
+        console.log(`[SendNow] Target "${label}" protection status: ${isProtected ? 'PROTECTED (محمية ببوتات حماية)' : 'UNPROTECTED (غير محمية)'}`);
+
+        // الخطوة 2:
+        if (!isProtected) {
+          // إذا كانت النتيجة false (غير محمية): أرسل الرسالة الأصلية فوراً (ممنوع إرسال السلام عليكم)
+          const sent: any = await client.sendMessage(entity, {
+            message: message,
+            parseMode: 'md',
+          });
+          sentResults.push({
+            target: label,
+            messageId: sent?.id || 0,
+            success: true,
+            isProtected: false,
+            salamMode: false,
+          });
+          console.log(`[SendNow] Direct send to unprotected group ${label} (ID: ${sent?.id})`);
+        } else {
+          // إذا كانت النتيجة true (محمية): نفّذ السيناريو الذكي
+          // 1. أرسل "السلام عليكم"
+          console.log(`[SendNow] [SalamMode] 1. Group ${label} is protected. Sending greeting "السلام عليكم"...`);
+          const greetingMsg: any = await client.sendMessage(entity, {
+            message: 'السلام عليكم',
+          });
+
+          recordSalamActivity({
+            chatId: label,
+            chatTitle: label,
+            greetingMsgId: greetingMsg.id,
+            status: 'greeting_sent',
+            statusLabel: 'تم إرسال السلام كتمويه أولي 🚀',
+            interactionCount: 0,
+            requiredInteractions: smart_required_messages,
+            remainingSeconds: smart_wait_seconds,
+            totalWaitSeconds: smart_wait_seconds,
+            originalText: message,
+            details: `تم إرسال 'السلام عليكم' بنجاح (معرف: ${greetingMsg.id}) وبدء مهلة الانتظار الذكية`,
+          });
+
+          // 2. تفعيل مستمع الأحداث الحي (Event Listener) لمراقبة الرسائل الجديدة لحظياً خلال فترة الانتظار
+          const liveIncomingMsgs: any[] = [];
+          const waitStartTime = Date.now();
+          recordSalamActivity({
+            chatId: label,
+            chatTitle: label,
+            greetingMsgId: greetingMsg.id,
+            status: 'waiting_interaction',
+            statusLabel: `في انتظار تفاعل الأعضاء (${smart_wait_seconds} ثانية)`,
+            interactionCount: 0,
+            requiredInteractions: smart_required_messages,
+            remainingSeconds: smart_wait_seconds,
+            totalWaitSeconds: smart_wait_seconds,
+            originalText: message,
+            details: `جاري رصد الرسائل الواردة من الأعضاء لحساب معدل النشاط المطلوب (${smart_required_messages}+)`,
+          });
+
+          const liveMsgHandler = (event: any) => {
+            try {
+              const incoming = event?.message;
+              if (incoming && !incoming.out && Number(incoming.id) > Number(greetingMsg.id)) {
+                liveIncomingMsgs.push(incoming);
+                console.log(`[SendNow] [SalamMode] ⚡ Live event detected in ${label}: message ID ${incoming.id} (total: ${liveIncomingMsgs.length})`);
+                const elapsed = Math.floor((Date.now() - waitStartTime) / 1000);
+                recordSalamActivity({
+                  chatId: label,
+                  chatTitle: label,
+                  greetingMsgId: greetingMsg.id,
+                  status: 'interaction_detected',
+                  statusLabel: `تفاعل وارد (${liveIncomingMsgs.length}/${smart_required_messages})`,
+                  interactionCount: liveIncomingMsgs.length,
+                  requiredInteractions: smart_required_messages,
+                  remainingSeconds: Math.max(0, smart_wait_seconds - elapsed),
+                  totalWaitSeconds: smart_wait_seconds,
+                  lastMessageSnippet: incoming.message ? String(incoming.message).slice(0, 70) : undefined,
+                  lastMessageSender: incoming.senderId ? String(incoming.senderId) : undefined,
+                  originalText: message,
+                  details: `وردت رسالة جديدة من عضو: "${(incoming.message || '').slice(0, 40)}"`,
+                });
+              }
+            } catch {}
+          };
+          try {
+            client.addEventHandler(liveMsgHandler, new NewMessage({ chats: [entity] }));
+          } catch {}
+
+          console.log(`[SendNow] [SalamMode] 2. Waiting ${smart_wait_seconds}s for interactions in ${label}...`);
+          await new Promise((r) => setTimeout(r, smart_wait_seconds * 1000));
+
+          try {
+            client.removeEventHandler(liveMsgHandler, new NewMessage({ chats: [entity] }));
+          } catch {}
+
+          // 3. التحقق المزدوج من نشاط المجموعة عبر Event Listener و getMessages
+          let interactionPassed = false;
+          let totalCount = liveIncomingMsgs.length;
+          try {
+            const recentMsgs: any = await client.getMessages(entity, {
+              limit: 20,
+              minId: greetingMsg.id,
+            });
+            const othersMsgs = (recentMsgs || []).filter((m: any) => !m.out && m.id > greetingMsg.id);
+            totalCount = Math.max(othersMsgs.length, liveIncomingMsgs.length);
+            console.log(`[SendNow] [SalamMode] 3. Monitored ${totalCount} new messages in ${label} (live: ${liveIncomingMsgs.length}, fetched: ${othersMsgs.length}, required: ${smart_required_messages})`);
+            if (totalCount >= smart_required_messages) {
+              interactionPassed = true;
+            }
+          } catch (chkErr: any) {
+            console.warn(`[SendNow] [SalamMode] Error checking messages in ${label}:`, chkErr?.message || chkErr);
+            if (liveIncomingMsgs.length >= smart_required_messages) {
+              interactionPassed = true;
+            } else {
+              interactionPassed = false;
+            }
+          }
+
+          if (interactionPassed) {
+            // 4. إذا وصل عدد الرسائل الجديدة >= smart_required_messages: قم بتعديل رسالة "السلام" إلى الرسالة الأصلية
+            console.log(`[SendNow] [SalamMode] 4. Interaction passed (${smart_required_messages}+ msgs). Editing greeting to original message in ${label}...`);
+            await client.editMessage(entity, {
+              message: greetingMsg.id,
+              text: message,
+              parseMode: 'md',
+            });
+            recordSalamActivity({
+              chatId: label,
+              chatTitle: label,
+              greetingMsgId: greetingMsg.id,
+              status: 'message_edited',
+              statusLabel: 'تم تعديل رسالة السلام إلى الرسالة الأصلية ✍️',
+              interactionCount: totalCount,
+              requiredInteractions: smart_required_messages,
+              remainingSeconds: 0,
+              totalWaitSeconds: smart_wait_seconds,
+              originalText: message,
+              decision: 'edit',
+              details: `المجموعة نشطة (${totalCount} تفاعلات >= ${smart_required_messages}). تم استبدال السلام بالمنشور الفعلي بنجاح.`,
+            });
+            sentResults.push({
+              target: label,
+              messageId: greetingMsg.id || 0,
+              success: true,
+              isProtected: true,
+              salamMode: true,
+            });
+          } else {
+            // 5. إذا لم يصل العدد: قم بحذف رسالة "السلام" عبر client.deleteMessages
+            console.log(`[SendNow] [SalamMode] 5. Low interaction (<${smart_required_messages}). Deleting greeting message from ${label}...`);
+            await client.deleteMessages(entity, [greetingMsg.id], { revoke: true }).catch(() => {});
+            recordSalamActivity({
+              chatId: label,
+              chatTitle: label,
+              greetingMsgId: greetingMsg.id,
+              status: 'message_deleted',
+              statusLabel: 'تم حذف رسالة السلام لعدم وجود تفاعل كافٍ 🗑️',
+              interactionCount: totalCount,
+              requiredInteractions: smart_required_messages,
+              remainingSeconds: 0,
+              totalWaitSeconds: smart_wait_seconds,
+              originalText: message,
+              decision: 'delete',
+              details: `المجموعة صامتة أو خاملة (${totalCount}/${smart_required_messages} تفاعلات). تم حذف رسالة السلام لمنع كشف البوت وتأمين الحساب.`,
+            });
+            failedResults.push({
+              target: label,
+              error: `سحبت رسالة التمويه الذكية لعدم وجود تفاعل كافٍ من الأعضاء (${smart_required_messages} رسائل جديدة مطلوبة خلال ${smart_wait_seconds}ث)`,
+            });
+          }
+        }
+      } catch (sendErr: any) {
+        const errMsg = sendErr?.errorMessage || sendErr?.message || String(sendErr);
+        console.warn(`[SendNow] Failed transmitting to ${label}:`, errMsg);
+        failedResults.push({
+          target: label,
+          error: errMsg,
+        });
+      }
+    }
+
+    // If zero messages succeeded, report real failure!
+    if (sentResults.length === 0 && failedResults.length > 0) {
+      const firstError = failedResults[0].error;
+      const status = firstError.includes('FLOOD_WAIT') ? 429 :
+                     firstError.includes('CHAT_WRITE_FORBIDDEN') || firstError.includes('USER_BANNED_IN_CHANNEL') || firstError.includes('CHANNEL_PRIVATE') ? 403 : 400;
+      let friendlyMsg = `فشل الإرسال إلى المجموعات: ${firstError}`;
+      if (firstError.includes('USER_BANNED_IN_CHANNEL')) {
+        friendlyMsg = 'أنت محظور أو مقيّد من إرسال الرسائل في هذه المجموعة أو القناة بواسطة المشرفين (USER_BANNED_IN_CHANNEL).';
+      } else if (firstError.includes('CHANNEL_PRIVATE')) {
+        friendlyMsg = 'هذه القناة أو المجموعة خاصة ولا يمكن إرسال الرسائل إليها دون أن تكون عضواً منضماً إليها (CHANNEL_PRIVATE).';
+      } else if (firstError.includes('CHAT_WRITE_FORBIDDEN')) {
+        friendlyMsg = 'لا تملك صلاحية النشر في هذه القناة أو المجموعة (مقتصرة على المشرفين فقط).';
+      }
+      return res.status(status).json({
+        success: false,
+        error: firstError,
+        message: friendlyMsg,
+        failedTargets: failedResults,
+      });
+    }
 
     return res.json({
       success: true,
-      message: `بدء الإرسال إلى ${resolvedTargets.length} مجموعة بنجاح`,
-      groupsCount: resolvedTargets.length,
+      message: `تم الإرسال الفعلي إلى ${sentResults.length} مجموعة بنجاح${failedResults.length > 0 ? ` (فشل ${failedResults.length})` : ''}`,
+      groupsCount: targetEntities.length,
+      sentCount: sentResults.length,
+      failedCount: failedResults.length,
       hasImages: images.length > 0,
-      resolvedTargets,
-      identifiers: identifiersList,
+      sentResults,
+      failedResults,
+      identifiers: resolvedLabels,
       timestamp: new Date().toISOString(),
     });
   });
@@ -3646,16 +5250,183 @@ async function startServer() {
   });
 
   // =========================================================================
-  // 1. النشر الدوري المجدول (Scheduled Rotator API)
+  // 1. النشر الدوري المجدول والمسودات المعتمدة (Scheduled Rotator & MESSAGE_DRAFTS)
   // =========================================================================
+  const MESSAGE_DRAFTS: string[] = [
+    `🚨 **#ســـكـــالــــيـــــــف رسمية** 🚨
+
+عليك غياب تبي عذر طبي في صحتي بدون حضور كلمني 📌📌
+
+**اجازه مرضيه معتمده في تطبيق صحتي** ♻️
+نستقبل عسكري مدني جامعي موضف
+
+━━━━━━━━━━━━━━
+🟢 تاريخ **#جديد** ↘️🟢↙️ **#قديم** 🔴
+
+🔰 **#عــــذر #طـــبـي** 🔰  
+🟣 **#اجازه ورقيه مختوم**  
+🔵 **#شعار مرافقه مريض**  
+🟡 **#مشهـد مراجـــعــــــة**  
+🔴 **#شـــعــــار تـــــنويـــم**  
+🟢 **#تــــقـــريـــر طـــبــــي**  
+
+━━━━━━━━━━━━━━
+📲 **للتواصل وتساب** 🆗⬇️  
+📲 https://wa.me/+966510349663`,
+
+    `📚 **السلام عليكم**  
+للخدمات الطلابيه المتكامله
+
+💞 **من خدمتنا** 💞  
+✅ **بحوث جامعية** (عربي + إنجليزي)  
+🔥 **رسائل ماجستير**  
+🟢 **اعذار طبيه صحتي ورقي PDF**  
+📝 **واجبات وأنشطة**  
+📊 **عروض باوربوينت Power Point**  
+📄 **تقارير وتكاليف**  
+📝 **حل كويزات / ميد / فاينل**  
+💰 **محاسبة + ادارة أعمال**  
+💻 **حاسوب + برمجة**  
+🎓 **مشاريع تخرج Project**  
+📖 **تلخيص محاضرات**  
+📄 **تصميم سيره ذاتيه احترافيه**  
+🎨 **تصاميم بوستر وبروشور**  
+📋 **كتابه تقارير تدريب**
+
+━━━━━━━━━━━━━━
+⭐ **اسعار مناسبه للجميع**  
+↩️ **للتواصل واتس اب**  
+📲 https://wa.me/+966562570935`,
+
+    `⚡ **ثقة وسرعة في الإنجاز** ⚡
+
+🟢 **بحـــوثات** (عربي أو انقلش)  
+🟡 **حل الواجبات والتكاليف**  
+📚 **تلخيص الكتب والمحاضرات**  
+🎓 **مشاريع تخــــرج**  
+💻 **حل تكاليف وانشطة البرمجه**  
+🎨 **إعداد عـــــروض بوربـــــوينت** - كانفا  
+📄 **صياغة ســــيرة ذاتـــية CV**  
+🖼️ **تصاميم (بوستر - انفوجرافيك)**  
+📝 **حــــل (كويز - ميد - فاينل)**  
+📋 **اسايمنت - لابات - دراسة حالة**  
+📊 **تحليل احصائي SPSS**  
+🧠 **إعداد (تقارير - خرائط ذهنيه)**  
+🩺 **اعذار طبية ورقية PDF مختومة**  
+📱 **اعذار طبيه من منصة صحتي**
+
+━━━━━━━━━━━━━━
+🔵 **للتواصل واتساب**  
+📲 https://wa.me/+966562570935`,
+
+    `🎯 **مَرْكَز سُرْعَة إِنْجَاز** ✨  
+كل ما تحتاجه في دراستك الجامعية، التقنية، وحتى خدماتك الطبية… في مكان واحد
+
+━━━━━━━━━━━━━━
+🔥 **الخدمات المقدمة:** 🔥
+
+📝✏️ **حل الواجبات والاختبارات** (كويز – ميد – فاينل)  
+📚📋 **تلخيص المقررات والمحاضرات**  
+🎨💫 **تصميم عروض PowerPoint احترافية وجذابة**  
+📂🎓 **إعداد مشاريع التخرج الشاملة**  
+📊 **إعداد المشاريع الهندسية** (أوتوكاد - ريفيت - لوميون)  
+📱 **تصميم مشاريع المحاكاة المختلفة**  
+📚✨ **إعداد رسائل الماجستير والدكتوراه باحترافية**  
+💡🎯 **اقتراح عناوين وخطط بحث متميزة**  
+🔍📖 **توفير المراجع والدراسات السابقة**  
+📄🔥 **إعداد أبحاث النشر والترقية**  
+📊📈 **التحليل الإحصائي والتدقيق اللغوي**  
+🌟 **إعداد البحوث الجامعية باللغتين (عربي - إنجليزي) بمنهجية متكاملة**  
+📋 **إعداد التقارير والتكاليف الأكاديمية**  
+🎪 **تصميم البوسترات الأكاديمية (بروجكت)**  
+🗺️ **إعداد الخرائط المفاهيمية**  
+📝 **إعداد دراسة الحالات والمقالات العلمية**  
+📚 **تلخيص الكتب باللغتين العربية والإنجليزية**  
+🌐💻 **تصميم وبرمجة المواقع والمتاجر الإلكترونية**  
+📱 **تطوير التطبيقات والبرمجيات**  
+🛠️📊 **تطوير أنظمة إدارة المهام والهيكل التنظيمي**  
+🚀📈 **تحسين محركات البحث (SEO) والدعم الفني**  
+💾 **إعداد مشاريع برمجة الحاسب** (Python - Java - C++ - PHP)  
+🤖 **إعداد مشاريع الذكاء الاصطناعي وتعلم الآلة**  
+🌐 **إعداد مشاريع إنترنت الأشياء (IoT)**  
+🔧 **برمجة أنظمة التحكم المدمجة (Embedded Systems)**  
+📊 **محاكاة المشاريع الهندسية (MATLAB, Simulink)**  
+📀 **تحليل البيانات الضخمة (Big Data)**  
+🗃️ **تصميم وتحليل قواعد البيانات** (MySQL - Oracle - MongoDB)  
+🌺 **ملف الإنجاز والأداء الوظيفي** (إلكتروني وورقي) وفق النظام الجديد  
+📄 **كتابة التقارير والسجلات التعليمية**  
+📊 **تحليل النتائج وإعداد الخطط العلاجية والإثرائية**  
+🏆 **تصميم شهادات الشكر والتقدير**  
+📝 **كتابة أسئلة الاختبارات**  
+✨ **وكافة الأعمال الإدارية والتعليمية الأخرى**  
+🎨 **تصميم الشعارات والهويات البصرية المتكاملة**  
+📄✨ **تصميم السيرة الذاتية الاحترافية، البروشورات، والمجلات**  
+📢 **تصميم المنشورات والفيديوهات الإعلانية**  
+🎬 **تصميم الرسوم المتحركة والتقنيات ثلاثية الأبعاد**  
+📩 **تصميم الدعوات الإلكترونية**  
+📊 **تصميم الإنفوجرافيك الاحترافي**  
+🌐🔄 **ترجمة معتمدة** (كتب - روايات - قصص - مقالات)  
+🔢 **دورات الرياضيات** (الرياضيات العامة، شروحات متقدمة، تدريبات شاملة)  
+🌐 **دورات اللغة الإنجليزية** (تأسيس، محادثة، تحضير للمقابلات والاختبارات)  
+🎯 **دورات المهارات الجامعية** (إدارة الوقت، مهارات البحث العلمي، كتابة الأوراق)  
+🏥 **دورات المصطلحات الطبية** (التمريض، الصيدلة، الطب البشري)  
+💼 **الدورات المحاسبية المتكاملة** (المحاسبة المالية، محاسبة التكاليف، البرامج المحاسبية)  
+📘🎯 **حلول منهج Evolve 1, 2, 3, 4**  
+📗💡 **حلول منهج Cambridge**  
+🔑✨ **أكواد Evolve جديدة مضمونة وأسعار مناسبة**  
+🩺🎖️ **خدمة استخراج "سكليف صحتي" بكل احترافية وفي وقت قياسي** (للعسكريين والمدنيين والطلاب)
+
+━━━━━━━━━━━━━━
+✨ **مميزات خدمتنا:**  
+⚡🚀 **سرعة إنجاز غير مسبوقة**  
+🎯✅ **دقة ومطابقة للمواصفات المطلوبة**  
+🔒🛡️ **تعامل سري وآمن 100%**  
+📍🇸🇦 **خدمة في جميع مناطق المملكة**
+
+📞 **للتواصل والاستفسار:**  
+📲💚 **واتساب:** https://wa.me/+966510349663  
+🌐✨ **الموقع الإلكتروني:** https://surraenjazblog.wordpress.com/`,
+
+    `توقف عن المعاناة الدراسية! 🚫  
+🎯 **مركز سرعة إنجاز - حلك النهائي لكل التحديات الأكاديمية!** 🎯
+
+━━━━━━━━━━━━━━
+🔥 **خدماتنا تشمل:** 🔥
+
+✅ **مشاريع تخرج** - بجودة استثنائية  
+✅ **أبحاث جامعية وعلمية** - 100% أصلية  
+✅ **رسائل ماجستير ودكتوراه** - بإشراف متخصصين  
+✅ **حل واجبات واختبارات** - بدقة فائقة  
+✅ **تحليل إحصائي (SPSS)** - نتائج مضمونة
+
+🔵 **للمعلمين والمؤسسات:**  
+✅ **ملفات إنجاز وإعداد مهني**  
+✅ **خطط تربوية وإدارية متكاملة**
+
+━━━━━━━━━━━━━━
+✨ **مميزاتنا:** ✨
+
+🟢 **خبراء متخصصون** - في جميع المجالات  
+🟢 **جودة مضمونة** - أعمال أصلية 100%  
+🟢 **سرعة في التنفيذ** - نسلم في الموعد  
+🟢 **أسعار مناسبة** - تناسب جميع الطلاب  
+🟢 **سرية تامة** - خصوصيتك محفوظة
+
+━━━━━━━━━━━━━━
+🎁 **عرض خاص:**  
+**خصم 15% على أول طلب** + تعديلات مجانية حتى الرضا التام!
+
+📞 **تواصل معنا الآن:**  
+📱 **واتساب مباشر:** https://wa.me/+966510349663  
+🌐 **الموقع الإلكتروني:** https://surraenjazblog.wordpress.com/
+
+━━━━━━━━━━━━━━
+⚡ **سرعة إنجاز - رفيق دربك نحو التميز الأكاديمي!** 🌟  
+**نجاحك يبدأ بقرار... اتخذ قرارك الآن!** 📚✨`,
+  ];
+
   let rotatingConfigStore = {
-    messages: [
-      'السلام عليكم، يتوفر لدينا خدمات أكاديمية متكاملة وحل واجبات وتكاليف بأعلى جودة وسرعة إنجاز ✨',
-      'أهلاً بكم! نقدم عروضاً مميزة على خدمات الأبحاث والترجمة والتحليل الإحصائي مع ضمان الدقة 📚',
-      'نوفر لكم دعماً أكاديمياً متخصصاً في كافة التخصصات والجامعات، تواصلوا معنا للاستفسار 🌟',
-      '',
-      '',
-    ],
+    messages: [...MESSAGE_DRAFTS],
     groups: [] as string[],
     interval_minutes: 5,
     is_active: false,
@@ -3736,15 +5507,20 @@ async function startServer() {
   });
 
   // =========================================================================
-  // 2. الانضمام التلقائي المتقدم ورادار الروابط (Auto Join Advanced API)
+  // 2. الانضمام التلقائي المتقدم ورادار الروابط (Auto Join Advanced API - Real GramJS)
   // =========================================================================
   interface AutoJoinTaskItem {
     id: string;
     url: string;
     type: 'public' | 'private';
     status: 'pending' | 'joining' | 'joined' | 'already_member' | 'invalid';
+    title?: string;
     error?: string;
   }
+
+  let autoJoinHistory: number[] = []; // Timestamps of joins in the last 3 hours (rate limiting: max 25 / 3h)
+  let isAutoJoinActive = false;
+  let autoJoinCancelRequested = false;
 
   let autoJoinState = {
     running: false,
@@ -3755,6 +5531,7 @@ async function startServer() {
     already: 0,
     fail: 0,
     items: [] as AutoJoinTaskItem[],
+    recentJoinsCount: 0,
   };
 
   app.post('/api/auto_join/advanced', async (req, res) => {
@@ -3767,6 +5544,7 @@ async function startServer() {
       rawLinks = data.links.split(/[\s,\n]+/).filter(Boolean);
     }
 
+    // Extract links from external web page if requested
     if (data.fetch_external && typeof data.web_url === 'string' && data.web_url.startsWith('http')) {
       try {
         const response = await fetch(data.web_url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -3786,6 +5564,10 @@ async function startServer() {
       status: 'pending',
     }));
 
+    // Clean up join history older than 3 hours
+    const threeHoursAgo = Date.now() - 3 * 60 * 60 * 1000;
+    autoJoinHistory = autoJoinHistory.filter((t) => t > threeHoursAgo);
+
     autoJoinState = {
       running: true,
       paused: false,
@@ -3795,16 +5577,155 @@ async function startServer() {
       already: 0,
       fail: 0,
       items: tasks,
+      recentJoinsCount: autoJoinHistory.length,
     };
 
+    autoJoinCancelRequested = false;
+    isAutoJoinActive = true;
+
+    // Send immediate HTTP response so the UI does not block
     res.json({
       success: true,
       message: `تم بدء فحص وانضمام ${tasks.length} رابط بنجاح`,
       state: autoJoinState,
     });
+
+    // Execute real GramJS joining in background asynchronously
+    (async () => {
+      const client = await getClientForSession(data.sessionString, data.phone);
+      if (!client) {
+        console.warn('[AutoJoin] No authenticated Telegram client found');
+        autoJoinState.running = false;
+        io.emit('auto_join_result', { success: false, message: 'لا يوجد حساب تيليجرام نشط', state: autoJoinState });
+        return;
+      }
+
+      // Fetch user's existing dialogs to skip already joined chats
+      const existingPeerIds = new Set<string>();
+      try {
+        const dialogs = await client.getDialogs({ limit: 150 }).catch(() => []);
+        for (const d of dialogs) {
+          if (d.id) existingPeerIds.add(String(d.id).replace(/^-100/, '').replace(/^-/, ''));
+        }
+      } catch (_) {}
+
+      const delayMs = Math.max(3000, Number(data.delay_seconds || 6) * 1000);
+
+      for (let i = 0; i < tasks.length; i++) {
+        if (autoJoinCancelRequested) {
+          console.log('[AutoJoin] Cancellation requested. Stopping join queue.');
+          break;
+        }
+
+        const task = tasks[i];
+        task.status = 'joining';
+        autoJoinState.items = [...tasks];
+        io.emit('auto_join_progress', { current: i + 1, total: tasks.length, task, state: autoJoinState });
+
+        // Check 3-hour rate limit
+        const currentThreeHoursAgo = Date.now() - 3 * 60 * 60 * 1000;
+        autoJoinHistory = autoJoinHistory.filter((t) => t > currentThreeHoursAgo);
+        if (autoJoinHistory.length >= 25) {
+          task.status = 'invalid';
+          task.error = 'توقف تلقائي لحماية الحساب: تم الوصول للحد الأقصى (25 انضمام خلال 3 ساعات)';
+          autoJoinState.fail++;
+          autoJoinState.done++;
+          continue;
+        }
+
+        try {
+          if (task.type === 'private') {
+            // Private invite link
+            const hashMatch = task.url.match(/(?:\+|joinchat\/|invite=)([a-zA-Z0-9_-]+)/);
+            const hash = hashMatch ? hashMatch[1] : task.url.replace(/^.*[+/]/, '');
+
+            try {
+              const resJoin: any = await client.invoke(new Api.messages.ImportChatInvite({ hash }));
+              task.status = 'joined';
+              task.title = resJoin?.chats?.[0]?.title || 'مجموعة خاصة';
+              autoJoinState.success++;
+              autoJoinHistory.push(Date.now());
+            } catch (invErr: any) {
+              const errMsg = invErr?.errorMessage || invErr?.message || '';
+              if (errMsg.includes('USER_ALREADY_PARTICIPANT')) {
+                task.status = 'already_member';
+                autoJoinState.already++;
+              } else if (errMsg.includes('INVITE_HASH_EXPIRED')) {
+                task.status = 'invalid';
+                task.error = 'رابط الدعوة منتهي الصلاحية';
+                autoJoinState.fail++;
+              } else if (errMsg.includes('FLOOD_WAIT')) {
+                task.status = 'invalid';
+                task.error = `قيود تيليجرام (FloodWait): ${errMsg}`;
+                autoJoinState.fail++;
+                break; // Stop immediately on flood wait
+              } else {
+                task.status = 'invalid';
+                task.error = errMsg || 'فشل الانضمام';
+                autoJoinState.fail++;
+              }
+            }
+          } else {
+            // Public username or link
+            const cleanTarget = task.url.replace(/^(?:https?:\/\/)?(?:t\.me\/|telegram\.me\/)?@?/, '').split('/')[0];
+            const peer = await resolvePeerTarget(client, cleanTarget);
+            try {
+              const resJoin: any = await client.invoke(new Api.channels.JoinChannel({ channel: peer }));
+              task.status = 'joined';
+              task.title = resJoin?.chats?.[0]?.title || cleanTarget;
+              autoJoinState.success++;
+              autoJoinHistory.push(Date.now());
+            } catch (pubErr: any) {
+              const pubErrMsg = pubErr?.errorMessage || pubErr?.message || '';
+              if (pubErrMsg.includes('USER_ALREADY_PARTICIPANT')) {
+                task.status = 'already_member';
+                autoJoinState.already++;
+              } else if (pubErrMsg.includes('FLOOD_WAIT')) {
+                task.status = 'invalid';
+                task.error = `قيود تيليجرام (FloodWait): ${pubErrMsg}`;
+                autoJoinState.fail++;
+                break;
+              } else {
+                task.status = 'invalid';
+                task.error = pubErrMsg || 'فشل الانضمام للقناة أو المجموعة';
+                autoJoinState.fail++;
+              }
+            }
+          }
+        } catch (execErr: any) {
+          task.status = 'invalid';
+          task.error = execErr?.message || 'خطأ غير متوقع';
+          autoJoinState.fail++;
+        }
+
+        autoJoinState.done++;
+        autoJoinState.recentJoinsCount = autoJoinHistory.length;
+        io.emit('auto_join_progress', { current: i + 1, total: tasks.length, task, state: autoJoinState });
+
+        // Delay between joins
+        if (i < tasks.length - 1 && !autoJoinCancelRequested) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+
+      autoJoinState.running = false;
+      isAutoJoinActive = false;
+      io.emit('auto_join_result', {
+        success: true,
+        message: `اكتمل فحص الروابط. انضمام ناجح: ${autoJoinState.success}، عضو مسبقاً: ${autoJoinState.already}، إخفاق: ${autoJoinState.fail}`,
+        state: autoJoinState,
+      });
+    })().catch((err) => {
+      console.warn('[AutoJoin] Background loop error:', err);
+      autoJoinState.running = false;
+      isAutoJoinActive = false;
+    });
   });
 
   app.get('/api/auto_join/status', (req, res) => {
+    const threeHoursAgo = Date.now() - 3 * 60 * 60 * 1000;
+    autoJoinHistory = autoJoinHistory.filter((t) => t > threeHoursAgo);
+    autoJoinState.recentJoinsCount = autoJoinHistory.length;
     res.json({
       success: true,
       ...autoJoinState,
@@ -3812,63 +5733,56 @@ async function startServer() {
   });
 
   app.post('/api/auto_join/stop', (req, res) => {
+    autoJoinCancelRequested = true;
     autoJoinState.running = false;
+    isAutoJoinActive = false;
     res.json({
       success: true,
-      message: 'تم إيقاف الانضمام التلقائي',
+      message: 'تم طلب إيقاف الانضمام التلقائي بنجاح',
       state: autoJoinState,
     });
   });
 
   // =========================================================================
-  // 3. القواعد والردود التلقائية (Auto Responder API)
+  // 3. القواعد والردود التلقائية (Auto Responder API - Real GramJS)
   // =========================================================================
-  let autoReplyRulesStore = [
-    {
-      id: 'rule_1',
-      keyword: 'السلام عليكم',
-      replyText: 'وعليكم السلام ورحمة الله وبركاته، مرحباً بك! كيف يمكنني مساعدتك؟ 🌸',
-      matchType: 'contains',
-      scope: 'all',
-      isEnabled: true,
-      timesTriggered: 14,
-    },
-    {
-      id: 'rule_2',
-      keyword: 'الأسعار',
-      replyText: 'أهلاً بك! يمكنك الاطلاع على باقاتنا وعروضنا الحالية عبر الرابط المثبت أو إرسال تفاصيل طلبك مباشرة ✨',
-      matchType: 'contains',
-      scope: 'all',
-      isEnabled: true,
-      timesTriggered: 8,
-    },
-  ];
-
   app.get('/api/auto_reply/rules', (req, res) => {
     res.json({
       success: true,
+      enabled: autoRepliesEnabled,
       rules: autoReplyRulesStore,
     });
   });
 
   app.post('/api/add_auto_reply', (req, res) => {
     const data = req.body || {};
+    const replyContent = (data.replyText || data.reply || '').trim();
+    const keyword = (data.keyword || '').trim();
+
+    if (!keyword || !replyContent) {
+      return res.status(400).json({ success: false, message: 'الكلمة المفتاحية ونص الرد مطلوبان' });
+    }
+
     const newRule = {
       id: `rule_${Date.now()}`,
-      keyword: (data.keyword || '').trim(),
-      replyText: (data.reply || data.replyText || '').trim(),
+      keyword,
+      replyText: replyContent,
+      reply: replyContent,
       matchType: data.matchType || data.match || 'contains',
+      match: data.matchType || data.match || 'contains',
       scope: data.scope || 'all',
       isEnabled: true,
       timesTriggered: 0,
+      used_count: 0,
+      last_used: 0,
     };
-    if (!newRule.keyword || !newRule.replyText) {
-      return res.status(400).json({ success: false, message: 'الكلمة المفتاحية ونص الرد مطلوبان' });
-    }
+
     autoReplyRulesStore.push(newRule);
+    persistAutoReplies();
+
     res.json({
       success: true,
-      message: 'تمت إضافة قاعدة الرد التلقائي بنجاح',
+      message: 'تمت إضافة قاعدة الرد التلقائي وحفظها في settings.json بنجاح',
       rule: newRule,
     });
   });
@@ -3879,14 +5793,25 @@ async function startServer() {
     if (!rule) {
       return res.status(404).json({ success: false, message: 'القاعدة غير موجودة' });
     }
+
     if (data.keyword) rule.keyword = data.keyword;
-    if (data.replyText || data.reply) rule.replyText = data.replyText || data.reply;
-    if (data.matchType || data.match) rule.matchType = data.matchType || data.match;
+    const rep = data.replyText || data.reply;
+    if (rep) {
+      rule.replyText = rep;
+      rule.reply = rep;
+    }
+    if (data.matchType || data.match) {
+      rule.matchType = data.matchType || data.match;
+      rule.match = data.matchType || data.match;
+    }
     if (data.scope) rule.scope = data.scope;
     if (typeof data.isEnabled === 'boolean') rule.isEnabled = data.isEnabled;
+
+    persistAutoReplies();
+
     res.json({
       success: true,
-      message: 'تم تحديث القاعدة بنجاح',
+      message: 'تم تحديث القاعدة وحفظها في settings.json بنجاح',
       rule,
     });
   });
@@ -3894,9 +5819,10 @@ async function startServer() {
   app.post('/api/delete_auto_reply', (req, res) => {
     const data = req.body || {};
     autoReplyRulesStore = autoReplyRulesStore.filter((r) => r.id !== data.id);
+    persistAutoReplies();
     res.json({
       success: true,
-      message: 'تم حذف القاعدة',
+      message: 'تم حذف القاعدة بنجاح',
     });
   });
 
@@ -3905,31 +5831,29 @@ async function startServer() {
     const rule = autoReplyRulesStore.find((r) => r.id === data.id);
     if (rule) {
       rule.isEnabled = !rule.isEnabled;
+      persistAutoReplies();
       return res.json({ success: true, rule });
     }
     res.status(404).json({ success: false, message: 'القاعدة غير موجودة' });
   });
 
-  // =========================================================================
-  // 4. رسائلي وسجل الدفعات (Sent Batches API)
-  // =========================================================================
-  let sentBatchesStore: any[] = [
-    {
-      id: 'batch_101',
-      text: 'السلام عليكم ورحمة الله، يتوفر لدينا خدمات دعم أكاديمي متخصصة 📚',
-      hasImages: false,
-      imagesCount: 0,
-      groupsCount: 3,
-      targets: [
-        { chatId: '-1001749201928', chatTitle: 'قروب المطورين العربي', messageId: 'msg_8901' },
-        { chatId: '-1001594839201', chatTitle: 'منصة التقنية والذكاء الاصطناعي', messageId: 'msg_8902' },
-        { chatId: '-1001892019283', chatTitle: 'ملتقى رواد الأعمال', messageId: 'msg_8903' },
-      ],
-      date: new Date().toLocaleDateString(),
-      timestamp: '10:45 AM',
-    },
-  ];
+  app.post('/api/auto_reply/toggle_global', (req, res) => {
+    const { enabled } = req.body || {};
+    if (typeof enabled === 'boolean') {
+      autoRepliesEnabled = enabled;
+    } else {
+      autoRepliesEnabled = !autoRepliesEnabled;
+    }
+    persistAutoReplies();
+    res.json({
+      success: true,
+      autoRepliesEnabled,
+    });
+  });
 
+  // =========================================================================
+  // 4. رسائلي وسجل الدفعات (Sent Batches API - Real GramJS editMessage & deleteMessages)
+  // =========================================================================
   app.get('/api/batches', (req, res) => {
     res.json({
       success: true,
@@ -3937,32 +5861,508 @@ async function startServer() {
     });
   });
 
-  app.post('/api/batches/edit', (req, res) => {
+  app.post('/api/batches/edit', async (req, res) => {
     const data = req.body || {};
-    const { batch_id, new_text } = data;
+    const { batch_id, new_text, sessionString, phone } = data;
+
     const batch = sentBatchesStore.find((b) => b.id === batch_id);
     if (!batch) {
       return res.status(404).json({ success: false, message: 'الدفعة غير موجودة' });
     }
+
+    const client = await getClientForSession(sessionString, phone);
+    let successCount = 0;
+    let failCount = 0;
+
+    if (client) {
+      for (const target of batch.targets || []) {
+        try {
+          const peer = await resolvePeerTarget(client, target.chatId);
+          await client.editMessage(peer, {
+            message: Number(target.messageId),
+            text: new_text,
+            parseMode: 'md',
+          });
+          successCount++;
+        } catch (editErr: any) {
+          console.warn(`[BatchEdit] Failed to edit message ${target.messageId} in ${target.chatId}:`, editErr?.message || editErr);
+          failCount++;
+        }
+      }
+    }
+
     batch.text = new_text;
+    saveBatchesToDisk(sentBatchesStore);
+
     res.json({
       success: true,
-      message: `تم تعديل الرسالة بنجاح في كافة المجموعات (${batch.targets.length} مجموعة)`,
+      message: `تم تعديل الرسالة بنجاح (نجح: ${successCount}، تعذر: ${failCount})`,
       batch,
     });
   });
 
-  app.post('/api/batches/delete', (req, res) => {
+  app.post('/api/batches/delete', async (req, res) => {
     const data = req.body || {};
-    const { batch_id } = data;
+    const { batch_id, sessionString, phone } = data;
+
     const idx = sentBatchesStore.findIndex((b) => b.id === batch_id);
     if (idx === -1) {
       return res.status(404).json({ success: false, message: 'الدفعة غير موجودة' });
     }
+
     const removed = sentBatchesStore.splice(idx, 1)[0];
+    saveBatchesToDisk(sentBatchesStore);
+
+    const client = await getClientForSession(sessionString, phone);
+    let deletedCount = 0;
+
+    if (client) {
+      for (const target of removed.targets || []) {
+        try {
+          const peer = await resolvePeerTarget(client, target.chatId);
+          await client.deleteMessages(peer, [Number(target.messageId)], { revoke: true });
+          deletedCount++;
+        } catch (delErr: any) {
+          console.warn(`[BatchDelete] Failed to delete message ${target.messageId} in ${target.chatId}:`, delErr?.message || delErr);
+        }
+      }
+    }
+
     res.json({
       success: true,
-      message: `تم حذف وسحب الرسائل من كافة المجموعات (${removed.targets.length} مجموعة)`,
+      message: `تم سحب وحذف الرسائل من تيليجرام (${deletedCount}/${removed.targets.length} مجموعة)`,
+    });
+  });
+
+  // =========================================================================
+  // CORE SEND BATCH & SMART (SALAM) ENGINE & REPORT TO 'me'
+  // =========================================================================
+  async function executeServerSendBatch(params: {
+    text: string;
+    targetChatIds: string[];
+    protectionMode?: string;
+    smart_required_messages?: number;
+    smart_wait_seconds?: number;
+    sessionString?: string;
+    phone?: string;
+  }): Promise<{
+    batchId: string;
+    totalSuccess: number;
+    totalFailed: number;
+    targets: Array<{ chatId: string; messageId: string; chatTitle: string; status: string }>;
+  }> {
+    const {
+      text,
+      targetChatIds,
+      protectionMode = 'salam',
+      smart_required_messages = 3,
+      smart_wait_seconds = 30,
+      sessionString,
+      phone,
+    } = params;
+
+    const client = await getClientForSession(sessionString, phone);
+    if (!client) {
+      throw new Error('لا يوجد حساب تيليجرام مصادق عليه لإرسال الدفعة');
+    }
+
+    const batchId = `batch_${Date.now()}`;
+    const targetResults: Array<{ chatId: string; messageId: string; chatTitle: string; status: string }> = [];
+
+    for (const chatId of targetChatIds) {
+      try {
+        const peer = await resolvePeerTarget(client, chatId);
+
+        // الخطوة 1: فحص الحماية لكل مجموعة قبل الإرسال
+        const isProtected = await isGroupProtected(client, peer);
+        console.log(`[SendBatch] Group "${chatId}" protection status: ${isProtected ? 'PROTECTED (محمية ببوتات حماية)' : 'UNPROTECTED (غير محمية)'}`);
+
+        // الخطوة 2: تطبيق القواعد الصارمة
+        // 1. ممنوع إرسال "السلام عليكم" للمجموعات غير المحمية
+        // 2. إذا كانت غير محمية: أرسل الرسالة الأصلية مباشرة
+        // 3. إذا كانت محمية: نفّذ السيناريو الذكي
+        if (isProtected) {
+          // السيناريو الذكي للمجموعات المحمية
+          // 1. أرسل "السلام عليكم"
+          console.log(`[SalamMode] 1. Group ${chatId} is protected. Sending greeting "السلام عليكم"...`);
+          const greetingMsg: any = await client.sendMessage(peer, {
+            message: 'السلام عليكم',
+          });
+
+          recordSalamActivity({
+            chatId,
+            chatTitle: chatId,
+            greetingMsgId: greetingMsg.id,
+            status: 'greeting_sent',
+            statusLabel: 'تم إرسال السلام كتمويه أولي (مجدول)',
+            interactionCount: 0,
+            requiredInteractions: smart_required_messages,
+            remainingSeconds: smart_wait_seconds,
+            totalWaitSeconds: smart_wait_seconds,
+            originalText: text,
+            details: `تم إرسال 'السلام عليكم' بنجاح (معرف: ${greetingMsg.id}) في الدفعة المجدولة`,
+          });
+
+          // 2. تفعيل مستمع الأحداث الحي (Event Listener) لمراقبة الرسائل الجديدة لحظياً خلال فترة الانتظار
+          const liveIncomingMsgs: any[] = [];
+          const waitStartTime = Date.now();
+          recordSalamActivity({
+            chatId,
+            chatTitle: chatId,
+            greetingMsgId: greetingMsg.id,
+            status: 'waiting_interaction',
+            statusLabel: `في انتظار تفاعل الأعضاء (${smart_wait_seconds} ثانية)`,
+            interactionCount: 0,
+            requiredInteractions: smart_required_messages,
+            remainingSeconds: smart_wait_seconds,
+            totalWaitSeconds: smart_wait_seconds,
+            originalText: text,
+            details: `جاري رصد تفاعل الأعضاء في المجموعة ${chatId}`,
+          });
+
+          const liveMsgHandler = (event: any) => {
+            try {
+              const incoming = event?.message;
+              if (incoming && !incoming.out && Number(incoming.id) > Number(greetingMsg.id)) {
+                liveIncomingMsgs.push(incoming);
+                console.log(`[SalamMode] ⚡ Live event detected in ${chatId}: message ID ${incoming.id} (total: ${liveIncomingMsgs.length})`);
+                const elapsed = Math.floor((Date.now() - waitStartTime) / 1000);
+                recordSalamActivity({
+                  chatId,
+                  chatTitle: chatId,
+                  greetingMsgId: greetingMsg.id,
+                  status: 'interaction_detected',
+                  statusLabel: `تفاعل وارد (${liveIncomingMsgs.length}/${smart_required_messages})`,
+                  interactionCount: liveIncomingMsgs.length,
+                  requiredInteractions: smart_required_messages,
+                  remainingSeconds: Math.max(0, smart_wait_seconds - elapsed),
+                  totalWaitSeconds: smart_wait_seconds,
+                  lastMessageSnippet: incoming.message ? String(incoming.message).slice(0, 70) : undefined,
+                  lastMessageSender: incoming.senderId ? String(incoming.senderId) : undefined,
+                  originalText: text,
+                  details: `وردت رسالة من عضو برقم ${incoming.id}`,
+                });
+              }
+            } catch {}
+          };
+          try {
+            client.addEventHandler(liveMsgHandler, new NewMessage({ chats: [peer] }));
+          } catch {}
+
+          console.log(`[SalamMode] 2. Waiting ${smart_wait_seconds}s for interactions in ${chatId}...`);
+          await new Promise((r) => setTimeout(r, smart_wait_seconds * 1000));
+
+          try {
+            client.removeEventHandler(liveMsgHandler, new NewMessage({ chats: [peer] }));
+          } catch {}
+
+          // 3. التحقق المزدوج من نشاط المجموعة عبر Event Listener و getMessages
+          let interactionPassed = false;
+          let totalCount = liveIncomingMsgs.length;
+          try {
+            const recentMsgs: any = await client.getMessages(peer, {
+              limit: 20,
+              minId: greetingMsg.id,
+            });
+            const othersMsgs = (recentMsgs || []).filter((m: any) => !m.out && m.id > greetingMsg.id);
+            totalCount = Math.max(othersMsgs.length, liveIncomingMsgs.length);
+            console.log(`[SalamMode] 3. Monitored ${totalCount} new messages from participants in ${chatId} (live: ${liveIncomingMsgs.length}, fetched: ${othersMsgs.length}, required: ${smart_required_messages})`);
+            if (totalCount >= smart_required_messages) {
+              interactionPassed = true;
+            }
+          } catch (chkErr) {
+            console.warn('[SalamMode] Check messages error:', chkErr);
+            if (liveIncomingMsgs.length >= smart_required_messages) {
+              interactionPassed = true;
+            } else {
+              interactionPassed = false;
+            }
+          }
+
+          if (interactionPassed) {
+            // 4. إذا تفاعل الأعضاء، عدّل رسالة "السلام" إلى الرسالة الأصلية
+            console.log(`[SalamMode] 4. Interaction verified (${smart_required_messages}+ msgs). Editing greeting to original text in ${chatId}...`);
+            await client.editMessage(peer, {
+              message: greetingMsg.id,
+              text,
+              parseMode: 'md',
+            });
+            recordSalamActivity({
+              chatId,
+              chatTitle: chatId,
+              greetingMsgId: greetingMsg.id,
+              status: 'message_edited',
+              statusLabel: 'تم تعديل رسالة السلام إلى الرسالة الأصلية ✍️',
+              interactionCount: totalCount,
+              requiredInteractions: smart_required_messages,
+              remainingSeconds: 0,
+              totalWaitSeconds: smart_wait_seconds,
+              originalText: text,
+              decision: 'edit',
+              details: `المجموعة نشطة (${totalCount} تفاعلات). تم التعديل إلى المنشور المطلوب بنجاح.`,
+            });
+            targetResults.push({
+              chatId,
+              messageId: String(greetingMsg.id),
+              chatTitle: chatId,
+              status: 'success',
+            });
+          } else {
+            // 5. إذا لم يحدث تفاعل كافٍ، احذف رسالة "السلام"
+            console.log(`[SalamMode] 5. Low interaction in ${chatId} (<${smart_required_messages}). Deleting greeting message via deleteMessages...`);
+            await client.deleteMessages(peer, [greetingMsg.id], { revoke: true }).catch(() => {});
+            recordSalamActivity({
+              chatId,
+              chatTitle: chatId,
+              greetingMsgId: greetingMsg.id,
+              status: 'message_deleted',
+              statusLabel: 'تم حذف رسالة السلام لعدم وجود تفاعل كافٍ 🗑️',
+              interactionCount: totalCount,
+              requiredInteractions: smart_required_messages,
+              remainingSeconds: 0,
+              totalWaitSeconds: smart_wait_seconds,
+              originalText: text,
+              decision: 'delete',
+              details: `المجموعة صامتة (${totalCount}/${smart_required_messages}). تم حذف الرسالة لتأمين الحساب من الحظر.`,
+            });
+            targetResults.push({
+              chatId,
+              messageId: String(greetingMsg.id),
+              chatTitle: chatId,
+              status: 'withdrawn_low_interaction',
+            });
+          }
+        } else {
+          // المجموعة غير محمية: أرسل الرسالة الأصلية مباشرة (ممنوع إرسال السلام عليكم هنا)
+          console.log(`[SendBatch] Group ${chatId} is UNPROTECTED. Sending original message directly...`);
+          const sent: any = await client.sendMessage(peer, { message: text, parseMode: 'md' });
+          targetResults.push({
+            chatId,
+            messageId: String(sent.id),
+            chatTitle: chatId,
+            status: 'success',
+          });
+        }
+      } catch (sendErr: any) {
+        console.warn(`[SendBatch] Error sending to ${chatId}:`, sendErr?.message || sendErr);
+        targetResults.push({
+          chatId,
+          messageId: '0',
+          chatTitle: chatId,
+          status: 'failed',
+        });
+      }
+    }
+
+    const successTargets = targetResults.filter((t) => t.status === 'success');
+    const failTargets = targetResults.filter((t) => t.status !== 'success');
+
+    // Create batch and save to disk
+    const newBatch = {
+      id: batchId,
+      text,
+      hasImages: false,
+      imagesCount: 0,
+      groupsCount: successTargets.length,
+      targets: successTargets,
+      date: new Date().toISOString().split('T')[0],
+      timestamp: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }),
+    };
+
+    if (successTargets.length > 0) {
+      sentBatchesStore.unshift(newBatch);
+      saveBatchesToDisk(sentBatchesStore);
+    }
+
+    // Send final report to 'me' (الرسائل المحفوظة)
+    try {
+      const modeLabel =
+        protectionMode === 'salam'
+          ? 'الوضع الذكي (السلام عليكم + انتظار 30ث ورصد 3 رسائل)'
+          : 'إرسال مباشر';
+
+      const reportContent =
+        `📊 *تقرير إرسال الدفعة الحقيقي* 📊\n\n` +
+        `🆔 *معرف الدفعة:* \`${batchId}\`\n` +
+        `🛡️ *الوضع:* ${modeLabel}\n` +
+        `✅ *المجموعات الناجحة:* ${successTargets.length}\n` +
+        `❌ *المجموعات المخفقة/المسحوبة:* ${failTargets.length}\n` +
+        `🕒 *الوقت:* ${new Date().toLocaleTimeString('ar-EG')}\n\n` +
+        `💬 *نص الإعلان:*\n${text.substring(0, 180)}${text.length > 180 ? '...' : ''}`;
+
+      await client.sendMessage('me', { message: reportContent, parseMode: 'md' });
+    } catch (repErr) {
+      console.warn('[SendBatch] Report to me error:', repErr);
+    }
+
+    io.emit('new_batch_sent', newBatch);
+
+    return {
+      batchId,
+      totalSuccess: successTargets.length,
+      totalFailed: failTargets.length,
+      targets: targetResults,
+    };
+  }
+
+  // Sender batch endpoint
+  app.post('/api/sender/batch', async (req, res) => {
+    try {
+      const data = req.body || {};
+      const {
+        text,
+        targetChatIds,
+        protectionMode = 'salam',
+        smart_required_messages = 3,
+        smart_wait_seconds = 30,
+        sessionString,
+        phone,
+      } = data;
+
+      if (!text || !Array.isArray(targetChatIds) || targetChatIds.length === 0) {
+        return res.status(400).json({ success: false, message: 'النص وقائمة المجموعات مطلوبة' });
+      }
+
+      const result = await executeServerSendBatch({
+        text,
+        targetChatIds,
+        protectionMode,
+        smart_required_messages,
+        smart_wait_seconds,
+        sessionString,
+        phone,
+      });
+
+      res.json({
+        success: true,
+        message: `تم إرسال الدفعة بنجاح (ناجح: ${result.totalSuccess}، مخفق/مسحوب: ${result.totalFailed})`,
+        ...result,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'فشل إرسال الدفعة' });
+    }
+  });
+
+  // =========================================================================
+  // REAL SERVER-SIDE SCHEDULED SENDER
+  // =========================================================================
+  let scheduledTimer: NodeJS.Timeout | null = null;
+  let scheduledState = {
+    active: false,
+    text: '',
+    targetChatIds: [] as string[],
+    intervalMinutes: 15,
+    protectionMode: 'salam',
+    smart_required_messages: 3,
+    smart_wait_seconds: 30,
+    roundsExecuted: 0,
+    lastRunTime: 0,
+    nextRunTime: 0,
+    sessionString: '',
+    phone: '',
+  };
+
+  app.post('/api/sender/schedule/start', async (req, res) => {
+    const data = req.body || {};
+    const {
+      text,
+      targetChatIds,
+      intervalMinutes = 15,
+      protectionMode = 'salam',
+      smart_required_messages = 3,
+      smart_wait_seconds = 30,
+      sessionString,
+      phone,
+    } = data;
+
+    if (!text || !Array.isArray(targetChatIds) || targetChatIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'النص وقائمة المجموعات مطلوبة للجدولة' });
+    }
+
+    if (scheduledTimer) {
+      clearInterval(scheduledTimer);
+      scheduledTimer = null;
+    }
+
+    const intervalVal = Math.max(1, Number(intervalMinutes));
+    scheduledState = {
+      active: true,
+      text,
+      targetChatIds,
+      intervalMinutes: intervalVal,
+      protectionMode,
+      smart_required_messages: Number(smart_required_messages) || 3,
+      smart_wait_seconds: Number(smart_wait_seconds) || 30,
+      roundsExecuted: 0,
+      lastRunTime: 0,
+      nextRunTime: Date.now() + intervalVal * 60 * 1000,
+      sessionString: sessionString || '',
+      phone: phone || '',
+    };
+
+    // Trigger first execution in background
+    executeServerSendBatch({
+      text,
+      targetChatIds,
+      protectionMode,
+      smart_required_messages: scheduledState.smart_required_messages,
+      smart_wait_seconds: scheduledState.smart_wait_seconds,
+      sessionString,
+      phone,
+    })
+      .then(() => {
+        scheduledState.roundsExecuted++;
+        scheduledState.lastRunTime = Date.now();
+        io.emit('scheduled_sender_status', scheduledState);
+      })
+      .catch((e) => console.warn('[Scheduler] First run error:', e));
+
+    // Start persistent server interval
+    scheduledTimer = setInterval(async () => {
+      console.log(`[Scheduler] ⏰ Executing scheduled round #${scheduledState.roundsExecuted + 1}...`);
+      scheduledState.roundsExecuted++;
+      scheduledState.lastRunTime = Date.now();
+      scheduledState.nextRunTime = Date.now() + intervalVal * 60 * 1000;
+      io.emit('scheduled_sender_status', scheduledState);
+
+      await executeServerSendBatch({
+        text: scheduledState.text,
+        targetChatIds: scheduledState.targetChatIds,
+        protectionMode: scheduledState.protectionMode,
+        smart_required_messages: scheduledState.smart_required_messages,
+        smart_wait_seconds: scheduledState.smart_wait_seconds,
+        sessionString: scheduledState.sessionString,
+        phone: scheduledState.phone,
+      }).catch((e) => console.warn('[Scheduler] Scheduled round error:', e));
+    }, intervalVal * 60 * 1000);
+
+    res.json({
+      success: true,
+      message: `تم تفعيل الجدولة الحقيقية في الخادم كل ${intervalVal} دقيقة بنجاح`,
+      scheduledState,
+    });
+  });
+
+  app.post('/api/sender/schedule/stop', (req, res) => {
+    if (scheduledTimer) {
+      clearInterval(scheduledTimer);
+      scheduledTimer = null;
+    }
+    scheduledState.active = false;
+    scheduledState.nextRunTime = 0;
+    io.emit('scheduled_sender_status', scheduledState);
+
+    res.json({
+      success: true,
+      message: 'تم إيقاف الجدولة بنجاح',
+      scheduledState,
+    });
+  });
+
+  app.get('/api/sender/schedule/status', (req, res) => {
+    res.json({
+      success: true,
+      scheduledState,
     });
   });
 
@@ -4193,27 +6593,65 @@ async function startServer() {
     }
   });
 
-  app.post('/api/telegram/chat-invite/join', (req, res) => {
+  app.post('/api/telegram/chat-invite/join', async (req, res) => {
     try {
-      const { hash } = req.body;
+      const { hash, sessionString, phone } = req.body;
       if (!hash) {
-        return res.status(400).json({ ok: false, error: 'INVITE_HASH_EMPTY' });
+        return res.status(400).json({ ok: false, error: 'INVITE_HASH_EMPTY', message: 'رابط أو رمز الدعوة مطلوب' });
       }
 
-      const hashSum = hash.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-      const isChannel = hashSum % 2 === 0;
-      const newChatId = `chat_inv_${hash.slice(0, 8)}`;
+      const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
+      if (!client || !client.connected) {
+        return res.status(401).json({
+          ok: false,
+          error: 'AUTH_KEY_UNREGISTERED',
+          message: 'خادم تيليجرام غير متصل بالجلسة. يرجى تسجيل الدخول أولاً.',
+        });
+      }
+
+      const cleanHash = String(hash).replace(/^(https?:\/\/)?t\.me\/(joinchat\/|\+)?/, '').split('?')[0].split('/')[0];
+      const result: any = await client.invoke(new Api.messages.ImportChatInvite({ hash: cleanHash }));
+
+      let title = 'مجموعة جديدة';
+      let isChannel = false;
+      let newChatId = `chat_${cleanHash.slice(0, 8)}`;
+
+      if (result && result.chats && result.chats[0]) {
+        const c = result.chats[0];
+        title = c.title || title;
+        isChannel = Boolean(c.broadcast);
+        newChatId = String(c.id);
+      }
 
       return res.json({
         ok: true,
         chatId: newChatId,
-        title: isChannel ? `قناة تيليجرام (${hash.slice(0, 6)})` : `مجموعة الدعم والمناقشة (${hash.slice(0, 6)})`,
+        title,
         isChannel,
         joinedDate: new Date().toISOString(),
-        message: 'Joined successfully via invite link',
+        message: 'تم الانضمام بنجاح عبر خوادم تيليجرام الرسمية (ImportChatInvite)',
+        result,
       });
     } catch (e: any) {
-      return res.status(500).json({ ok: false, error: e.message });
+      const errMsg = e?.errorMessage || e?.message || String(e);
+      console.warn('[MTProto] ImportChatInvite error:', errMsg);
+
+      if (errMsg.includes('USER_ALREADY_PARTICIPANT')) {
+        return res.json({
+          ok: true,
+          alreadyMember: true,
+          message: 'أنت عضو بالفعل في هذه المجموعة/القناة.',
+        });
+      }
+
+      const status = errMsg.includes('FLOOD_WAIT') ? 429 :
+                     errMsg.includes('INVITE_HASH_EXPIRED') ? 410 : 400;
+
+      return res.status(status).json({
+        ok: false,
+        error: errMsg,
+        message: `فشل الانضمام: ${errMsg}`,
+      });
     }
   });
 
@@ -4362,7 +6800,7 @@ async function startServer() {
   // ==========================================
 
   // 1. Get Public VAPID Key Endpoint
-  app.get('/api/web-push/vapid-public-key', (req, res) => {
+  app.get(['/api/web-push/vapid-public-key', '/api/web-push/public-key'], (req, res) => {
     res.json({
       success: true,
       publicKey: VAPID_PUBLIC_KEY,
@@ -4391,6 +6829,7 @@ async function startServer() {
       };
 
       webPushSubscriptions.set(id, record);
+      saveSubscriptionsToDisk(webPushSubscriptions);
       console.log(`[WebPush] Subscription saved successfully (ID: ${id.substring(0, 10)}..., Total: ${webPushSubscriptions.size})`);
 
       res.json({
@@ -4410,6 +6849,7 @@ async function startServer() {
       if (endpoint) {
         const id = crypto.createHash('sha256').update(endpoint).digest('hex');
         webPushSubscriptions.delete(id);
+        saveSubscriptionsToDisk(webPushSubscriptions);
       }
       res.json({ success: true });
     } catch (e: any) {
@@ -4467,6 +6907,48 @@ async function startServer() {
   });
 
   // ==========================================
+  // KEYWORD MONITORING ENDPOINTS
+  // ==========================================
+  app.get('/api/alerts/history', (req, res) => {
+    res.json({
+      success: true,
+      monitoringEnabled,
+      count: USER_LOGS.length,
+      keywordsCount: MONITOR_KEYWORDS.length,
+      alerts: USER_LOGS,
+    });
+  });
+
+  app.post('/api/alerts/clear', (req, res) => {
+    USER_LOGS.length = 0;
+    res.json({
+      success: true,
+      message: 'تم مسح سجل التنبيهات بنجاح',
+      alerts: [],
+    });
+  });
+
+  app.get('/api/alerts/status', (req, res) => {
+    res.json({
+      success: true,
+      monitoringEnabled,
+      keywordsCount: MONITOR_KEYWORDS.length,
+      alertsCount: USER_LOGS.length,
+      keywords: MONITOR_KEYWORDS,
+    });
+  });
+
+  app.post('/api/alerts/toggle', (req, res) => {
+    // Monitoring is permanently and automatically active (Hardcoded Default)
+    monitoringEnabled = true;
+    res.json({
+      success: true,
+      monitoringEnabled: true,
+      message: 'المراقبة تعمل دائماً وبشكل افتراضي',
+    });
+  });
+
+  // ==========================================
   // VITE MIDDLEWARE & STATIC ASSET HANDLING
   // ==========================================
 
@@ -4504,9 +6986,109 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', async () => {
     console.log(`Telegram Fullstack Server running on http://0.0.0.0:${PORT}`);
     console.log(`Telegram API_ID: ${TELEGRAM_API_ID} | MTProto 2.0 Layer 184`);
+
+  // =========================================================================
+  // BOOT INITIALIZATION: Load all account sessions from sessions/ directory
+  // =========================================================================
+  const initializeSessionsOnBoot = async (): Promise<void> => {
+    console.log('[SessionEngine] Initializing isolated accounts from sessions/ directory...');
+    const diskSessions = loadAllAccountSessionsFromDisk();
+
+    if (diskSessions.size === 0) {
+      console.log('ℹ️ [SessionEngine] No saved sessions found in sessions/ directory. Ready for fresh authentication.');
+      return;
+    }
+
+    console.log(`[SessionEngine] Found ${diskSessions.size} account session(s) on disk. Connecting clients...`);
+
+    for (const [index, sessionData] of diskSessions.entries()) {
+      try {
+        console.log(`[SessionEngine] Bootstrapping AccountInstance [${index}] (Phone: ${sessionData.phone || 'unknown'}, UserID: ${sessionData.userId})...`);
+
+        const stringSession = new sessions.StringSession(sessionData.session);
+        const client = new TelegramClient(
+          stringSession,
+          Number(TELEGRAM_API_ID),
+          TELEGRAM_API_HASH,
+          {
+            connectionRetries: 3,
+            requestRetries: 3,
+            timeout: 10,
+            useWSS: false,
+            deviceModel: `Telegram Android MTProto (Acc ${index})`,
+            systemVersion: 'Android 14',
+            appVersion: '11.2.3',
+            langCode: 'ar',
+            systemLangCode: 'ar',
+          }
+        );
+
+        configureTelegramClient(client, sessionData.session);
+
+        const isConnected = await connectWithTimeout(client, 3500);
+        if (isConnected) {
+          const isAuth = await client.checkAuthorization().catch(() => false);
+          if (isAuth) {
+            const me: any = await client.getMe().catch(() => null);
+            const userData = me || {
+              id: sessionData.userId,
+              phone: sessionData.phone,
+              firstName: sessionData.name || `User ${index}`,
+              username: sessionData.username || '',
+            };
+
+            USERS.set(index, userData);
+            authenticatedTelegramClients.set(sessionData.session, client);
+
+            accountInstances.set(index, {
+              currentAccount: index,
+              userId: String(userData.id || sessionData.userId),
+              phone: userData.phone || sessionData.phone,
+              sessionString: sessionData.session,
+              client,
+              user: userData,
+              lastActive: new Date().toISOString(),
+            });
+
+            if (index === currentAccount || !mainTelegramClient) {
+              currentAccount = index;
+              mainTelegramClient = client;
+            }
+
+            const userName = [userData.firstName, userData.lastName].filter(Boolean).join(' ') || userData.firstName || 'مستخدم';
+            console.log(`✅ [SessionEngine] Account [${index}] verified & ready. Logged in as: ${userName} (${userData.phone || userData.id})`);
+          } else {
+            console.warn(`⚠️ [SessionEngine] Account [${index}] authorization failed or revoked.`);
+          }
+        } else {
+          console.warn(`⚠️ [SessionEngine] Account [${index}] connect timed out. Registered in memory for on-demand retry.`);
+          authenticatedTelegramClients.set(sessionData.session, client);
+          accountInstances.set(index, {
+            currentAccount: index,
+            userId: sessionData.userId,
+            phone: sessionData.phone,
+            sessionString: sessionData.session,
+            client,
+            user: null,
+            lastActive: new Date().toISOString(),
+          });
+        }
+      } catch (err: any) {
+        console.error(`❌ [SessionEngine] Failed to initialize account [${index}] from disk:`, err?.message || err);
+      }
+    }
+
+    console.log(`[SessionEngine] Boot initialization finished. Loaded accounts: ${accountInstances.size}, Active Account: [${currentAccount}]`);
+  };
+
+    // =========================================================================
+    // 1. Multi-Account Boot & Session Health Check (sessions/ directory)
+    // Replicates official Telegram isolated session structure (sessions/account_{index}.json)
+    // =========================================================================
+    await initializeSessionsOnBoot();
   });
 }
 

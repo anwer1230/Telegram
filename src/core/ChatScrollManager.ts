@@ -1,14 +1,10 @@
 /**
  * ChatScrollManager.ts
- * Replicates DrKLO/Telegram Android ChatActivity scroll position restoration mechanism:
- * - firstVisibleItemPosition / firstVisibleItemIndex
- * - topOffset (exact pixel offset of the top item relative to container)
- * - isNearBottom
- * - visibleItemsCount
- * - lastViewedMessageId
+ * Replicates official Telegram scroll position restoration mechanism:
+ * - Default on opening a chat is ALWAYS scroll to bottom (scrollToBottom)
+ * - Old scroll position is only restored if returning to the same chat within the active session
+ * - Persistent restoration across page reloads is disabled to avoid jumping to old messages
  */
-
-import { MessagesStorage } from './MessagesStorage';
 
 export interface ChatScrollState {
   chatId: string;
@@ -40,7 +36,7 @@ export class ChatScrollManager {
   }
 
   /**
-   * Saves current scroll metrics for a chat (equivalent to ChatActivity.onPause / saveScrollPosition)
+   * Saves current scroll metrics for a chat in active in-memory session only
    */
   public saveScrollPosition(
     chatId: string,
@@ -49,23 +45,19 @@ export class ChatScrollManager {
     isNearBottom: boolean
   ): void {
     if (!chatId || !container) return;
-
     const scrollTop = container.scrollTop;
     const scrollHeight = container.scrollHeight;
     const clientHeight = container.clientHeight;
 
-    // Find the first visible message element
     const messageElements = container.querySelectorAll<HTMLElement>('[data-message-id]');
     let firstVisibleMessageId: string | undefined;
     let topOffset = 0;
     let firstVisibleItemPosition = 0;
 
     const containerRect = container.getBoundingClientRect();
-
     for (let i = 0; i < messageElements.length; i++) {
       const el = messageElements[i];
       const rect = el.getBoundingClientRect();
-      // First element whose bottom edge is below container top
       if (rect.bottom >= containerRect.top) {
         firstVisibleMessageId = el.getAttribute('data-message-id') || undefined;
         topOffset = rect.top - containerRect.top;
@@ -88,55 +80,28 @@ export class ChatScrollManager {
     };
 
     this.scrollStates.set(chatId, state);
-
-    // Save to MessagesStorage for SQLite/session persistence
-    try {
-      MessagesStorage.getInstance(this.currentAccount).saveChatScrollPosition(
-        chatId,
-        firstVisibleItemPosition,
-        topOffset,
-        firstVisibleMessageId || 0,
-        isNearBottom
-      );
-    } catch (e) {}
   }
 
   /**
-   * Retrieves saved scroll position for a chat
+   * Retrieves saved scroll position for a chat (in-memory current session only)
    */
   public getScrollPosition(chatId: string): ChatScrollState | undefined {
-    let state = this.scrollStates.get(chatId);
-    if (!state) {
-      // Try restoring from MessagesStorage
-      const persistent = MessagesStorage.getInstance(this.currentAccount).getChatScrollPosition(chatId);
-      if (persistent) {
-        state = {
-          chatId,
-          scrollTop: 0,
-          scrollHeight: 0,
-          clientHeight: 0,
-          firstVisibleMessageId: persistent.messageId !== '0' ? persistent.messageId : undefined,
-          topOffset: persistent.topOffset || 0,
-          firstVisibleItemPosition: persistent.position || 0,
-          isNearBottom: persistent.isAtBottom,
-          visibleCount: 30,
-          savedTimestamp: Date.now(),
-        };
-        this.scrollStates.set(chatId, state);
-      }
-    }
-    return state;
+    return this.scrollStates.get(chatId);
   }
 
   /**
-   * Clears saved scroll position (e.g. when chat is deleted)
+   * Clears saved scroll position (e.g. when chat is closed or reset)
    */
-  public clearScrollPosition(chatId: string): void {
-    this.scrollStates.delete(chatId);
+  public clearScrollPosition(chatId?: string): void {
+    if (chatId) {
+      this.scrollStates.delete(chatId);
+    } else {
+      this.scrollStates.clear();
+    }
   }
 
   /**
-   * Restores scroll position in DOM container (equivalent to ChatActivity.scrollToPositionWithOffset)
+   * Restores scroll position in DOM container
    */
   public restoreScroll(
     chatId: string,
@@ -144,7 +109,6 @@ export class ChatScrollManager {
     fallbackToBottom: boolean = true
   ): boolean {
     if (!chatId || !container) return false;
-
     const state = this.getScrollPosition(chatId);
     if (!state) {
       if (fallbackToBottom) {
@@ -158,7 +122,6 @@ export class ChatScrollManager {
       return true;
     }
 
-    // Try restoring by target message element if available
     if (state.firstVisibleMessageId) {
       const el = container.querySelector<HTMLElement>(`[data-message-id="${state.firstVisibleMessageId}"]`);
       if (el) {
@@ -171,7 +134,6 @@ export class ChatScrollManager {
       }
     }
 
-    // Fallback: restore exact scrollTop with offset correction if scrollHeight matches or changed
     if (state.scrollHeight > 0 && container.scrollHeight > 0) {
       const heightDiff = container.scrollHeight - state.scrollHeight;
       container.scrollTop = Math.max(0, state.scrollTop + heightDiff);
@@ -180,7 +142,6 @@ export class ChatScrollManager {
     } else {
       container.scrollTop = container.scrollHeight;
     }
-
     return true;
   }
 }

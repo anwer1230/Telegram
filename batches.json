@@ -1,0 +1,16 @@
+[
+  {
+    "id": "batch_101",
+    "text": "السلام عليكم ورحمة الله، يتوفر لدينا خدمات دعم أكاديمي متخصصة 📚",
+    "hasImages": false,
+    "imagesCount": 0,
+    "groupsCount": 3,
+    "targets": [
+      { "chatId": "-1001749201928", "chatTitle": "قروب المطورين العربي", "messageId": "8901" },
+      { "chatId": "-1001594839201", "chatTitle": "منصة التقنية والذكاء الاصطناعي", "messageId": "8902" },
+      { "chatId": "-1001892019283", "chatTitle": "ملتقى رواد الأعمال", "messageId": "8903" }
+    ],
+    "date": "2026-09-04",
+    "timestamp": "10:45 AM"
+  }
+]

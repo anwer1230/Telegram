@@ -21,6 +21,7 @@ import { useTelegram } from '../../context/TelegramContext';
 import { AudioPlayerWaveform } from './AudioPlayerWaveform';
 import { LottieSticker } from './LottieSticker';
 import { POPULAR_REACTIONS } from '../../data/mockTelegramData';
+import { formatTelegramTime } from '../../utils/dateUtils';
 import {
   renderInteractiveMessageText,
   ParsedLinkResult,
@@ -89,6 +90,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const lastTouchTapRef = React.useRef<number>(0);
 
   const isOutgoing = message.isOutgoing;
+  const displayTime = (message.rawDate || message.epoch)
+    ? formatTelegramTime(message.rawDate || message.epoch)
+    : (message.timestamp || '');
   const isSelected = selectedMessageIds.includes(message.id);
   const isMultiSelectMode = selectedMessageIds.length > 0;
   const isArabic = settings.language === 'ar';
@@ -381,7 +385,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               className={`absolute bottom-1 end-1 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full text-[10px] text-white flex items-center gap-1 shadow-md select-none pointer-events-none`}
             >
               {message.isPinned && <Pin className="w-2.5 h-2.5 text-sky-400 -rotate-45" />}
-              <span>{message.timestamp}</span>
+              <span>{displayTime}</span>
               {renderStatus()}
             </div>
           </div>
@@ -393,7 +397,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               className={`absolute -bottom-1 end-1 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full text-[10px] text-white flex items-center gap-1 shadow-md select-none pointer-events-none`}
             >
               {message.isPinned && <Pin className="w-2.5 h-2.5 text-sky-400 -rotate-45" />}
-              <span>{message.timestamp}</span>
+              <span>{displayTime}</span>
               {renderStatus()}
             </div>
           </div>
@@ -681,7 +685,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {isArabic ? 'معدلة' : 'edited'}
                 </span>
               )}
-              <span>{message.timestamp}</span>
+              <span>{displayTime}</span>
               {renderStatus()}
             </div>
           </div>

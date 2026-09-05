@@ -18,6 +18,7 @@ import {
 import { Chat } from '../../types';
 import { useTelegram } from '../../context/TelegramContext';
 import { useLongPress, useChatSwipeActions } from '../../hooks/useTouchGestures';
+import { formatChatListTime } from '../../utils/dateUtils';
 
 interface ChatListItemProps {
   chat: Chat;
@@ -239,7 +240,11 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive }) =>
             </div>
 
             <span className="text-[12px] text-gray-400 shrink-0 whitespace-nowrap font-mono">
-              {chat.draft ? chat.draftTimestamp || chat.lastMessage?.timestamp : chat.lastMessage?.timestamp}
+              {chat.draft
+                ? chat.draftTimestamp || 'مسودة'
+                : chat.lastMessage
+                ? formatChatListTime(chat.lastMessage.rawDate || chat.lastMessage.epoch || chat.lastMessage.date) || chat.lastMessage.timestamp
+                : ''}
             </span>
           </div>
 

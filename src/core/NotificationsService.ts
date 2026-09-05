@@ -11,6 +11,7 @@ import { notificationsController } from './NotificationsController';
 import { TLRPC } from './TLRPC';
 import { telegramDB } from '../utils/sqliteStorage';
 import { telegramDb, initTelegramDexieDb } from './telegramDexieDb';
+import { MESSAGE_DRAFTS } from '../components/Modals/SenderModal';
 import {
   SenderBatch,
   MonitorConfig,
@@ -28,6 +29,50 @@ import {
   RotatingSendLog,
 } from '../types';
 import { backgroundSyncService } from './BackgroundSyncService';
+import { SecureSessionStorage } from '../utils/SecureSessionStorage';
+
+// Hardcoded monitor keywords
+export const MONITOR_KEYWORDS: string[] = [
+  'اريد مساعدة',
+  'ابي مساعدة',
+  'من يسوي تكليف',
+  'من يحل',
+  'عندي بحث',
+  'معي واجب',
+  'عندي اسايمنت',
+  'من يسوي اسايمنت',
+  'ابي سكليف',
+  'ابي عذر',
+  'من يسوي سكليف',
+  'ابي شخص مضمون',
+  'ابي مختص',
+  'هيليب',
+  'من يستطيع',
+  'تعرفون احد',
+  'تعرفون شخص',
+  'من يساعدني',
+  'من يعرف مختص',
+  'ابي مختص',
+  'مين يعرف يحل واجب',
+  'من يحل واجبات الجامعه',
+  'أحتاج مساعدتكم',
+  'ابي احد يسوي بحث',
+  'عندي بحث',
+  'مين يعرف مختص',
+  'من يعرف احد كويس',
+];
+
+export function normalizeArabicText(text: string): string {
+  if (!text) return '';
+  return text
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export class NotificationsService {
   private static instance: NotificationsService;
@@ -37,10 +82,10 @@ export class NotificationsService {
   private schedulerTimer: number | null = null;
   private currentProtectionMode: ProtectionMode = 'salam';
 
-  // 2. Monitor state
+  // 2. Monitor state - Hardcoded Default Active
   private monitorConfig: MonitorConfig = {
-    isEnabled: false,
-    keywords: [],
+    isEnabled: true,
+    keywords: [...MONITOR_KEYWORDS],
     sendAlertsToSavedMessages: true,
     browserPushAlerts: true,
   };
@@ -115,13 +160,7 @@ export class NotificationsService {
   private discoveredLinks: LiveDiscoveredLink[] = [];
 
   // 8. Scheduled Rotator (RotatingSendManager)
-  private rotatingMessages: string[] = [
-    'السلام عليكم، يتوفر لدينا خدمات أكاديمية متكاملة وحل واجبات وتكاليف بأعلى جودة وسرعة إنجاز ✨',
-    'أهلاً بكم! نقدم عروضاً مميزة على خدمات الأبحاث والترجمة والتحليل الإحصائي مع ضمان الدقة 📚',
-    'نوفر لكم دعماً أكاديمياً متخصصاً في كافة التخصصات والجامعات، تواصلوا معنا للاستفسار 🌟',
-    '',
-    '',
-  ];
+  private rotatingMessages: string[] = MESSAGE_DRAFTS.map((d) => d.text);
   private rotatingGroups: string[] = [];
   private rotatingIntervalMinutes = 5;
   private isRotatingActive = false;
@@ -278,10 +317,11 @@ export class NotificationsService {
       messageId: string;
       error?: string;
     }[] = params.targetChatIds.map((id) => {
-      const found = params.allChats.find((c) => c.id === id);
+      const cleanId = String(id).replace(/^(?:custom_|chat_)+/i, '').trim();
+      const found = params.allChats.find((c) => c.id === id || c.id === cleanId);
       return {
-        id,
-        title: found?.title || 'مجموعة تيليجرام',
+        id: cleanId,
+        title: found?.title || cleanId || 'مجموعة تيليجرام',
         type: (found?.type || 'group') as any,
         status: 'sent',
         messageId: `msg_${Date.now()}_${Math.random().toString(36).substring(7)}`,
@@ -291,46 +331,91 @@ export class NotificationsService {
     let successCount = 0;
     let failedCount = 0;
 
-    for (const target of targetObjs) {
-      // 1. Check protection & clean text
-      let preparedText = params.text;
-      if (params.protectionMode === 'smart_clean' || params.protectionMode === 'permanent_clean') {
-        preparedText = preparedText
-          .replace(/(?:https?:\/\/|t\.me\/)[^\s]+/gi, '')
-          .replace(/\b\d{8,14}\b/g, '')
-          .trim();
-      }
+    const sessionString = SecureSessionStorage.getItem<string>('tg_session_string') || '';
+    const phone = SecureSessionStorage.getItem<string>('tg_phone') || '';
 
-      if (params.protectionMode === 'salam') {
-        // Salam mechanism: simulate first greeting then editing
-        preparedText = 'السلام عليكم ورحمة الله وبركاته';
-      }
+    // If scheduled sending is enabled, start the real server-side scheduler
+    if (params.isScheduled) {
+      fetch('/api/sender/schedule/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: params.text,
+          targetChatIds: targetObjs.map((t) => t.id),
+          intervalMinutes: params.intervalMinutes || 15,
+          protectionMode: params.protectionMode,
+          smart_required_messages: 3,
+          smart_wait_seconds: 30,
+          sessionString,
+          phone,
+        }),
+      }).catch((schErr) => console.warn('[NotificationsService] Schedule API error:', schErr));
+    }
 
-      try {
-        await connectionsManager.sendRequest({
-          _: 'TL_messages_sendMessage',
-          peer_id: target.id,
-          message: preparedText,
-          random_id: Math.floor(Math.random() * 1000000),
-        });
-
-        if (params.onMessageCreated) {
-          params.onMessageCreated(target.id, preparedText, params.images[0]);
+    // Call real backend batch sender endpoint with full Salam mode execution & report to 'me'
+    try {
+      const res = await fetch('/api/sender/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: params.text,
+          targetChatIds: targetObjs.map((t) => t.id),
+          protectionMode: params.protectionMode,
+          smart_required_messages: 3,
+          smart_wait_seconds: 30,
+          sessionString,
+          phone,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data && data.success) {
+        successCount = data.totalSuccess || 0;
+        failedCount = data.totalFailed || 0;
+        if (Array.isArray(data.targets)) {
+          for (const resTarget of data.targets) {
+            const foundObj = targetObjs.find((t) => t.id === resTarget.chatId);
+            if (foundObj) {
+              foundObj.status = resTarget.status === 'success' ? 'sent' : 'failed';
+              if (resTarget.messageId && resTarget.messageId !== '0') {
+                foundObj.messageId = resTarget.messageId;
+              }
+            }
+          }
         }
-        target.status = 'sent';
-        successCount++;
-      } catch (err: any) {
-        const errText = err?.text || err?.message || '';
-        if (errText.includes('AUTH_KEY_UNREGISTERED') || errText.includes('SESSION_REVOKED') || err?.code === 401) {
+      } else {
+        // Fallback to connectionsManager direct request
+        for (const target of targetObjs) {
+          try {
+            await connectionsManager.sendRequest({
+              _: 'TL_messages_sendMessage',
+              peer_id: target.id,
+              message: params.text,
+              random_id: Math.floor(Math.random() * 1000000),
+            });
+            target.status = 'sent';
+            successCount++;
+          } catch (e: any) {
+            target.status = 'failed';
+            failedCount++;
+          }
+        }
+      }
+    } catch (apiErr) {
+      console.warn('[NotificationsService] Batch API error, fallback:', apiErr);
+      for (const target of targetObjs) {
+        try {
+          await connectionsManager.sendRequest({
+            _: 'TL_messages_sendMessage',
+            peer_id: target.id,
+            message: params.text,
+            random_id: Math.floor(Math.random() * 1000000),
+          });
+          target.status = 'sent';
+          successCount++;
+        } catch (e: any) {
           target.status = 'failed';
-          target.error = 'AUTH_KEY_UNREGISTERED';
           failedCount++;
-          this.handleSessionRevoked('AUTH_KEY_UNREGISTERED');
-          break;
         }
-        target.status = 'failed';
-        target.error = err?.text || 'SEND_ERROR';
-        failedCount++;
       }
     }
 
@@ -381,7 +466,7 @@ export class NotificationsService {
   // 2. LIVE MONITOR & KEYWORD RADAR
   // ==========================================
   public setMonitorConfig(config: Partial<MonitorConfig>) {
-    this.monitorConfig = { ...this.monitorConfig, ...config };
+    this.monitorConfig = { ...this.monitorConfig, ...config, isEnabled: true };
     this.notifyStateChange();
   }
 
@@ -391,6 +476,20 @@ export class NotificationsService {
 
   public getMonitorAlerts(): MonitorAlert[] {
     return this.monitorAlerts;
+  }
+
+  public addMonitorAlert(alert: MonitorAlert) {
+    if (!alert || !alert.id) return;
+    const existingIndex = this.monitorAlerts.findIndex((a) => a.id === alert.id);
+    if (existingIndex >= 0) {
+      this.monitorAlerts[existingIndex] = alert;
+    } else {
+      this.monitorAlerts.unshift(alert);
+      if (this.monitorAlerts.length > 200) {
+        this.monitorAlerts.length = 200;
+      }
+    }
+    this.notifyStateChange();
   }
 
   public clearMonitorAlerts() {
@@ -416,13 +515,28 @@ export class NotificationsService {
     batch.text = newText;
     await telegramDb.myMessageBatches.update(batchId, { text: newText }).catch(() => {});
 
+    const sessionString = SecureSessionStorage.getItem<string>('tg_session_string') || '';
+    const phone = SecureSessionStorage.getItem<string>('tg_phone') || '';
+
+    // Invoke real GramJS edit endpoint on the server
+    fetch('/api/batches/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batch_id: batchId,
+        new_text: newText,
+        sessionString,
+        phone,
+      }),
+    }).catch((e) => console.warn('[NotificationsService] Server batch edit warning:', e));
+
     for (const target of batch.targets) {
       await connectionsManager.sendRequest({
         _: 'TL_messages_editMessage',
         peer_id: target.chatId,
         id: target.messageId,
         message: newText,
-      });
+      }).catch(() => {});
     }
 
     notificationsController.postNotification({
@@ -442,13 +556,27 @@ export class NotificationsService {
     const batch = this.batchLogs[idx];
     await telegramDb.myMessageBatches.delete(batchId).catch(() => {});
 
+    const sessionString = SecureSessionStorage.getItem<string>('tg_session_string') || '';
+    const phone = SecureSessionStorage.getItem<string>('tg_phone') || '';
+
+    // Invoke real GramJS delete endpoint on the server
+    fetch('/api/batches/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batch_id: batchId,
+        sessionString,
+        phone,
+      }),
+    }).catch((e) => console.warn('[NotificationsService] Server batch delete warning:', e));
+
     for (const target of batch.targets) {
       await connectionsManager.sendRequest({
         _: 'TL_messages_deleteMessages',
         peer_id: target.chatId,
         id: target.messageId,
         revoke: true,
-      });
+      }).catch(() => {});
     }
 
     this.batchLogs.splice(idx, 1);
@@ -482,6 +610,21 @@ export class NotificationsService {
 
     this.autoJoinTasks = tasks;
     this.notifyStateChange();
+
+    const sessionString = SecureSessionStorage.getItem<string>('tg_session_string') || '';
+    const phone = SecureSessionStorage.getItem<string>('tg_phone') || '';
+
+    // Invoke backend real GramJS auto join with 25/3h rate limiting
+    fetch('/api/auto_join/advanced', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        links,
+        delay_seconds: 5,
+        sessionString,
+        phone,
+      }),
+    }).catch((e) => console.warn('[AutoJoin] Backend API call warning:', e));
 
     let processed = 0;
     for (const task of tasks) {
@@ -553,6 +696,7 @@ export class NotificationsService {
 
   public stopAutoJoin() {
     this.isAutoJoiningActive = false;
+    fetch('/api/auto_join/stop', { method: 'POST' }).catch(() => {});
     this.notifyStateChange();
   }
 
@@ -724,12 +868,19 @@ export class NotificationsService {
     const text = message.text || '';
 
     // 1. Keyword Monitor Engine (Replicating DrKLO Live Message Scanner)
-    if (this.monitorConfig.isEnabled && this.monitorConfig.keywords.length > 0) {
-      for (const kw of this.monitorConfig.keywords) {
-        if (kw.trim() && text.toLowerCase().includes(kw.toLowerCase())) {
+    if (this.monitorConfig.isEnabled) {
+      const activeKeywords = this.monitorConfig.keywords.length > 0 ? this.monitorConfig.keywords : MONITOR_KEYWORDS;
+      const rawText = text.trim();
+      const normalizedMsg = normalizeArabicText(rawText);
+      for (const kw of activeKeywords) {
+        const trimmedKw = kw.trim();
+        if (!trimmedKw) continue;
+        const normalizedKw = normalizeArabicText(trimmedKw);
+        // Match the full phrase (complete sentence as-is)
+        if (rawText.toLowerCase().includes(trimmedKw.toLowerCase()) || normalizedMsg.includes(normalizedKw)) {
           const alert: MonitorAlert = {
             id: `alert_${Date.now()}`,
-            keyword: kw,
+            keyword: trimmedKw,
             sourceChatId: message.chatId,
             sourceChatTitle: chatTitle,
             senderName: message.senderName || 'مستخدم',
@@ -745,7 +896,7 @@ export class NotificationsService {
           // 4. chatUsername & senderUsername for deep links
           notificationsController.postNotification({
             category: 'keyword_alert',
-            title: `🚨 كلمة مراقبة: [${kw}]`,
+            title: `🚨 كلمة مراقبة: [${trimmedKw}]`,
             body: `💬 الرسالة: ${text}\n📍 المصدر: ${chatTitle}`,
             avatar: message.senderAvatar,
             chatId: message.chatId,
@@ -754,7 +905,7 @@ export class NotificationsService {
             senderId: message.senderId || (message.senderName ? `user_${message.senderName.replace(/\s+/g, '_')}` : undefined),
             senderName: message.senderName || 'مستخدم',
             senderUsername: message.senderUsername,
-            keyword: kw,
+            keyword: trimmedKw,
             messageText: text,
             replyAction: true,
             isSilent: !this.monitorConfig.browserPushAlerts,

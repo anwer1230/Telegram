@@ -565,7 +565,7 @@ self.addEventListener('push', (event) => {
     try {
       rawData = event.data.json();
     } catch {
-      rawData = { notification: { title: 'Telegram', body: event.data.text() } };
+      rawData = { title: 'Telegram', body: event.data.text() };
     }
   }
 
@@ -575,8 +575,8 @@ self.addEventListener('push', (event) => {
     rawData?.type === 'SESSION_REVOKED' ||
     rawData?.data?.reason === 'AUTH_KEY_UNREGISTERED'
   ) {
-    const title = rawData.title || '⚠️ تيليجرام: تم إلغاء الجلسة';
-    const body = rawData.body || 'تم إنهاء الجلسة من جهاز آخر أو انتهت صلاحيتها. تم تسجيل الخروج لحماية حسابك.';
+    const title = rawData.title || rawData?.data?.title || '⚠️ تيليجرام: تم إلغاء الجلسة';
+    const body = rawData.body || rawData?.data?.body || 'تم إنهاء الجلسة من جهاز آخر أو انتهت صلاحيتها. تم تسجيل الخروج لحماية حسابك.';
     event.waitUntil(
       Promise.all([
         self.registration.showNotification(title, {
@@ -603,13 +603,116 @@ self.addEventListener('push', (event) => {
     return;
   }
 
-  const payload = parsePushPayload(rawData);
-  event.waitUntil(showTelegramPushNotification(payload));
+  // Handle Keyword Monitor New Alert Push Event (🔔 تنبيه: {الكلمة} وجسم: في {المجموعة} من {المرسل})
+  const isAlert =
+    rawData?.type === 'new_alert' ||
+    rawData?.data?.type === 'new_alert' ||
+    Boolean(rawData?.keyword || rawData?.data?.keyword);
+
+  if (isAlert) {
+    const alertData = rawData.data || rawData;
+    const keyword = alertData.keyword || rawData.keyword || 'مراقبة';
+    const group = alertData.group || alertData.chatTitle || alertData.chat_title || 'المجموعة';
+    const sender = alertData.sender || alertData.senderName || alertData.sender_name || 'مستخدم';
+    const alertTitle = alertData.title || `🔔 تنبيه: ${keyword}`;
+    const alertBody = alertData.body || `في ${group} من ${sender}`;
+
+    const notificationOptions = {
+      body: alertBody,
+      icon: alertData.icon || '/telegram-logo.svg',
+      badge: '/telegram-logo.svg',
+      tag: `tg_alert_${alertData.id || alertData.messageId || Date.now()}`,
+      renotify: true,
+      vibrate: [200, 100, 200],
+      data: {
+        type: 'new_alert',
+        keyword,
+        group,
+        sender,
+        text: alertData.text,
+        chatId: alertData.chatId,
+        messageId: alertData.messageId,
+        url: alertData.url || (alertData.chatId ? `/?dialog_id=${encodeURIComponent(alertData.chatId)}#/chat/${encodeURIComponent(alertData.chatId)}` : '/'),
+        timestamp: Date.now(),
+      },
+      actions: [
+        { action: 'open_chat', title: 'عرض التنبيه والمحادثة' },
+      ],
+    };
+
+    event.waitUntil(
+      Promise.all([
+        self.registration.showNotification(alertTitle, notificationOptions),
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+          clients.forEach((client) => {
+            client.postMessage({
+              type: 'NEW_KEYWORD_ALERT',
+              alert: {
+                ...alertData,
+                keyword,
+                group,
+                sender,
+              },
+            });
+          });
+        }),
+      ])
+    );
+    return;
+  }
+
+  // Standard Web Push message: extract data.title and data.body
+  const notifData = rawData.data || rawData;
+  const title = notifData.title || rawData.title || 'رسالة جديدة في تيليجرام';
+  const body = notifData.body || notifData.text || rawData.body || rawData.text || 'لديك إشعار جديد في تيليجرام';
+  const icon = notifData.icon || rawData.icon || '/telegram-logo.svg';
+  const badge = notifData.badge || rawData.badge || '/telegram-logo.svg';
+  const targetChatId = notifData.chatId || notifData.dialog_id || notifData.dialogId || '';
+  const urlToOpen = notifData.url || (targetChatId ? `/?dialog_id=${encodeURIComponent(targetChatId)}#/chat/${encodeURIComponent(targetChatId)}` : '/');
+
+  const options = {
+    body,
+    icon,
+    badge,
+    tag: notifData.tag || rawData.tag || `tg_dialog_${targetChatId || Date.now()}`,
+    renotify: true,
+    vibrate: [200, 100, 200],
+    data: {
+      ...notifData,
+      chatId: targetChatId,
+      dialog_id: targetChatId,
+      url: urlToOpen,
+      timestamp: Date.now(),
+    },
+    actions: [
+      { action: 'open_chat', title: 'فتح المحادثة' },
+    ],
+  };
+
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(title, options),
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({
+            type: 'BACKGROUND_PUSH_RECEIVED',
+            title,
+            body,
+            dialog_id: targetChatId,
+            chatId: targetChatId,
+            data: notifData,
+            timestamp: Date.now(),
+          });
+        });
+      }),
+    ])
+  );
 });
 
-// Notification Click Handler
+// Notification Click Handler: opens the specified chat
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+
   const notificationData = event.notification.data || {};
   const action = event.action;
 
@@ -631,43 +734,47 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
-  const targetDialogId =
+  const targetChatId =
+    notificationData.chatId ||
     notificationData.dialog_id ||
     notificationData.dialogId ||
-    notificationData.chatId ||
-    'chat_general';
+    '';
+
+  const targetUrl =
+    notificationData.url ||
+    (targetChatId ? `/?dialog_id=${encodeURIComponent(targetChatId)}#/chat/${encodeURIComponent(targetChatId)}` : '/');
 
   event.waitUntil(
     (async () => {
       // 1. Mark as Read action
-      if (action === 'mark_read') {
-        if (targetDialogId) {
-          await markChatAsReadInDB(targetDialogId);
-        }
-
+      if (action === 'mark_read' && targetChatId) {
+        try {
+          await markChatAsReadInDB(targetChatId);
+        } catch (_) {}
         const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
         clientList.forEach((client) => {
           client.postMessage({
             type: 'MARK_CHAT_AS_READ',
-            dialog_id: targetDialogId,
-            chatId: targetDialogId,
+            dialog_id: targetChatId,
+            chatId: targetChatId,
           });
         });
         return;
       }
 
       // 2. Inline Reply action
-      if (action === 'reply' || event.reply) {
+      if ((action === 'reply' || event.reply) && targetChatId) {
         const replyText = event.reply || (event.userText ? event.userText.trim() : '');
-        if (replyText && targetDialogId) {
-          await saveInlineNotificationReply(targetDialogId, replyText);
-
+        if (replyText) {
+          try {
+            await saveInlineNotificationReply(targetChatId, replyText);
+          } catch (_) {}
           const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
           clientList.forEach((client) => {
             client.postMessage({
               type: 'INLINE_NOTIFICATION_REPLY',
-              dialog_id: targetDialogId,
-              chatId: targetDialogId,
+              dialog_id: targetChatId,
+              chatId: targetChatId,
               text: replyText,
             });
           });
@@ -675,26 +782,23 @@ self.addEventListener('notificationclick', (event) => {
         return;
       }
 
-      // 3. Focus active window or open new window
+      // 3. Focus active window and navigate to chat
       const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const client of clientList) {
         if ('focus' in client) {
           client.postMessage({
             type: 'NAVIGATE_TO_CHAT',
-            dialog_id: targetDialogId,
-            chatId: targetDialogId,
-            url: `/?dialog_id=${encodeURIComponent(targetDialogId)}#/chat/${encodeURIComponent(targetDialogId)}`,
+            dialog_id: targetChatId,
+            chatId: targetChatId,
+            url: targetUrl,
           });
           return client.focus();
         }
       }
 
-      // 4. Open new window if closed
+      // 4. If no window is currently open, open a new window to the chat URL
       if (self.clients.openWindow) {
-        const urlToOpen = targetDialogId
-          ? `/?dialog_id=${encodeURIComponent(targetDialogId)}#/chat/${encodeURIComponent(targetDialogId)}`
-          : '/';
-        return self.clients.openWindow(urlToOpen);
+        return self.clients.openWindow(targetUrl);
       }
     })()
   );

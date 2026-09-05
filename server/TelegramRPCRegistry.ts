@@ -522,14 +522,13 @@ export class TelegramRPCRegistry {
     switch (method) {
       case 'messages.sendMessage':
         return {
-          success: true,
+          success: false,
           rpc: method,
           serverTime,
-          result: {
-            id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-            message: params.message || '',
-            date: serverTime,
-            out: true,
+          error: {
+            code: 401,
+            name: 'AUTH_KEY_UNREGISTERED',
+            message: 'Cannot send message: Telegram client is disconnected or unauthenticated.',
           },
         };
 
