@@ -80,6 +80,15 @@ export class MessagesController {
 
   private constructor(accountNum: number = 0) {
     this.currentAccount = accountNum;
+    try {
+      const syncState = ConnectionsManager.getInstance(accountNum).getSyncStateManager().getSyncState();
+      this.pts = syncState.pts;
+      this.seq = syncState.seq;
+      this.qts = syncState.qts;
+      this.lastDate = syncState.date;
+    } catch (e) {
+      console.warn('[MessagesController] Init sync state notice:', e);
+    }
   }
 
   /**
@@ -736,6 +745,15 @@ export class MessagesController {
     this.gettingDifference = true;
 
     try {
+      const conn = ConnectionsManager.getInstance(this.currentAccount);
+      const syncManager = conn.getSyncStateManager();
+      const currentSync = syncManager.getSyncState();
+
+      if (!this.pts && currentSync.pts) this.pts = currentSync.pts;
+      if (!this.seq && currentSync.seq) this.seq = currentSync.seq;
+      if (!this.qts && currentSync.qts) this.qts = currentSync.qts;
+      if (!this.lastDate && currentSync.date) this.lastDate = currentSync.date;
+
       const userConfig = UserConfig.getInstance(this.currentAccount);
       const user = userConfig.getCurrentUser();
       const phone = user?.phone || '';
@@ -743,8 +761,8 @@ export class MessagesController {
 
       const storage = MessagesStorage.getInstance(this.currentAccount);
 
-      // 1. Request real cloud differential sync slice from backend MTProto proxy
-      const resp = await fetch('/api/telegram/sync', {
+      // 1. Request real cloud differential sync slice from backend MTProto proxy (/api/telegram/difference with fallback to /api/telegram/sync)
+      let resp = await fetch('/api/telegram/difference', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -753,8 +771,23 @@ export class MessagesController {
           pts: this.pts,
           date: this.lastDate,
           qts: this.qts,
+          ptsTotalLimit: currentSync.ptsTotalLimit || 1000,
         }),
-      });
+      }).catch(() => null);
+
+      if (!resp || !resp.ok) {
+        resp = await fetch('/api/telegram/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            sessionString,
+            pts: this.pts,
+            date: this.lastDate,
+            qts: this.qts,
+          }),
+        });
+      }
 
       const data = await resp.json();
 
@@ -773,10 +806,22 @@ export class MessagesController {
           });
         }
 
-        this.pts = (this.pts || 0) + 1;
-        this.seq = (this.seq || 0) + 1;
-        this.lastDate = Math.floor(Date.now() / 1000);
-        storage.saveDiffParams(this.seq, this.pts, this.lastDate, this.qts);
+        const returnedState = data.state || data.difference?.state || data.difference?.intermediate_state || {};
+        this.pts = Number(returnedState.pts) || (this.pts > 0 ? this.pts + 1 : 1001);
+        this.seq = Number(returnedState.seq) || (this.seq > 0 ? this.seq + 1 : 1);
+        this.lastDate = Number(returnedState.date) || Math.floor(Date.now() / 1000);
+        this.qts = Number(returnedState.qts) || this.qts;
+
+        // Persist to SynchronizationStateManager (localStorage)
+        syncManager.updateSyncState({
+          pts: this.pts,
+          seq: this.seq,
+          qts: this.qts,
+          date: this.lastDate,
+        });
+
+        // Persist to SQLite storage
+        storage.saveDiffParams(this.pts, this.seq, this.lastDate, this.qts);
 
         NotificationCenter.getInstance(this.currentAccount).postNotificationName(
           NotificationCenter.dialogsNeedReload
@@ -804,6 +849,10 @@ export class MessagesController {
       if (updates.seq) {
         this.seq = updates.seq;
         this.lastDate = updates.date || Math.floor(Date.now() / 1000);
+        ConnectionsManager.getInstance(this.currentAccount).getSyncStateManager().updateSyncState({
+          seq: this.seq,
+          date: this.lastDate,
+        });
       }
 
       for (const upd of updatesList) {
@@ -811,12 +860,14 @@ export class MessagesController {
           // If PTS was uninitialized (e.g. fresh login), initialize directly without dropping
           if (this.pts === 0) {
             this.pts = upd.pts;
+            ConnectionsManager.getInstance(this.currentAccount).getSyncStateManager().updatePts(this.pts);
           } else if (!isDifference && this.pts + upd.pts_count !== upd.pts) {
             // Sequence gap detected -> trigger fresh getDifference immediately
             this.getDifference();
             return;
           } else {
             this.pts = upd.pts;
+            ConnectionsManager.getInstance(this.currentAccount).getSyncStateManager().updatePts(this.pts);
           }
         }
         this.processSingleUpdate(upd);

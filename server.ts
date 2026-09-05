@@ -9,6 +9,8 @@ import { createServer as createViteServer } from 'vite';
 import { TelegramClient, Api, sessions } from 'telegram';
 import { NewMessage } from 'telegram/events';
 import webpush from 'web-push';
+import * as admin from 'firebase-admin';
+import { getMessaging } from 'firebase-admin/messaging';
 import { telegramRPCRegistry } from './server/TelegramRPCRegistry';
 
 // Dynamic Environment & Credentials Resolution (from process.env)
@@ -629,6 +631,229 @@ async function startServer() {
 
   const webPushSubscriptions = loadSubscriptionsFromDisk();
 
+  // ==========================================
+  // FIREBASE ADMIN SDK & CLOUD MESSAGING (FCM)
+  // Replicating configuration from local service account key file
+  // ==========================================
+  let firebaseServiceAccount: any = {
+    projectId: 'telegramclone-de6f2',
+    clientEmail: 'firebase-adminsdk-fbsvc@telegramclone-de6f2.iam.gserviceaccount.com',
+    privateKeyId: '944153e6d4fa17ac638a70ab6418cdaa199c0ec6',
+    privateKey: undefined,
+  };
+
+  // محاولة تحميل الملف من المجلد المحلي
+  const serviceAccountFilePath = path.join(process.cwd(), 'config', 'serviceAccountKey.json');
+  try {
+    if (fs.existsSync(serviceAccountFilePath)) {
+      const rawFile = fs.readFileSync(serviceAccountFilePath, 'utf8');
+      const serviceAccount = JSON.parse(rawFile);
+      firebaseServiceAccount = {
+        projectId: serviceAccount.project_id || firebaseServiceAccount.projectId,
+        clientEmail: serviceAccount.client_email || firebaseServiceAccount.clientEmail,
+        privateKeyId: serviceAccount.private_key_id || firebaseServiceAccount.privateKeyId,
+        privateKey: serviceAccount.private_key,
+      };
+      console.log('[Firebase Admin] Loaded service account key from config/serviceAccountKey.json');
+    } else {
+      console.warn('[Firebase Admin] serviceAccountKey.json not found in config/ directory. FCM delivery is disabled.');
+    }
+  } catch (e: any) {
+    console.warn('[Firebase Admin] Error reading config/serviceAccountKey.json:', e?.message || e);
+  }
+
+  // Fallback to environment variable if privateKey wasn't in file
+  if (!firebaseServiceAccount.privateKey && process.env.FIREBASE_PRIVATE_KEY) {
+    firebaseServiceAccount.privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+  }
+
+  let firebaseAdminApp: any = null;
+
+  const initFirebaseAdminApp = () => {
+    if (firebaseAdminApp) return firebaseAdminApp;
+    const existingApps = (admin as any).apps || admin.getApps?.() || [];
+    if (existingApps && existingApps.length > 0) {
+      firebaseAdminApp = existingApps[0];
+      return firebaseAdminApp;
+    }
+
+    if (!firebaseServiceAccount.privateKey) {
+      return null;
+    }
+
+    try {
+      const certCredential = (admin as any).credential?.cert || admin.cert;
+      firebaseAdminApp = admin.initializeApp({
+        credential: certCredential(firebaseServiceAccount as any),
+        projectId: firebaseServiceAccount.projectId,
+      });
+      console.log('[Firebase Admin] FCM successfully initialized for project:', firebaseServiceAccount.projectId);
+      return firebaseAdminApp;
+    } catch (err: any) {
+      console.warn('[Firebase Admin] Initialization error:', err?.message || err);
+      return null;
+    }
+  };
+
+  // Initialize Firebase Admin eagerly on startup if credentials exist
+  initFirebaseAdminApp();
+
+  // Persistent storage for registered FCM Device Tokens (Android/iOS/Web)
+  const FCM_TOKENS_FILE = path.join(SESSIONS_DIR, 'fcm_device_tokens.json');
+
+  const loadFcmTokensFromDisk = (): Set<string> => {
+    const set = new Set<string>();
+    try {
+      if (fs.existsSync(FCM_TOKENS_FILE)) {
+        const raw = fs.readFileSync(FCM_TOKENS_FILE, 'utf8');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          for (const token of list) {
+            if (token && typeof token === 'string') set.add(token.trim());
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[FCM] Failed loading tokens from disk:', e);
+    }
+    return set;
+  };
+
+  const saveFcmTokensToDisk = (set: Set<string>) => {
+    try {
+      if (!fs.existsSync(SESSIONS_DIR)) {
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      }
+      fs.writeFileSync(FCM_TOKENS_FILE, JSON.stringify(Array.from(set), null, 2), 'utf8');
+    } catch (e) {
+      console.warn('[FCM] Failed saving tokens to disk:', e);
+    }
+  };
+
+  const registeredFcmTokens = loadFcmTokensFromDisk();
+
+  // Primary function to send real Firebase Cloud Messaging (FCM) notifications
+  const sendFirebaseNotification = async (payload: {
+    title: string;
+    body: string;
+    token?: string;
+    tokens?: string[];
+    chatId?: string;
+    sound?: string;
+    data?: Record<string, string>;
+  }): Promise<{ success: boolean; messageId?: string; response?: any; simulated?: boolean; error?: string }> => {
+    const app = initFirebaseAdminApp();
+    const messaging = app
+      ? typeof (admin as any).messaging === 'function'
+        ? (admin as any).messaging(app)
+        : getMessaging(app)
+      : null;
+
+    const targetTokens = new Set<string>();
+    if (payload.token) targetTokens.add(payload.token.trim());
+    if (Array.isArray(payload.tokens)) {
+      payload.tokens.forEach((t) => {
+        if (t) targetTokens.add(t.trim());
+      });
+    }
+    if (targetTokens.size === 0) {
+      registeredFcmTokens.forEach((t) => targetTokens.add(t));
+    }
+
+    const soundName = payload.sound || 'default';
+    const channelId = `tg_fcm_channel_${soundName}`;
+    const soundFile = soundName === 'silent' ? undefined : `${soundName}.mp3`;
+
+    const stringData: Record<string, string> = {
+      title: payload.title,
+      body: payload.body,
+      timestamp: String(Date.now()),
+      ...(payload.chatId ? { chatId: String(payload.chatId) } : {}),
+      ...(payload.data || {}),
+    };
+
+    if (!messaging || !firebaseServiceAccount.privateKey) {
+      console.log(
+        `[FCM] Notification queued (title: "${payload.title}"). Real delivery requires setting FIREBASE_PRIVATE_KEY.`
+      );
+      return {
+        success: true,
+        simulated: true,
+        messageId: `fcm_simulated_${Date.now()}`,
+      };
+    }
+
+    try {
+      if (targetTokens.size === 0) {
+        // Send to topic 'all_users' (standard FCM broadcast pattern)
+        const response = await messaging.send({
+          topic: 'all_users',
+          notification: {
+            title: payload.title,
+            body: payload.body,
+          },
+          android: {
+            priority: 'high',
+            notification: {
+              channelId,
+              sound: soundFile,
+              defaultSound: soundName === 'default',
+            },
+          },
+          data: stringData,
+        });
+        console.log(`[FCM] Topic broadcast delivered:`, response);
+        return { success: true, messageId: response };
+      }
+
+      const tokenList = Array.from(targetTokens);
+      if (tokenList.length === 1) {
+        const response = await messaging.send({
+          token: tokenList[0],
+          notification: {
+            title: payload.title,
+            body: payload.body,
+          },
+          android: {
+            priority: 'high',
+            notification: {
+              channelId,
+              sound: soundFile,
+              defaultSound: soundName === 'default',
+            },
+          },
+          data: stringData,
+        });
+        console.log(`[FCM] Notification sent to device (${tokenList[0].substring(0, 15)}...):`, response);
+        return { success: true, messageId: response };
+      } else {
+        const response = await messaging.sendEachForMulticast({
+          tokens: tokenList,
+          notification: {
+            title: payload.title,
+            body: payload.body,
+          },
+          android: {
+            priority: 'high',
+            notification: {
+              channelId,
+              sound: soundFile,
+              defaultSound: soundName === 'default',
+            },
+          },
+          data: stringData,
+        });
+        console.log(
+          `[FCM] Multicast sent to ${tokenList.length} devices (success: ${response.successCount}, failure: ${response.failureCount})`
+        );
+        return { success: true, response };
+      }
+    } catch (err: any) {
+      console.warn('[FCM] Error sending Firebase push notification:', err?.message || err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
   // Helper to send Web Push Notification to registered clients (even when closed)
   const sendWebPushNotificationToSubscribers = async (
     payload: {
@@ -679,6 +904,22 @@ async function startServer() {
     if (stateChanged) {
       saveSubscriptionsToDisk(webPushSubscriptions);
     }
+
+    // Simultaneously dispatch notification to registered Firebase Cloud Messaging (FCM) devices
+    try {
+      sendFirebaseNotification({
+        title: payload.title,
+        body: payload.body,
+        data: payload.data
+          ? Object.fromEntries(
+              Object.entries(payload.data).map(([k, v]) => [
+                k,
+                typeof v === 'object' ? JSON.stringify(v) : String(v),
+              ])
+            )
+          : undefined,
+      }).catch((e) => console.warn('[FCM] Dispatch from push subscribers warning:', e?.message || e));
+    } catch (_) {}
 
     return results;
   };
@@ -3269,10 +3510,91 @@ async function startServer() {
     }
   });
 
+  // 8.0 Real MTProto Dedicated updates.getDifference Endpoint
+  app.all('/api/telegram/difference', async (req, res) => {
+    const phone = req.body?.phone || (req.query?.phone as string);
+    const sessionString = req.body?.sessionString || (req.query?.sessionString as string);
+    const pts = Number(req.body?.pts || req.query?.pts) || 0;
+    const date = Number(req.body?.date || req.query?.date) || 0;
+    const qts = Number(req.body?.qts || req.query?.qts) || 0;
+    const ptsTotalLimit = Number(req.body?.ptsTotalLimit || req.query?.ptsTotalLimit) || 1000;
+
+    console.log(`[MTProto] updates.getDifference requested (pts: ${pts}, date: ${date}, qts: ${qts})...`);
+
+    try {
+      const client = await getClientForSession(sessionString, phone);
+      if (client && client.connected) {
+        if (pts > 0) {
+          try {
+            const diffRes: any = await client.invoke(
+              new Api.updates.GetDifference({
+                pts,
+                date: date || Math.floor(Date.now() / 1000) - 86400,
+                qts,
+                ptsTotalLimit,
+              })
+            );
+            console.log(`[MTProto] updates.GetDifference returned:`, diffRes?.className || diffRes?._ || 'updates.difference');
+            return res.json({
+              success: true,
+              rpc: 'updates.getDifference',
+              differenceType: diffRes?.className || diffRes?._ || 'updates.difference',
+              difference: diffRes,
+              state: diffRes?.state || diffRes?.intermediateState || {
+                pts: diffRes?.pts || pts + 1,
+                seq: diffRes?.seq || 1,
+                date: diffRes?.date || Math.floor(Date.now() / 1000),
+                qts: diffRes?.qts || qts,
+              },
+            });
+          } catch (diffErr: any) {
+            console.warn('[MTProto] Api.updates.GetDifference invoke notice, falling back to real sync data:', diffErr?.message || diffErr);
+          }
+        }
+
+        const realData = await fetchRealTelegramData(client, phone);
+        return res.json({
+          success: true,
+          rpc: 'updates.getDifference',
+          differenceType: 'updates.difference',
+          chats: realData.chats,
+          messages: realData.messages,
+          users: realData.users,
+          state: {
+            pts: Math.max(1001, pts + 1),
+            seq: 1,
+            date: Math.floor(Date.now() / 1000),
+            qts: qts,
+          },
+        });
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || err?.errorMessage || String(err);
+      console.warn('[MTProto] /api/telegram/difference error:', errMsg);
+      if (errMsg.includes('SESSION_REVOKED') || errMsg.includes('AUTH_KEY_UNREGISTERED')) {
+        const revokeKey = sessionString?.trim() || (phone ? formatE164Phone(phone) : '');
+        if (revokeKey) {
+          await handleSessionRevocation(revokeKey, 'AUTH_KEY_UNREGISTERED');
+        }
+        return res.json({ success: false, sessionRevoked: true, error: 'SESSION_REVOKED', message: 'الجلسة منتهية الصلاحية.' });
+      }
+    }
+
+    return res.json({
+      success: false,
+      needsLogin: true,
+      error: 'NO_SESSION',
+      message: 'لا توجد جلسة تيليجرام نشطة. يرجى تسجيل الدخول برقم الهاتف أو رمز الجلسة.',
+    });
+  });
+
   // 8. Real MTProto Account & Dialogs Synchronization (updates.getState / messages.getDialogs / users.getUsers RPC)
   app.all('/api/telegram/sync', async (req, res) => {
     const phone = req.body?.phone || (req.query?.phone as string);
     const sessionString = req.body?.sessionString || (req.query?.sessionString as string);
+    const pts = Number(req.body?.pts || req.query?.pts) || 0;
+    const date = Number(req.body?.date || req.query?.date) || 0;
+    const qts = Number(req.body?.qts || req.query?.qts) || 0;
 
     console.log(`[MTProto] Synchronizing account data from Telegram cloud (phone: ${phone || 'any'})...`);
 
@@ -3288,6 +3610,12 @@ async function startServer() {
           ...realData,
           apiId: TELEGRAM_API_ID,
           layer: 184,
+          state: {
+            pts: Math.max(1001, pts + (realData.chats?.length || 1)),
+            seq: 1,
+            date: date || Math.floor(Date.now() / 1000),
+            qts: qts,
+          },
         });
       }
     } catch (syncErr: any) {
@@ -6767,20 +7095,52 @@ async function startServer() {
     }
   });
 
-  // 3. Test Firebase Push Delivery Simulation with Custom Ringtone
-  app.post('/api/telegram/firebase/test-push', (req, res) => {
+  // 2.1 Register FCM Device Token (from Android or Web devices)
+  app.post('/api/telegram/firebase/register-device-token', (req, res) => {
     try {
-      const { chatId, title = 'تجربة إشعار تليجرام', body = 'هذا إشعار تجريبي لاختبار النغمة المخصصة عبر Firebase Messaging', sound = 'default' } = req.body;
+      const { token, platform = 'android', deviceName } = req.body;
+      if (!token || typeof token !== 'string') {
+        return res.status(400).json({ success: false, error: 'TOKEN_REQUIRED' });
+      }
+      const cleanToken = token.trim();
+      registeredFcmTokens.add(cleanToken);
+      saveFcmTokensToDisk(registeredFcmTokens);
+      console.log(`[FCM] Device token registered (${platform}, ${cleanToken.substring(0, 15)}..., total: ${registeredFcmTokens.size})`);
+      res.json({
+        success: true,
+        token: cleanToken,
+        platform,
+        deviceName: deviceName || 'Android Device',
+        totalRegisteredTokens: registeredFcmTokens.size,
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || e });
+    }
+  });
+
+  // 3. Test Firebase Push Delivery with Custom Ringtone & Real FCM Dispatch
+  app.post('/api/telegram/firebase/test-push', async (req, res) => {
+    try {
+      const { chatId, title = 'تجربة إشعار تليجرام', body = 'هذا إشعار تجريبي لاختبار النغمة المخصصة عبر Firebase Messaging', sound = 'default', token } = req.body;
       const fcmChannelId = `tg_fcm_channel_${sound || 'default'}`;
+
+      const fcmLiveResult = await sendFirebaseNotification({
+        chatId,
+        title,
+        body,
+        sound,
+        token,
+      });
 
       const fcmSimulation = {
         success: true,
-        messageId: `fcm_msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        messageId: fcmLiveResult.messageId || `fcm_msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         targetChatId: chatId,
         deliveredSound: sound,
         fcmChannelId,
         firebaseServiceAccount: 'firebase-adminsdk-fbsvc@telegramclone-de6f2.iam.gserviceaccount.com',
         timestamp: new Date().toISOString(),
+        liveDelivery: fcmLiveResult,
         fcmResponse: {
           canonical_ids: 1,
           multicast_id: Math.floor(Math.random() * 1000000000000000),

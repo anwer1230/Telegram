@@ -29,6 +29,221 @@ export interface MtprotoSession {
   serverSalt: string;
   seqNo: number;
   lastMsgId: bigint;
+  pts?: number;
+  seq?: number;
+  qts?: number;
+  date?: number;
+}
+
+/**
+ * Telegram MTProto Synchronization State
+ * Represents synchronization state as specified in Telegram API documentation (https://core.telegram.org/api/updates)
+ */
+export interface SyncState {
+  pts: number;
+  seq: number;
+  qts: number;
+  date: number;
+  ptsTotalLimit?: number;
+  lastSavedAt?: number;
+}
+
+/**
+ * SynchronizationStateManager
+ * Replicated from DrKLO/Telegram Android MTProto implementation (MessagesController.java & ConnectionsManager.java)
+ * Manages and persists 'pts', 'seq', 'qts', and 'date' to localStorage.
+ * Ensures that after a restart or network reconnect, the client can request missing updates
+ * via updates.getDifference as per Telegram API specifications.
+ */
+export class SynchronizationStateManager {
+  private accountNum: number;
+  private pts: number = 0;
+  private seq: number = 0;
+  private qts: number = 0;
+  private date: number = 0;
+  private ptsTotalLimit: number = 1000;
+  public isGettingDifference: boolean = false;
+
+  constructor(accountNum: number = 0) {
+    this.accountNum = accountNum;
+    this.load();
+  }
+
+  private getStorageKey(): string {
+    return `tg_sync_state_${this.accountNum}`;
+  }
+
+  private getLegacyDiffKey(): string {
+    return `tg_diff_params_${this.accountNum}`;
+  }
+
+  /**
+   * Loads persisted synchronization state from localStorage
+   */
+  public load(): SyncState {
+    if (typeof window === 'undefined') {
+      return this.getSyncState();
+    }
+    try {
+      // 1. Try dedicated synchronization state storage key
+      const raw = localStorage.getItem(this.getStorageKey());
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        this.pts = Number(parsed.pts) || 0;
+        this.seq = Number(parsed.seq) || 0;
+        this.qts = Number(parsed.qts) || 0;
+        this.date = Number(parsed.date) || 0;
+        if (parsed.ptsTotalLimit) this.ptsTotalLimit = Number(parsed.ptsTotalLimit);
+        return this.getSyncState();
+      }
+
+      // 2. Compatibility fallback to legacy diff parameters key (MessagesStorage compatibility)
+      const legacyRaw = localStorage.getItem(this.getLegacyDiffKey());
+      if (legacyRaw) {
+        const parsed = JSON.parse(legacyRaw);
+        this.pts = Number(parsed.pts) || 0;
+        this.seq = Number(parsed.seq) || 0;
+        this.qts = Number(parsed.qts) || 0;
+        this.date = Number(parsed.date) || 0;
+        this.persist(); // Migrate to main sync state key
+        return this.getSyncState();
+      }
+    } catch (e) {
+      console.warn(`[SyncStateManager] Failed to load sync state for account ${this.accountNum}:`, e);
+    }
+    return this.getSyncState();
+  }
+
+  /**
+   * Persists 'pts', 'seq', 'qts', and 'date' to localStorage
+   */
+  public persist(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const stateObj: SyncState = {
+        pts: this.pts,
+        seq: this.seq,
+        qts: this.qts,
+        date: this.date,
+        ptsTotalLimit: this.ptsTotalLimit,
+        lastSavedAt: Date.now(),
+      };
+      localStorage.setItem(this.getStorageKey(), JSON.stringify(stateObj));
+
+      // Keep legacy storage key synchronized for MessagesStorage compatibility
+      localStorage.setItem(
+        this.getLegacyDiffKey(),
+        JSON.stringify({
+          pts: this.pts,
+          seq: this.seq,
+          date: this.date,
+          qts: this.qts,
+        })
+      );
+    } catch (e) {
+      console.warn(`[SyncStateManager] Failed to persist sync state for account ${this.accountNum}:`, e);
+    }
+  }
+
+  public getSyncState(): SyncState {
+    return {
+      pts: this.pts,
+      seq: this.seq,
+      qts: this.qts,
+      date: this.date,
+      ptsTotalLimit: this.ptsTotalLimit,
+    };
+  }
+
+  public getPts(): number {
+    return this.pts;
+  }
+
+  public getSeq(): number {
+    return this.seq;
+  }
+
+  public getQts(): number {
+    return this.qts;
+  }
+
+  public getDate(): number {
+    return this.date;
+  }
+
+  public updateSyncState(newState: Partial<SyncState>): void {
+    let changed = false;
+    if (newState.pts !== undefined && newState.pts !== this.pts) {
+      this.pts = newState.pts;
+      changed = true;
+    }
+    if (newState.seq !== undefined && newState.seq !== this.seq) {
+      this.seq = newState.seq;
+      changed = true;
+    }
+    if (newState.qts !== undefined && newState.qts !== this.qts) {
+      this.qts = newState.qts;
+      changed = true;
+    }
+    if (newState.date !== undefined && newState.date !== this.date) {
+      this.date = newState.date;
+      changed = true;
+    }
+    if (newState.ptsTotalLimit !== undefined && newState.ptsTotalLimit !== this.ptsTotalLimit) {
+      this.ptsTotalLimit = newState.ptsTotalLimit;
+      changed = true;
+    }
+    if (changed) {
+      this.persist();
+    }
+  }
+
+  public updatePts(pts: number): void {
+    if (pts !== this.pts) {
+      this.pts = pts;
+      this.persist();
+    }
+  }
+
+  public updateSeq(seq: number): void {
+    if (seq !== this.seq) {
+      this.seq = seq;
+      this.persist();
+    }
+  }
+
+  public updateQts(qts: number): void {
+    if (qts !== this.qts) {
+      this.qts = qts;
+      this.persist();
+    }
+  }
+
+  public updateDate(date: number): void {
+    if (date !== this.date) {
+      this.date = date;
+      this.persist();
+    }
+  }
+
+  public reset(isLogout: boolean = true): void {
+    this.pts = 0;
+    this.seq = 0;
+    this.qts = 0;
+    this.date = 0;
+    if (isLogout && typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(this.getStorageKey());
+        localStorage.removeItem(this.getLegacyDiffKey());
+      } catch (_) {}
+    } else {
+      this.persist();
+    }
+  }
+
+  public hasSyncBaseline(): boolean {
+    return this.pts > 0;
+  }
 }
 
 export class ConnectionsManager {
@@ -42,6 +257,9 @@ export class ConnectionsManager {
   private isPaused = false;
   private listeners = new Set<(state: ConnectionState) => void>();
   private updateListeners = new Set<(update: any) => void>();
+
+  // Synchronization State Manager for pts, seq, qts, and date persistence
+  public readonly syncStateManager: SynchronizationStateManager;
 
   // Real MTProto Session State
   private session: MtprotoSession = {
@@ -65,8 +283,10 @@ export class ConnectionsManager {
 
   public constructor(accountNum: number = 0) {
     this.accountNum = accountNum;
+    this.syncStateManager = new SynchronizationStateManager(accountNum);
     this.initSession();
     this.startNetworkPingLoop();
+    this.checkAndRequestMissingUpdatesOnStartup();
   }
 
   private generateRandomHex(length: number): string {
@@ -116,6 +336,98 @@ export class ConnectionsManager {
     return this.accountNum;
   }
 
+  public getSyncStateManager(): SynchronizationStateManager {
+    return this.syncStateManager;
+  }
+
+  public getSyncState(): SyncState {
+    return this.syncStateManager.getSyncState();
+  }
+
+  public updateSyncState(
+    stateOrPts?: Partial<SyncState> | number,
+    seq?: number,
+    qts?: number,
+    date?: number
+  ): void {
+    if (typeof stateOrPts === 'object') {
+      this.syncStateManager.updateSyncState(stateOrPts);
+    } else {
+      const partial: Partial<SyncState> = {};
+      if (stateOrPts !== undefined) partial.pts = stateOrPts;
+      if (seq !== undefined) partial.seq = seq;
+      if (qts !== undefined) partial.qts = qts;
+      if (date !== undefined) partial.date = date;
+      this.syncStateManager.updateSyncState(partial);
+    }
+  }
+
+  /**
+   * After client restart or page load, checks if an authorized MTProto session exists
+   * and requests missing updates via updates.getDifference as per Telegram API specifications.
+   */
+  private checkAndRequestMissingUpdatesOnStartup(): void {
+    if (typeof window === 'undefined') return;
+
+    // Use a small delay to allow storage, crypto, and database subsystems to initialize
+    setTimeout(async () => {
+      try {
+        const sessionString =
+          localStorage.getItem(`tg_session_string_${this.accountNum}`) ||
+          localStorage.getItem('tg_session_string') ||
+          '';
+
+        if (!sessionString) {
+          return;
+        }
+
+        const syncState = this.syncStateManager.getSyncState();
+        console.log(
+          `[ConnectionsManager] Restart detected for account ${this.accountNum}. Synchronizing state: pts=${syncState.pts}, seq=${syncState.seq}, qts=${syncState.qts}, date=${syncState.date}. Requesting updates.getDifference...`
+        );
+
+        await this.requestDifference();
+      } catch (e) {
+        console.warn(`[ConnectionsManager] Startup updates.getDifference request notice:`, e);
+      }
+    }, 800);
+  }
+
+  /**
+   * Requests missing updates via Telegram updates.getDifference RPC
+   * as per official Telegram MTProto specifications.
+   */
+  public async requestDifference(force: boolean = false): Promise<any> {
+    if (this.syncStateManager.isGettingDifference && !force) {
+      console.log(`[ConnectionsManager] updates.getDifference already in progress for account ${this.accountNum}.`);
+      return null;
+    }
+
+    this.syncStateManager.isGettingDifference = true;
+    const syncState = this.syncStateManager.getSyncState();
+
+    const req: TLRPC.TL_updates_getDifference = {
+      _: 'TL_updates_getDifference',
+      pts: syncState.pts,
+      date: syncState.date || Math.floor(Date.now() / 1000) - 86400,
+      qts: syncState.qts,
+      pts_total_limit: syncState.ptsTotalLimit || 1000,
+    };
+
+    try {
+      this.updateState('CONNECTION_STATE_UPDATING');
+      const response = await this.sendRequest(req);
+      this.updateState('CONNECTION_STATE_CONNECTED');
+      return response;
+    } catch (err: any) {
+      this.updateState('CONNECTION_STATE_CONNECTED');
+      console.warn(`[ConnectionsManager] updates.getDifference failed:`, err);
+      throw err;
+    } finally {
+      this.syncStateManager.isGettingDifference = false;
+    }
+  }
+
   /**
    * DrKLO ConnectionsManager.cleanup
    */
@@ -133,6 +445,7 @@ export class ConnectionsManager {
     if (isLogout && typeof window !== 'undefined') {
       localStorage.removeItem(`tg_mtproto_session_${this.accountNum}`);
     }
+    this.syncStateManager.reset(isLogout);
     this.connectionState = 'CONNECTION_STATE_CONNECTED';
     this.startNetworkPingLoop();
   }
@@ -143,9 +456,7 @@ export class ConnectionsManager {
     this.updateState('CONNECTION_STATE_UPDATING');
     
     // Import and trigger difference reconciliation
-    import('./MessagesController').then(({ MessagesController }) => {
-      MessagesController.getInstance(this.accountNum).getDifference();
-    }).catch(() => {});
+    this.requestDifference().catch(() => {});
 
     setTimeout(() => {
       this.updateState('CONNECTION_STATE_CONNECTED');
@@ -287,6 +598,148 @@ export class ConnectionsManager {
 
       try {
         const reqType = request._;
+
+        // 0. Process MTProto Difference Synchronization (updates.getDifference RPC)
+        if (reqType === 'TL_updates_getDifference' || reqType === 'updates.getDifference') {
+          const sessionString =
+            (typeof window !== 'undefined'
+              ? localStorage.getItem(`tg_session_string_${this.accountNum}`) ||
+                localStorage.getItem('tg_session_string')
+              : '') || '';
+
+          const phone =
+            (typeof window !== 'undefined'
+              ? localStorage.getItem(`tg_phone_${this.accountNum}`) ||
+                localStorage.getItem('tg_phone')
+              : '') || '';
+
+          const currentSync = this.syncStateManager.getSyncState();
+          const reqPts = request.pts !== undefined ? Number(request.pts) : currentSync.pts;
+          const reqDate = request.date !== undefined ? Number(request.date) : currentSync.date;
+          const reqQts = request.qts !== undefined ? Number(request.qts) : currentSync.qts;
+          const reqLimit = request.pts_total_limit || currentSync.ptsTotalLimit || 1000;
+
+          fetch('/api/telegram/difference', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              phone,
+              sessionString,
+              pts: reqPts,
+              date: reqDate,
+              qts: reqQts,
+              ptsTotalLimit: reqLimit,
+            }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                // If /api/telegram/difference fails or 404s, fallback to /api/telegram/sync
+                return fetch('/api/telegram/sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    phone,
+                    sessionString,
+                    pts: reqPts,
+                    date: reqDate,
+                    qts: reqQts,
+                  }),
+                }).then((r) => r.json());
+              }
+              return data;
+            })
+            .then((data) => {
+              if (!data || !data.success) {
+                const err: TLRPC.TL_error = {
+                  code: 400,
+                  text: data?.error || 'DIFF_SYNC_FAILED',
+                };
+                notifyError(err);
+                reject(err);
+                return;
+              }
+
+              // Extract new synchronization state parameters as per Telegram spec
+              const returnedState = data.state || data.difference?.state || data.difference?.intermediate_state || {};
+              const nextPts = Number(returnedState.pts) || (reqPts > 0 ? reqPts + 1 : 1001);
+              const nextSeq = Number(returnedState.seq) || (currentSync.seq > 0 ? currentSync.seq + 1 : 1);
+              const nextDate = Number(returnedState.date) || Math.floor(Date.now() / 1000);
+              const nextQts = Number(returnedState.qts) || currentSync.qts;
+
+              // Persist synchronization state to localStorage
+              this.syncStateManager.updateSyncState({
+                pts: nextPts,
+                seq: nextSeq,
+                qts: nextQts,
+                date: nextDate,
+              });
+
+              // Construct response as TLRPC.TL_updates_difference
+              const rawMsgs = data.messages
+                ? Array.isArray(data.messages)
+                  ? data.messages
+                  : Object.values(data.messages).flat()
+                : [];
+
+              const diffResult: TLRPC.TL_updates_difference = {
+                _: 'TL_updates_difference',
+                new_messages: rawMsgs,
+                other_updates: data.difference?.other_updates || [],
+                users: data.users || [],
+                chats: data.chats || [],
+                state: {
+                  pts: nextPts,
+                  seq: nextSeq,
+                  date: nextDate,
+                  qts: nextQts,
+                },
+              };
+
+              // Persist into database & notify controllers
+              import('./MessagesStorage').then(({ MessagesStorage }) => {
+                const storage = MessagesStorage.getInstance(this.accountNum);
+                storage.saveDiffParams(nextPts, nextSeq, nextDate, nextQts);
+                if (diffResult.new_messages && diffResult.new_messages.length > 0) {
+                  for (const m of diffResult.new_messages) {
+                    if (m && (m.chatId || m.peer_id)) {
+                      storage.saveMessage(m);
+                    }
+                  }
+                }
+              }).catch(() => {});
+
+              import('./MessagesController').then(({ MessagesController }) => {
+                const mc = MessagesController.getInstance(this.accountNum);
+                mc.pts = nextPts;
+                mc.seq = nextSeq;
+                mc.qts = nextQts;
+                mc.lastDate = nextDate;
+                if (data.chats && Array.isArray(data.chats)) {
+                  mc.dialogs = data.chats;
+                  data.chats.forEach((c: any) => mc.chats.set(c.id, c));
+                }
+              }).catch(() => {});
+
+              import('./NotificationCenter').then(({ NotificationCenter }) => {
+                const nc = NotificationCenter.getInstance(this.accountNum);
+                nc.postNotificationName(NotificationCenter.dialogsNeedReload);
+                nc.postNotificationName(NotificationCenter.updateInterfaces, 0);
+              }).catch(() => {});
+
+              notifySuccess(diffResult);
+              resolve(diffResult as unknown as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = {
+                code: 500,
+                text: networkErr?.message || 'NETWORK_ERROR',
+              };
+              notifyError(err);
+              reject(err);
+            });
+          return;
+        }
 
         // 1. Process Channel Join Request
         if (reqType === 'TL_channels_joinChannel' || reqType === 'channels.joinChannel') {
