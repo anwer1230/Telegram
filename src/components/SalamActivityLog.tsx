@@ -20,10 +20,12 @@ import {
   AlertTriangle,
   Play,
   RotateCcw,
+  Activity,
 } from 'lucide-react';
 import { NotificationCenter } from '../core/NotificationCenter';
 import { SalamActivityItem, SalamActivityStatus } from '../types';
 import { useTelegram } from '../context/TelegramContext';
+import { SalamActivityChart } from './SalamActivityChart';
 
 interface SalamActivityLogProps {
   isOpen?: boolean;
@@ -504,6 +506,15 @@ export const SalamActivityLog: React.FC<SalamActivityLogProps> = ({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
+            onClick={() => setActiveModal('telemetry-log')}
+            className="px-2.5 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+            title="فتح سجل بيانات القياس وتشخيص المزامنة (Telemetry Logs)"
+          >
+            <Activity className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
+            <span className="hidden sm:inline">سجل القياس والمزامنة</span>
+          </button>
+          <button
+            type="button"
             onClick={fetchServerActivities}
             disabled={isRefreshing}
             className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition-all active:scale-95 disabled:opacity-50"
@@ -566,6 +577,9 @@ export const SalamActivityLog: React.FC<SalamActivityLogProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Daily User Activity Interactive Recharts Chart */}
+      <SalamActivityChart activities={activities} />
 
       {/* Action Bar: Search, Filters, Live Simulation & Clear */}
       <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between pb-3 border-b border-white/[0.06] shrink-0">

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { Chat } from '../../types';
+import { notificationsController } from '../../core/NotificationsController';
 
 export interface InviteModalData {
   id: string;
@@ -67,6 +68,14 @@ export const JoinInviteModal: React.FC = () => {
       // Broadcast new chat creation
       const customEvent = new CustomEvent('tg-joined-chat', { detail: data.joinedChat || inviteData });
       window.dispatchEvent(customEvent);
+
+      notificationsController.postNotification({
+        category: 'channel_post',
+        title: isArabic ? 'تم الانضمام بنجاح 🎉' : 'Joined Successfully 🎉',
+        body: inviteData.title,
+        avatar: inviteData.avatar,
+        chatId: inviteData.id,
+      });
 
       showToast(
         isArabic

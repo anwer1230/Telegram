@@ -5,6 +5,8 @@ import {
   Pin,
   Reply,
   Share2,
+  Edit2,
+  Trash2,
   Smile,
   FileText,
   Download,
@@ -17,6 +19,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { Message } from '../../types';
+import { chatStore, PartialSyncIcon } from '../../store/chatStore';
 import { useTelegram } from '../../context/TelegramContext';
 import { AudioPlayerWaveform } from './AudioPlayerWaveform';
 import { LottieSticker } from './LottieSticker';
@@ -64,7 +67,7 @@ interface MessageBubbleProps {
   };
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({
+const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   message,
   isFirstInGroup = true,
   isLastInGroup = true,
@@ -75,6 +78,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     activeChat,
     setReplyingTo,
     toggleReaction,
+    deleteMessage,
+    setEditingMessage,
+    setForwardingMessage,
+    setActiveModal,
     setViewerMedia,
     votePoll,
     setMessageContextMenu,
@@ -119,6 +126,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   };
 
   const renderStatus = () => {
+    const chatId = message.chatId || activeChat?.id || '';
+    const isUnverified =
+      (message as any).syncStatus === 'partial' ||
+      (!chatStore.isMessageVerified(chatId, message.id) &&
+        (chatStore.getSyncStatus(chatId) === 'partial' || !(message as any).isCloudVerified));
+
+    if (isUnverified) {
+      return (
+        <span
+          title={isArabic ? 'محفوظ محلياً - بانتظار التأكيد السحابي (جزئي)' : 'Locally cached — Pending cloud verification (partial)'}
+          className="inline-flex items-center text-amber-400 select-none"
+          data-testid="partial-sync-icon"
+        >
+          <PartialSyncIcon className="w-3.5 h-3.5 text-amber-400" />
+        </span>
+      );
+    }
+
     if (!isOutgoing) return null;
     if (message.status === 'read') return <CheckCheck className="w-3.5 h-3.5 text-[#4fae4e]" />;
     if (message.status === 'delivered' || message.status === 'sent')
@@ -367,6 +392,39 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           >
             <Reply className="w-3.5 h-3.5" />
           </button>
+          {isOutgoing && message.text && !message.media && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditingMessage({ id: message.id, text: message.text || '' });
+              }}
+              className="hover:text-emerald-400 p-0.5 text-gray-300 transition-colors"
+              title="Edit"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setForwardingMessage(message);
+              setActiveModal('forward');
+            }}
+            className="hover:text-blue-400 p-0.5 text-gray-300 transition-colors"
+            title="Forward"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              deleteMessage(message.id);
+            }}
+            className="hover:text-rose-400 p-0.5 text-gray-300 transition-colors"
+            title="Delete"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         {/* The Visual Bubble or Standalone Sticker / Big Emoji Presentation */}
@@ -535,6 +593,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             {/* MEDIA: Voice note with real audio waves */}
             {message.media?.type === 'voice' && (
               <AudioPlayerWaveform
+                messageId={message.id}
+                chatId={message.chatId}
+                senderName={message.senderName}
                 audioUrl={message.media.url}
                 duration={message.media.duration || 12}
                 waveform={message.media.waveform}
@@ -720,3 +781,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     </div>
   );
 };
+
+export const MessageBubble = React.memo(MessageBubbleComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.status === nextProps.message.status &&
+    prevProps.message.text === nextProps.message.text &&
+    prevProps.message.timestamp === nextProps.message.timestamp &&
+    prevProps.isFirstInGroup === nextProps.isFirstInGroup &&
+    prevProps.isLastInGroup === nextProps.isLastInGroup &&
+    prevProps.grouping?.isGroupStart === nextProps.grouping?.isGroupStart &&
+    prevProps.grouping?.isGroupMiddle === nextProps.grouping?.isGroupMiddle &&
+    prevProps.grouping?.isGroupEnd === nextProps.grouping?.isGroupEnd &&
+    prevProps.grouping?.isSingle === nextProps.grouping?.isSingle &&
+    JSON.stringify(prevProps.message.reactions) === JSON.stringify(nextProps.message.reactions) &&
+    JSON.stringify(prevProps.message.media?.pollData) === JSON.stringify(nextProps.message.media?.pollData)
+  );
+});

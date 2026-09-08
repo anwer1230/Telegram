@@ -14,11 +14,14 @@ import {
   Trash2,
   MailCheck,
   ShieldAlert,
+  Edit3,
 } from 'lucide-react';
 import { Chat } from '../../types';
+import { chatStore, PartialSyncIcon } from '../../store/chatStore';
 import { useTelegram } from '../../context/TelegramContext';
 import { useLongPress, useChatSwipeActions } from '../../hooks/useTouchGestures';
 import { formatChatListTime } from '../../utils/dateUtils';
+import { draftSyncService } from '../../services/DraftSyncService';
 
 interface ChatListItemProps {
   chat: Chat;
@@ -28,11 +31,12 @@ interface ChatListItemProps {
 /**
  * ChatListItem - Replicates Telegram Android (DrKLO ItemTouchHelper & Swipe Actions)
  */
-export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive }) => {
+const ChatListItemComponent: React.FC<ChatListItemProps> = ({ chat, isActive }) => {
   const {
     setActiveChatId,
     setChatContextMenu,
     togglePinChat,
+    toggleArchiveChat,
     toggleMuteChat,
     markChatReadUnread,
     deleteChat,
@@ -42,9 +46,17 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive }) =>
 
   const isSavedMessages = chat.type === 'saved';
   const isRtl = settings.language === 'ar';
+  const effectiveDraft = chat.draft || draftSyncService.getDraftText(chat.id);
 
   const renderStatusCheck = (status?: string) => {
     if (!status) return null;
+    if (chat.lastMessage && !chatStore.isMessageVerified(chat.id, chat.lastMessage.id) && chatStore.getSyncStatus(chat.id) === 'partial') {
+      return (
+        <span title="Locally cached — Pending cloud verification (partial)">
+          <PartialSyncIcon className="w-3.5 h-3.5 text-amber-400" />
+        </span>
+      );
+    }
     if (status === 'read') return <CheckCheck className="w-3.5 h-3.5 text-[#4fae4e]" />;
     if (status === 'delivered' || status === 'sent') return <Check className="w-3.5 h-3.5 text-gray-400" />;
     return null;
@@ -77,7 +89,7 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive }) =>
 
   const { offset, isDragging, touchHandlers, resetOffset } = useChatSwipeActions({
     onArchive: () => {
-      showToast(isRtl ? 'تم أرشفة المحادثة' : 'Chat archived', '📦');
+      toggleArchiveChat(chat.id);
     },
     onPin: () => {
       togglePinChat(chat.id);
@@ -187,15 +199,22 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive }) =>
             <div className="w-full h-full bg-[#2481cc] flex items-center justify-center">
               <Bookmark className="w-6 h-6 fill-white text-white" />
             </div>
-          ) : chat.avatar ? (
-            <img
-              src={chat.avatar}
-              alt={chat.title}
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
           ) : (
-            <span>{chat.title.charAt(0).toUpperCase()}</span>
+            <>
+              <span>{chat.title ? chat.title.charAt(0).toUpperCase() : '?'}</span>
+              {chat.avatar && (
+                <img
+                  src={chat.avatar}
+                  alt={chat.title}
+                  className="w-full h-full object-cover absolute inset-0"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLElement).style.display = 'none';
+                  }}
+                />
+              )}
+            </>
           )}
 
           {chat.type === 'private' && (
@@ -239,9 +258,9 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive }) =>
               )}
             </div>
 
-            <span className="text-[12px] text-gray-400 shrink-0 whitespace-nowrap font-mono">
-              {chat.draft
-                ? chat.draftTimestamp || 'مسودة'
+            <span className={`text-[12px] shrink-0 whitespace-nowrap font-mono ${effectiveDraft ? 'text-[#e53935] font-medium' : 'text-gray-400'}`}>
+              {effectiveDraft
+                ? chat.draftTimestamp || (settings.language === 'ar' ? 'مسودة' : 'Draft')
                 : chat.lastMessage
                 ? formatChatListTime(chat.lastMessage.rawDate || chat.lastMessage.epoch || chat.lastMessage.date) || chat.lastMessage.timestamp
                 : ''}
@@ -269,13 +288,14 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive }) =>
 
           {/* Bottom Row: Last Message Snippet OR Draft + Status + Unread / Pin */}
           <div className="flex items-center justify-between gap-2">
-            {chat.draft ? (
+            {effectiveDraft ? (
               <div className="flex items-center gap-1 min-w-0 text-[15px] truncate">
+                <Edit3 className="w-3.5 h-3.5 text-[#e53935] shrink-0" />
                 <span className="text-[#e53935] font-semibold shrink-0">
                   {settings.language === 'ar' ? 'مسودة:' : 'Draft:'}
                 </span>
-                <span className="text-gray-300 truncate">
-                  {chat.draft}
+                <span className="text-gray-300 truncate font-normal">
+                  {effectiveDraft}
                 </span>
               </div>
             ) : (
@@ -313,3 +333,20 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive }) =>
     </div>
   );
 };
+
+export const ChatListItem = React.memo(ChatListItemComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.chat.id === nextProps.chat.id &&
+    prevProps.chat.unreadCount === nextProps.chat.unreadCount &&
+    prevProps.chat.isPinned === nextProps.chat.isPinned &&
+    prevProps.chat.isMuted === nextProps.chat.isMuted &&
+    prevProps.chat.title === nextProps.chat.title &&
+    prevProps.chat.avatar === nextProps.chat.avatar &&
+    prevProps.chat.draft === nextProps.chat.draft &&
+    prevProps.chat.lastMessage?.id === nextProps.chat.lastMessage?.id &&
+    prevProps.chat.lastMessage?.text === nextProps.chat.lastMessage?.text &&
+    prevProps.chat.lastMessage?.status === nextProps.chat.lastMessage?.status &&
+    prevProps.chat.lastMessage?.timestamp === nextProps.chat.lastMessage?.timestamp
+  );
+});

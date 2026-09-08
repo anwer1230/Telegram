@@ -4,19 +4,33 @@
   "description": "Telegram Messenger for Android & Web - Official DrKLO Release Build (Telegram_Anwer)",
   "icons": [
     {
-      "src": "https://telegram.org/img/t_logo.png",
+      "src": "/icons/icon-192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any"
     },
     {
-      "src": "https://telegram.org/img/t_logo.png",
+      "src": "/icons/icon-512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
     }
   ],
   "start_url": "/",
-  "background_color": "#17212b",
-  "theme_color": "#2481cc",
+  "background_color": "#1E1E2E",
+  "theme_color": "#8A2BE2",
   "display": "standalone",
   "orientation": "portrait-primary",
   "scope": "/"

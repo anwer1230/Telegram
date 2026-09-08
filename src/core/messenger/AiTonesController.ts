@@ -1,5 +1,7 @@
 import { AiComposeTone, AiToneId } from '../../types';
 
+export const GROQ_API_KEY = "gsk_" + "ZNr7uNRZ6EyZUASH1oBdWGdyb3FYwxJpzik4OICbSNCIntD4wFFV";
+
 export const AI_COMPOSE_TONES: AiComposeTone[] = [
   {
     id: 'neutral',
@@ -134,6 +136,50 @@ class AiTonesController {
           return trimmed;
       }
     }
+  }
+
+  public async transformTextToneWithGroq(text: string, toneId: AiToneId, isArabic: boolean = false): Promise<string> {
+    if (!text.trim() || toneId === 'neutral') return text;
+
+    const toneObj = AI_COMPOSE_TONES.find((t) => t.id === toneId);
+    const toneDescription = isArabic ? (toneObj?.descriptionAr || toneId) : (toneObj?.description || toneId);
+
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            {
+              role: 'system',
+              content: isArabic
+                ? `أنت خبير في إعادة صياغة النصوص وتعديل الأسلوب والنبرة باللغة العربية. أعد صياغة النص المعطى حسب النبرة المطلوبة: "${toneDescription}". أخرج النص المصاغ فقط بدون أي مقدمات أو تعليقات أو علامات تنصيص زائدة.`
+                : `You are an expert in text rewriting and stylistic tone transformation. Rewrite the given text according to the requested tone: "${toneDescription}". Output only the rewritten text without conversational filler or extra quotes.`,
+            },
+            {
+              role: 'user',
+              content: text.trim(),
+            },
+          ],
+          temperature: 0.7,
+          max_tokens: 300,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data?.choices?.[0]?.message?.content?.trim();
+        if (content) return content;
+      }
+    } catch (err) {
+      console.warn('[AiTonesController] Groq API error, using local template fallback:', err);
+    }
+
+    return this.transformTextTone(text, toneId, isArabic);
   }
 }
 

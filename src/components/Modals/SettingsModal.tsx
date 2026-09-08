@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -109,6 +109,8 @@ import { ChannelBoostsView } from './ChannelBoostsView';
 import { MemberRequestsView } from './MemberRequestsView';
 import { CacheByChatsView } from './CacheByChatsView';
 import { AppUpdateSettingsView } from './AppUpdateSettingsView';
+import { AccountSettingsView } from './AccountSettingsView';
+import { AccountProfileSettings } from '../Settings/AccountProfileSettings';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -194,7 +196,13 @@ export const SettingsModal: React.FC = () => {
                   />
                 )}
 
-                {settingsSubPage === 'account' && <AccountEditView onBack={goBack} />}
+                {settingsSubPage === 'account' && (
+                  <AccountProfileSettings
+                    onBack={goBack}
+                    onNavigateTo2FA={() => setSettingsSubPage('two_step_verification')}
+                    onNavigateToPrivacy={() => setSettingsSubPage('privacy_security')}
+                  />
+                )}
                 {settingsSubPage === 'plus_settings' && (
                   <PlusSettingsView
                     onBack={goBack}
@@ -790,11 +798,32 @@ const AccountEditView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [name, setName] = useState(currentUser.name);
   const [username, setUsername] = useState(currentUser.username || '');
   const [bio, setBio] = useState(currentUser.bio || '');
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const handleSave = () => {
-    updateAccountProfile({ name, username, bio });
-    showToast(isArabic ? 'تم حفظ التعديلات' : 'Profile updated', '✅');
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      setAvatarPreview(base64);
+      await updateAccountProfile({ avatar: base64 });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    await updateAccountProfile({
+      name,
+      username,
+      bio,
+      avatar: avatarPreview || currentUser.avatar,
+    });
+    setSaving(false);
   };
 
   return (
@@ -804,18 +833,35 @@ const AccountEditView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Avatar & Name Input */}
         <div className="p-4 bg-[#17212b] rounded-2xl border border-white/10 flex flex-col items-center text-center">
-          <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-[#5288c1] mb-3">
-            {currentUser.avatar ? (
-              <img src={currentUser.avatar} alt={currentUser.name} className="w-full h-full object-cover" />
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handlePhotoSelect}
+            accept="image/*"
+            className="hidden"
+          />
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-[#5288c1] mb-3 cursor-pointer group"
+          >
+            {avatarPreview || currentUser.avatar ? (
+              <img
+                src={avatarPreview || currentUser.avatar}
+                alt={currentUser.name}
+                className="w-full h-full object-cover"
+              />
             ) : (
               <div className="w-full h-full bg-[#5288c1] flex items-center justify-center text-white font-bold text-2xl">
                 {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
               </div>
             )}
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center cursor-pointer hover:bg-black/60">
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-80 group-hover:opacity-100 transition-opacity">
               <Camera className="w-6 h-6 text-white" />
             </div>
           </div>
+          <span className="text-[11px] text-sky-400 mb-2 cursor-pointer hover:underline" onClick={() => fileInputRef.current?.click()}>
+            {isArabic ? 'تغيير الصورة الشخصية' : 'Change profile photo'}
+          </span>
 
           <div className="w-full space-y-2">
             <input
@@ -830,13 +876,16 @@ const AccountEditView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               value={bio}
               onChange={(e) => setBio(e.target.value)}
               className="w-full bg-[#242f3d] border border-white/10 rounded-xl px-3 py-2 text-xs text-center text-gray-300 outline-none focus:border-[#5288c1]"
-              placeholder={isArabic ? 'النبذة: 70 بضع كلمات عنك' : 'Bio'}
+              placeholder={isArabic ? 'النبذة: بضع كلمات عنك' : 'Bio'}
             />
             <button
               onClick={handleSave}
-              className="w-full py-2 bg-[#2481cc] hover:bg-[#1f6fa8] rounded-xl text-xs font-bold text-white transition-colors"
+              disabled={saving}
+              className="w-full py-2 bg-[#2481cc] hover:bg-[#1f6fa8] disabled:opacity-50 rounded-xl text-xs font-bold text-white transition-colors"
             >
-              {isArabic ? 'حفظ التغييرات' : 'Save Changes'}
+              {saving
+                ? (isArabic ? 'جاري المزامنة مع تيليجرام...' : 'Syncing with Telegram...')
+                : (isArabic ? 'حفظ التغييرات ومزامنة الحساب' : 'Save & Sync Profile')}
             </button>
           </div>
         </div>
@@ -850,19 +899,25 @@ const AccountEditView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               </div>
               <div>
                 <div className="text-xs font-mono font-bold text-white">{currentUser.phone}</div>
-                <div className="text-[11px] text-gray-400">{isArabic ? 'انقر لتغيير رقم الهاتف' : 'Tap to change phone'}</div>
+                <div className="text-[11px] text-gray-400">{isArabic ? 'رقم الهاتف المرتبط' : 'Linked phone number'}</div>
               </div>
             </div>
           </div>
 
           <div className="p-3.5 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-orange-400">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-orange-400 shrink-0">
                 <AtSign className="w-4 h-4" />
               </div>
-              <div>
-                <div className="text-xs font-mono font-bold text-white">@{username}</div>
-                <div className="text-[11px] text-gray-400">{isArabic ? 'اسم المستخدم' : 'Username'}</div>
+              <div className="flex-1 min-w-0">
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value.replace(/^@/, ''))}
+                  placeholder="username"
+                  className="bg-transparent text-xs font-mono font-bold text-[#5288c1] border-b border-transparent focus:border-[#5288c1] outline-none w-full"
+                />
+                <div className="text-[11px] text-gray-400">{isArabic ? 'انقر لتعديل المعرف (@username)' : 'Tap to edit username'}</div>
               </div>
             </div>
           </div>
@@ -1436,8 +1491,22 @@ const PrivacySecurityView: React.FC<{
 }> = ({ onBack, onSelectPrivacyTarget }) => {
   const { settings, showToast, setSettingsSubPage } = useTelegram();
   const isArabic = settings.language === 'ar';
-  const twoStepState = twoStepController.getState();
-  const privacyState = privacyController.getState();
+  const [twoStepState, setTwoStepState] = useState(twoStepController.getState());
+  const [privacyState, setPrivacyState] = useState(privacyController.getState());
+
+  useEffect(() => {
+    twoStepController.getPassword().then(() => {
+      setTwoStepState(twoStepController.getState());
+    }).catch(() => {});
+
+    privacyController.loadPrivacySettings().then((s) => {
+      setPrivacyState({ ...s });
+    }).catch(() => {});
+
+    privacyController.loadAuthorizations().then(() => {
+      setPrivacyState(privacyController.getState());
+    }).catch(() => {});
+  }, []);
 
   const getOptionLabel = (opt: string) => {
     if (opt === 'everybody') return isArabic ? 'الجميع' : 'Everybody';
@@ -1482,8 +1551,8 @@ const PrivacySecurityView: React.FC<{
           <SecurityRow
             icon={<Mail className="w-5 h-5 text-teal-400" />}
             title={isArabic ? 'بريد تسجيل الدخول' : 'Login Email'}
-            value={privacyState.loginEmail}
-            onClick={() => showToast(`${isArabic ? 'بريد تسجيل الدخول:' : 'Login email:'} ${privacyState.loginEmail}`, '📧')}
+            value={twoStepState.emailPattern || privacyState.loginEmail || (isArabic ? 'غير مضبوط' : 'Not set')}
+            onClick={() => showToast(`${isArabic ? 'بريد تسجيل الدخول:' : 'Login email:'} ${twoStepState.emailPattern || privacyState.loginEmail || 'None'}`, '📧')}
           />
           <SecurityRow
             icon={<Ban className="w-5 h-5 text-rose-400" />}
@@ -1494,7 +1563,7 @@ const PrivacySecurityView: React.FC<{
           <SecurityRow
             icon={<MonitorSmartphone className="w-5 h-5 text-sky-400" />}
             title={isArabic ? 'الجلسات النشطة' : 'Active Sessions'}
-            value={String(privacyState.activeSessionsCount)}
+            value={String(privacyState.activeSessionsCount || privacyState.sessions?.length || 1)}
             onClick={() => setSettingsSubPage('sessions')}
           />
         </div>
@@ -1564,6 +1633,32 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
   const [inAppSounds, setInAppSounds] = useState(true);
   const [inAppVibrate, setInAppVibrate] = useState(true);
 
+  const handleToggleNotify = async (peerType: 'users' | 'chats' | 'broadcasts', enable: boolean) => {
+    if (peerType === 'users') setPrivateChats(enable);
+    if (peerType === 'chats') setGroups(enable);
+    if (peerType === 'broadcasts') setChannels(enable);
+
+    const activeSession = typeof window !== 'undefined' ? (localStorage.getItem('tg_session_string') || '') : '';
+    if (!activeSession) return;
+
+    try {
+      await fetch('/api/telegram/account/notify-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionString: activeSession,
+          peerType,
+          muteUntil: enable ? 0 : 2147483647,
+          showPreviews: true,
+          silent: !enable,
+        }),
+      });
+      showToast(isArabic ? 'تم تحديث إعدادات الإشعارات في تيليجرام' : 'Notification settings synced with Telegram', '🔔');
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-[#0e1621]">
       <SubPageHeader title={isArabic ? 'الإشعارات والأصوات' : 'Notifications and Sounds'} onBack={onBack} />
@@ -1615,9 +1710,9 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
         {/* Chat Notifications */}
         <div className="bg-[#17212b] rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden">
           <div className="p-3 text-[11px] font-bold text-[#5288c1] uppercase">{isArabic ? 'إشعارات المحادثات' : 'Chat Notifications'}</div>
-          <ToggleRow title={isArabic ? 'المحادثات الخاصة' : 'Private Chats'} checked={privateChats} onChange={setPrivateChats} />
-          <ToggleRow title={isArabic ? 'المجموعات' : 'Groups'} checked={groups} onChange={setGroups} />
-          <ToggleRow title={isArabic ? 'القنوات' : 'Channels'} checked={channels} onChange={setChannels} />
+          <ToggleRow title={isArabic ? 'المحادثات الخاصة' : 'Private Chats'} checked={privateChats} onChange={(v) => handleToggleNotify('users', v)} />
+          <ToggleRow title={isArabic ? 'المجموعات' : 'Groups'} checked={groups} onChange={(v) => handleToggleNotify('chats', v)} />
+          <ToggleRow title={isArabic ? 'القنوات' : 'Channels'} checked={channels} onChange={(v) => handleToggleNotify('broadcasts', v)} />
         </div>
 
         {/* In-App Notifications */}
@@ -2081,8 +2176,46 @@ const DevicesView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 // 12. FOLDERS / CATEGORIES VIEW
 // ==========================================
 const FoldersView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
-  const { folders, showToast, settings } = useTelegram();
+  const { folders, showToast, settings, createChatFolder } = useTelegram();
   const isArabic = settings.language === 'ar';
+
+  const [isCreating, setIsCreating] = useState(false);
+  const [folderTitle, setFolderTitle] = useState('');
+  const [filterContacts, setFilterContacts] = useState(true);
+  const [filterNonContacts, setFilterNonContacts] = useState(false);
+  const [filterGroups, setFilterGroups] = useState(true);
+  const [filterChannels, setFilterChannels] = useState(true);
+  const [filterBots, setFilterBots] = useState(false);
+  const [excludeMuted, setExcludeMuted] = useState(false);
+  const [excludeArchived, setExcludeArchived] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!folderTitle.trim()) {
+      showToast(isArabic ? 'يرجى إدخال اسم المجلد' : 'Please enter folder name', '⚠️');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await createChatFolder({
+        title: folderTitle.trim(),
+        contacts: filterContacts,
+        nonContacts: filterNonContacts,
+        groups: filterGroups,
+        broadcasts: filterChannels,
+        bots: filterBots,
+        excludeMuted,
+        excludeArchived,
+      });
+      setIsCreating(false);
+      setFolderTitle('');
+    } catch (err: any) {
+      showToast(isArabic ? 'فشل إنشاء المجلد' : 'Failed to create folder', '❌');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-[#0e1621]">
@@ -2099,17 +2232,112 @@ const FoldersView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   <div className="text-[11px] text-gray-400">{f.id === 'all' ? 'All chats included' : 'Filtered category'}</div>
                 </div>
               </div>
-              <span className="text-xs text-gray-400 font-mono">Default</span>
+              <span className="text-xs text-gray-400 font-mono">
+                {f.id === 'all' ? 'Default' : 'Active'}
+              </span>
             </div>
           ))}
         </div>
 
-        <button
-          onClick={() => showToast(isArabic ? 'إنشاء مجلد جديد' : 'Create new folder', '📁')}
-          className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] text-white text-xs font-bold rounded-xl"
-        >
-          {isArabic ? '+ إنشاء مجلد جديد' : '+ Create New Folder'}
-        </button>
+        {isCreating ? (
+          <form onSubmit={handleCreateFolder} className="bg-[#17212b] rounded-2xl border border-white/10 p-4 space-y-3">
+            <div className="text-xs font-bold text-white mb-1">
+              {isArabic ? 'إنشاء مجلد جديد في تيليجرام' : 'Create Telegram Chat Folder'}
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-400 mb-1">
+                {isArabic ? 'اسم المجلد' : 'Folder Name'}
+              </label>
+              <input
+                type="text"
+                value={folderTitle}
+                onChange={(e) => setFolderTitle(e.target.value)}
+                placeholder={isArabic ? 'مثال: العمل، القنوات، العائلة...' : 'e.g. Work, Channels, Family...'}
+                className="w-full px-3 py-2 bg-[#0e1621] border border-white/10 rounded-xl text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#5288c1]"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <div className="text-[11px] font-semibold text-gray-300">
+                {isArabic ? 'المحادثات المضمنة:' : 'Included Chats:'}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <label className="flex items-center gap-2 text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterContacts}
+                    onChange={(e) => setFilterContacts(e.target.checked)}
+                    className="accent-[#5288c1] rounded"
+                  />
+                  <span>{isArabic ? 'جهات الاتصال' : 'Contacts'}</span>
+                </label>
+                <label className="flex items-center gap-2 text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterNonContacts}
+                    onChange={(e) => setFilterNonContacts(e.target.checked)}
+                    className="accent-[#5288c1] rounded"
+                  />
+                  <span>{isArabic ? 'غير جهات الاتصال' : 'Non-Contacts'}</span>
+                </label>
+                <label className="flex items-center gap-2 text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterGroups}
+                    onChange={(e) => setFilterGroups(e.target.checked)}
+                    className="accent-[#5288c1] rounded"
+                  />
+                  <span>{isArabic ? 'المجموعات' : 'Groups'}</span>
+                </label>
+                <label className="flex items-center gap-2 text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterChannels}
+                    onChange={(e) => setFilterChannels(e.target.checked)}
+                    className="accent-[#5288c1] rounded"
+                  />
+                  <span>{isArabic ? 'القنوات' : 'Channels'}</span>
+                </label>
+                <label className="flex items-center gap-2 text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterBots}
+                    onChange={(e) => setFilterBots(e.target.checked)}
+                    className="accent-[#5288c1] rounded"
+                  />
+                  <span>{isArabic ? 'البوتات' : 'Bots'}</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex-1 py-2.5 bg-[#2481cc] hover:bg-[#1f6fa8] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors"
+              >
+                {isSubmitting
+                  ? (isArabic ? 'جاري الحفظ بالسحابة...' : 'Saving to Cloud...')
+                  : (isArabic ? 'حفظ وإنشاء في تيليجرام' : 'Save & Create Folder')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCreating(false)}
+                className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-medium rounded-xl transition-colors"
+              >
+                {isArabic ? 'إلغاء' : 'Cancel'}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <button
+            onClick={() => setIsCreating(true)}
+            className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] text-white text-xs font-bold rounded-xl transition-colors"
+          >
+            {isArabic ? '+ إنشاء مجلد جديد' : '+ Create New Folder'}
+          </button>
+        )}
       </div>
     </div>
   );

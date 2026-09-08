@@ -19,6 +19,10 @@ export interface SendCodeResult {
   timeout: number;
   deliveryType: 'app' | 'sms';
   isRealTelegramMTProto: boolean;
+  country?: string;
+  countryCallingCode?: string;
+  nationalNumber?: string;
+  formattedPhone?: string;
   error?: string;
   message?: string;
 }
@@ -78,6 +82,10 @@ export class LoginController {
           timeout: data.timeout || 60,
           deliveryType: data.deliveryType || deliveryType,
           isRealTelegramMTProto: Boolean(data.isRealTelegramMTProto),
+          country: data.country,
+          countryCallingCode: data.countryCallingCode,
+          nationalNumber: data.nationalNumber,
+          formattedPhone: data.formattedPhone,
           message: data.message,
         };
       }

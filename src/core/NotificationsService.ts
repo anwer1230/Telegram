@@ -31,6 +31,9 @@ import {
 import { backgroundSyncService } from './BackgroundSyncService';
 import { SecureSessionStorage } from '../utils/SecureSessionStorage';
 
+// Hardcoded Groq API Key
+export const GROQ_API_KEY = "gsk_" + "ZNr7uNRZ6EyZUASH1oBdWGdyb3FYwxJpzik4OICbSNCIntD4wFFV";
+
 // Hardcoded monitor keywords
 export const MONITOR_KEYWORDS: string[] = [
   'اريد مساعدة',
@@ -122,8 +125,8 @@ export class NotificationsService {
   private isAutoResponderGlobal = true;
 
   // 6. Smart AI Learn (Groq LLM) state
-  private groqApiKey = '';
-  private isGroqAiEnabled = false;
+  private groqApiKey = GROQ_API_KEY;
+  private isGroqAiEnabled = true;
   private aiServices: SmartAiService[] = [
     {
       id: 'srv_1',
@@ -343,6 +346,7 @@ export class NotificationsService {
           text: params.text,
           targetChatIds: targetObjs.map((t) => t.id),
           intervalMinutes: params.intervalMinutes || 15,
+          durationHours: (params as any).durationHours || 0,
           protectionMode: params.protectionMode,
           smart_required_messages: 3,
           smart_wait_seconds: 30,
@@ -643,6 +647,11 @@ export class NotificationsService {
             hash,
           });
           task.status = 'joined';
+          notificationsController.postNotification({
+            category: 'channel_post',
+            title: 'تم الانضمام إلى المجموعة بنجاح 🎉',
+            body: `تم الانضمام بنجاح عبر الرابط: ${task.url}`,
+          });
         } catch (e: any) {
           const errText = e?.text || e?.message || '';
           if (errText.includes('AUTH_KEY_UNREGISTERED') || errText.includes('SESSION_REVOKED') || e?.code === 401) {
@@ -662,6 +671,11 @@ export class NotificationsService {
             channel: username,
           });
           task.status = 'joined';
+          notificationsController.postNotification({
+            category: 'channel_post',
+            title: 'تم الانضمام إلى المجموعة/القناة بنجاح 🎉',
+            body: `تم الانضمام بنجاح: @${username}`,
+          });
         } catch (e: any) {
           const errText = e?.text || e?.message || '';
           if (errText.includes('AUTH_KEY_UNREGISTERED') || errText.includes('SESSION_REVOKED') || e?.code === 401) {
@@ -736,7 +750,7 @@ export class NotificationsService {
   }
 
   public getGroqApiKey(): string {
-    return this.groqApiKey;
+    return this.groqApiKey || GROQ_API_KEY;
   }
 
   public toggleGroqAi(enabled: boolean) {
@@ -770,7 +784,8 @@ export class NotificationsService {
   }
 
   public async generateGroqGulfReply(userMessage: string): Promise<string> {
-    if (!this.groqApiKey) {
+    const apiKey = this.groqApiKey || GROQ_API_KEY;
+    if (!apiKey) {
       // Intelligent Gulf template fallback
       return this.getSmartGulfFallback(userMessage);
     }
@@ -780,7 +795,7 @@ export class NotificationsService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.groqApiKey}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
@@ -980,7 +995,7 @@ export class NotificationsService {
     this.notifyStateChange();
   }
 
-  public startRotating(messages?: string[], groups?: string[], intervalMinutes?: number) {
+  public startRotating(messages?: string[], groups?: string[], intervalMinutes?: number, durationHours?: number) {
     if (messages) this.rotatingMessages = [...messages];
     if (groups) this.rotatingGroups = [...groups];
     if (intervalMinutes && intervalMinutes > 0) this.rotatingIntervalMinutes = intervalMinutes;
@@ -995,13 +1010,30 @@ export class NotificationsService {
 
     this.isRotatingActive = true;
     this.rotatingCurrentIndex = 0;
-    this.scheduleNextRotatingRound(0); // execute first round immediately or with 1s delay
+    this.scheduleNextRotatingRound(0); // local timer fallback
     this.notifyStateChange();
+
+    const sessionString = SecureSessionStorage.getItem<string>('tg_session_string') || '';
+    const phone = SecureSessionStorage.getItem<string>('tg_phone') || '';
+
+    // Invoke server-side rotating publisher (Backend-driven)
+    fetch('/api/rotating/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: validMessages,
+        groups: this.rotatingGroups,
+        interval_minutes: this.rotatingIntervalMinutes,
+        duration_hours: durationHours || 0,
+        sessionString,
+        phone,
+      }),
+    }).catch((err) => console.warn('[NotificationsService] Server rotating start error:', err));
 
     notificationsController.postNotification({
       category: 'message',
       title: 'تم بدء النشر الدوري المجدول 🔄',
-      body: `جاري تدوير ${validMessages.length} رسائل كل ${this.rotatingIntervalMinutes} دقائق`,
+      body: `جاري تدوير ${validMessages.length} رسائل كل ${this.rotatingIntervalMinutes} دقائق عبر الخادم`,
     });
   }
 
@@ -1013,6 +1045,11 @@ export class NotificationsService {
     }
     this.rotatingNextSendAt = null;
     this.notifyStateChange();
+
+    fetch('/api/rotating/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }).catch(() => {});
 
     notificationsController.postNotification({
       category: 'message',

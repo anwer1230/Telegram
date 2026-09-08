@@ -9,6 +9,7 @@ import { connectionsManager } from '../ConnectionsManager';
 import { telegramDB } from '../../utils/sqliteStorage';
 import { Message } from '../../types';
 import { notificationsController } from '../NotificationsController';
+import { chatStore } from '../../store/chatStore';
 
 export interface TextEntity {
   type: 'bold' | 'italic' | 'code' | 'pre' | 'url' | 'mention' | 'hashtag' | 'custom_emoji';
@@ -135,9 +136,20 @@ export class SendMessagesHelper {
       // Trigger notification handler
       notificationsController.playNotificationSound('sent');
     } catch (err) {
-      console.error('[SendMessagesHelper] RPC send failed, queued for retry:', err);
-      newMsg.status = 'sent'; // Fallback to local sent state
+      console.error('[SendMessagesHelper] RPC send failed, queued in chatStore for retry:', err);
+      newMsg.status = 'sending';
       telegramDB.saveMessage(newMsg);
+      chatStore.enqueueOutgoingMessage({
+        id: newMsg.id,
+        chatId: newMsg.chatId,
+        text: newMsg.text,
+        replyTo: newMsg.replyTo,
+        replyToMsgId: newMsg.replyTo?.messageId,
+        timestamp: newMsg.timestamp,
+        date: newMsg.date,
+        senderId: newMsg.senderId,
+        senderName: newMsg.senderName,
+      });
     }
 
     return newMsg;

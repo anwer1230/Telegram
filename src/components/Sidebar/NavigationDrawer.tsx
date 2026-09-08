@@ -36,6 +36,7 @@ import {
   RotateCw,
   Bot,
   Search,
+  Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTelegram } from '../../context/TelegramContext';
@@ -125,8 +126,8 @@ export const NavigationDrawer: React.FC = () => {
               color: 'var(--tg-theme-bubble-in-text, #ffffff)',
             }}
           >
-            {/* User Profile Header (Telegram Android Style) */}
-            <div className="p-4 bg-gradient-to-b from-[#256c9e] to-[#1f5982] text-white flex flex-col justify-between min-h-[148px] shadow-sm relative shrink-0">
+            {/* User Profile Header (Telegram Android Style with Purple-to-Pink Brand Gradient) */}
+            <div className="p-4 bg-gradient-to-r from-[#8A2BE2] to-[#FF69B4] text-white flex flex-col justify-between min-h-[148px] shadow-sm relative shrink-0">
               {/* Header Action Buttons */}
               <div className="flex items-center justify-between">
                 {/* User Avatar */}
@@ -515,6 +516,36 @@ export const NavigationDrawer: React.FC = () => {
                       </div>
                       <span className="px-1.5 py-0.5 text-[9px] font-bold bg-emerald-500/25 text-emerald-200 border border-emerald-400/30 rounded font-mono">
                         LIVE
+                      </span>
+                    </motion.button>
+                  );
+                })()}
+
+                {/* 1.2 سجل بيانات القياس والتشخيص (Telemetry) */}
+                {(() => {
+                  const isActive = activeModal === 'telemetry-log';
+                  return (
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      id="drawer-telemetry-log"
+                      onClick={() => handleItemClick(() => setActiveModal('telemetry-log'))}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
+                        isActive
+                          ? 'active bg-cyan-500/20 text-cyan-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-cyan-400'
+                          : 'hover:bg-cyan-500/10 text-gray-100 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <Activity className={`w-5 h-5 shrink-0 ${isActive ? 'text-cyan-300' : 'text-cyan-400'} group-hover:scale-110 transition-transform`} />
+                        <div className="flex flex-col text-left rtl:text-right">
+                          <span className="font-semibold">{isArabic ? 'سجل بيانات القياس (Telemetry)' : 'Telemetry & Diagnostics'}</span>
+                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
+                            {isArabic ? 'تشخيص أسباب تأخر المزامنة وقياس Latency' : 'Diagnose sync issues & latency'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-cyan-500/25 text-cyan-200 border border-cyan-400/30 rounded font-mono">
+                        DIAG
                       </span>
                     </motion.button>
                   );

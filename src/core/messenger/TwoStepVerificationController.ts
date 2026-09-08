@@ -29,10 +29,10 @@ export class TwoStepVerificationController {
   private currentAccount: number = 0;
 
   private state: TwoStepState = {
-    hasPassword: true,
-    hint: 'Security Hint',
-    hasRecoveryEmail: true,
-    emailPattern: 'a***@gmail.com',
+    hasPassword: false,
+    hint: '',
+    hasRecoveryEmail: false,
+    emailPattern: undefined,
   };
 
   public static getInstance(account: number = 0): TwoStepVerificationController {
@@ -47,6 +47,20 @@ export class TwoStepVerificationController {
   constructor(account: number) {
     this.currentAccount = account;
     this.loadCachedState();
+  }
+
+  public updateFromRemote(pwdData: any) {
+    if (!pwdData) return;
+    this.state.hasPassword = Boolean(pwdData.hasPassword ?? pwdData.has_password);
+    this.state.hint = pwdData.hint || '';
+    this.state.hasRecoveryEmail = Boolean(pwdData.hasRecovery ?? pwdData.has_recovery);
+    this.state.emailPattern = pwdData.loginEmailPattern || pwdData.login_email_pattern || undefined;
+    this.state.unconfirmedEmail = pwdData.emailUnconfirmedPattern || pwdData.email_unconfirmed_pattern || undefined;
+    this.saveState();
+    NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+      NotificationCenter.updateInterfaces,
+      0x0008
+    );
   }
 
   private loadCachedState() {

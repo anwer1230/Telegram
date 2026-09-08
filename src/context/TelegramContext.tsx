@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import {
   ActiveCall,
@@ -21,6 +21,7 @@ import {
   FcmDiagnosticInfo,
   FcmPushPacket,
   MonitorAlert,
+  AppUpdateState,
 } from '../types';
 import {
   CURRENT_USER,
@@ -40,7 +41,9 @@ import { multiAccountManager } from '../utils/MultiAccountManager';
 import { notificationEngine } from '../services/NotificationEngine';
 import { SecureSessionStorage } from '../utils/SecureSessionStorage';
 import { storageSyncManager } from '../utils/StorageSyncManager';
+import { draftSyncService } from '../services/DraftSyncService';
 import { themeController } from '../core/ThemeController';
+import { logTelemetry } from '../utils/telemetry';
 import { PinnedAndForwardHelper } from '../core/PinnedAndForwardHelper';
 import { OpenTelegramLink } from '../core/OpenTelegramLink';
 import {
@@ -59,6 +62,9 @@ import {
 import { io as createSocketIO, Socket } from 'socket.io-client';
 import { getTelegramEpoch, parseTelegramDate, formatTelegramTime } from '../utils/dateUtils';
 import { messageCache } from '../services/IndexedDBMessageCache';
+import { telegramDB } from '../utils/sqliteStorage';
+import { chatStore, ChatStore, ChatReadPosition } from '../store/chatStore';
+import { privacyController } from '../core/messenger/PrivacySettingsController';
 
 interface TelegramContextType {
   currentUser: User;
@@ -69,6 +75,9 @@ interface TelegramContextType {
   activeFolderId: string;
   folders: Folder[];
   searchQuery: string;
+  searchFilter: 'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private';
+  isSearchActive: boolean;
+  chatsWithDraftsCount: number;
   refreshDialogs: () => Promise<void>;
   isDrawerOpen: boolean;
   isRightPanelOpen: boolean;
@@ -103,7 +112,8 @@ interface TelegramContextType {
     | 'user-profile'
     | 'android-notification-shade'
     | 'restricted-content'
-    | 'salam-activity-log';
+    | 'salam-activity-log'
+    | 'telemetry-log';
   selectedProfileUser: ProfileUserInfo | null;
   setSelectedProfileUser: (user: ProfileUserInfo | null) => void;
   openUserProfile: (user: ProfileUserInfo) => void;
@@ -155,6 +165,8 @@ interface TelegramContextType {
   setActiveChatId: (id: string | null) => void;
   setActiveFolderId: (id: string) => void;
   setSearchQuery: (q: string) => void;
+  setSearchFilter: (filter: 'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private') => void;
+  setIsSearchActive: (active: boolean) => void;
   setIsDrawerOpen: (open: boolean) => void;
   setIsRightPanelOpen: (open: boolean) => void;
   setActiveModal: (
@@ -190,6 +202,7 @@ interface TelegramContextType {
       | 'android-notification-shade'
       | 'restricted-content'
       | 'salam-activity-log'
+      | 'telemetry-log'
   ) => void;
   setViewerMedia: (media: { url: string; title?: string; sender?: string; timestamp?: string } | null) => void;
   setReplyingTo: (reply: ReplyInfo | null) => void;
@@ -203,6 +216,7 @@ interface TelegramContextType {
   
   // Messages & Interactions
   sendMessage: (text: string, media?: MessageMedia) => void;
+  sendMediaMessage: (file: File, caption?: string, mediaType?: 'photo' | 'document') => Promise<void>;
   editMessageText: (messageId: string, newText: string) => void;
   forwardMessageTo: (targetChatId: string, message: Message) => void;
   toggleReaction: (messageId: string, emoji: string) => void;
@@ -221,6 +235,20 @@ interface TelegramContextType {
   // Chat Actions
   toggleMuteChat: (chatId: string) => void;
   togglePinChat: (chatId: string) => void;
+  toggleArchiveChat: (chatId: string) => Promise<void>;
+  blockUser: (userId: string, block?: boolean) => Promise<void>;
+  searchTelegramGlobal: (query: string) => Promise<any[]>;
+  createChatFolder: (folderData: {
+    title: string;
+    contacts?: boolean;
+    nonContacts?: boolean;
+    groups?: boolean;
+    broadcasts?: boolean;
+    bots?: boolean;
+    excludeMuted?: boolean;
+    excludeRead?: boolean;
+    excludeArchived?: boolean;
+  }) => Promise<any>;
   markChatReadUnread: (chatId: string) => void;
   markChatAsRead: (chatId: string) => void;
   clearChatHistory: (chatId: string) => void;
@@ -242,12 +270,29 @@ interface TelegramContextType {
   createNewChat: (type: 'private' | 'group' | 'channel', title: string, username?: string, description?: string) => void;
   jumpToMessage: (chatId: string, messageId: string) => void;
   openPrivateChat: (senderId: string, senderName: string, senderAvatar?: string, senderUsername?: string) => void;
+  chatStore: ChatStore;
+  lastReadPositions: Record<string, ChatReadPosition>;
+  ScrollPositions: Record<string, number>;
+  getLastReadPosition: (chatId: string) => ChatReadPosition | undefined;
+  saveLastReadPosition: (
+    chatId: string,
+    data: {
+      lastReadMessageId?: string;
+      scrollTop?: number;
+      scrollHeight?: number;
+      isNearBottom?: boolean;
+    }
+  ) => void;
   resolveTelegramLink: (urlOrQuery: string) => Promise<void>;
   syncCloudData: () => Promise<void>;
   syncInitializationRoutine: (phoneOverride?: string, sessionStringOverride?: string) => Promise<void>;
   validateSessionProactively: (force?: boolean) => Promise<boolean>;
   isSyncing: boolean;
   isSessionValidating: boolean;
+  telemetryLogs: string[];
+  recordTelemetry: (errorType: string, details?: any) => void;
+  isFloodWaitActive: boolean;
+  floodWaitRemainingSeconds: number;
   solveChatCaptcha: (chatId: string, answer: string) => Promise<boolean>;
   forwardToSavedMessages: (message: Message) => void;
   // Incremental Pagination & Stream Sync
@@ -264,7 +309,17 @@ interface TelegramContextType {
   // Screenshot Protection & FLAG_SECURE
   triggerScreenshotBlocked: (reason?: string) => void;
 
+  // Offline-First Network Status & Cache
+  isOffline: boolean;
+  networkStatus: 'online' | 'offline' | 'reconnecting' | 'updating';
+  setNetworkStatus: (status: 'online' | 'offline' | 'reconnecting' | 'updating') => void;
+
   // Local IndexedDB Message Cache
+  // Smart App Update & Render Deploy Hook
+  updateState: AppUpdateState;
+  checkForAppUpdates: () => Promise<void>;
+  triggerAppUpdate: () => Promise<boolean>;
+  dismissUpdateNotification: () => void;
   messageCache: typeof messageCache;
 }
 
@@ -290,7 +345,73 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   streamingEnabled: true,
 };
 
+// Global in-memory Telemetry error log collector
+export const telemetryLogs: string[] = [];
+
+/**
+ * Global function to record telemetry error and forward asynchronously to /api/telemetry/log
+ */
+export function recordContextTelemetry(
+  errorType: 'AUTH_KEY_UNREGISTERED' | 'FLOOD_WAIT' | 'CHAT_WRITE_FORBIDDEN' | 'USER_BANNED_IN_CHANNEL' | string,
+  details?: { message?: string; retryAfter?: number; [key: string]: any }
+) {
+  const timestamp = new Date().toISOString();
+  const entry = `[${timestamp}] ${errorType}${details?.retryAfter ? ` (Wait: ${details.retryAfter}s)` : ''}: ${details?.message || ''}`;
+  
+  telemetryLogs.unshift(entry);
+  if (telemetryLogs.length > 200) {
+    telemetryLogs.pop();
+  }
+
+  // Also log into internal telemetry diagnostic service
+  logTelemetry({
+    type: 'sync_error',
+    category: 'sync',
+    reason: errorType,
+    durationMs: details?.durationMs,
+    details: {
+      ...details,
+      rawLog: entry,
+    },
+  });
+
+  // Transmit to backend POST /api/telemetry/log
+  try {
+    fetch('/api/telemetry/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        timestamp,
+        errorType,
+        message: details?.message || '',
+        retryAfter: details?.retryAfter,
+        details: details || {},
+        source: 'TelegramContext',
+      }),
+    }).catch(() => {});
+  } catch (_) {}
+}
+
 export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Smart Retry & Flood Wait rate-limiting guards
+  const floodWaitUntilRef = useRef<number>(0);
+  const floodRetryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSyncAttemptTimeRef = useRef<number>(0);
+  const [floodWaitRemaining, setFloodWaitRemaining] = useState<number>(0);
+
+  // Active countdown timer for FLOOD_WAIT status display
+  useEffect(() => {
+    if (floodWaitRemaining <= 0) return;
+    const interval = setInterval(() => {
+      const remainingSec = Math.max(0, Math.ceil((floodWaitUntilRef.current - Date.now()) / 1000));
+      setFloodWaitRemaining(remainingSec);
+      if (remainingSec <= 0) {
+        clearInterval(interval);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [floodWaitRemaining]);
+
   // 1. Resilient Multi-Tier Encrypted Session Persistence & State
   const [accounts, setAccounts] = useState<UserAccount[]>(() => {
     try {
@@ -377,8 +498,52 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     avatar: '',
     isOnline: false,
   });
-  const [chats, setChats] = useState<Chat[]>(() => (initialActiveAcc?.chats && initialActiveAcc.chats.length > 0 ? initialActiveAcc.chats : []));
-  const [messages, setMessages] = useState<Record<string, Message[]>>(() => (initialActiveAcc?.messages && Object.keys(initialActiveAcc.messages).length > 0 ? initialActiveAcc.messages : {}));
+
+  // Offline-First Network Status
+  const [isOffline, setIsOffline] = useState<boolean>(() => {
+    if (typeof navigator !== 'undefined') {
+      return !navigator.onLine;
+    }
+    return false;
+  });
+  const [networkStatus, setNetworkStatus] = useState<'online' | 'offline' | 'reconnecting' | 'updating'>(() => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return 'offline';
+    }
+    return 'online';
+  });
+
+  // Cache-First Immediate Loading: Guarantee ZERO blank/white screen on startup or offline
+  const [chats, setChats] = useState<Chat[]>(() => {
+    if (initialActiveAcc?.chats && initialActiveAcc.chats.length > 0) {
+      chatStore.saveChats(initialActiveAcc.chats);
+      return initialActiveAcc.chats;
+    }
+    const cachedFromStore = chatStore.getCachedChats();
+    if (cachedFromStore && cachedFromStore.length > 0) {
+      return cachedFromStore;
+    }
+    chatStore.saveChats(INITIAL_CHATS);
+    return INITIAL_CHATS;
+  });
+
+  const [messages, setMessages] = useState<Record<string, Message[]>>(() => {
+    if (initialActiveAcc?.messages && Object.keys(initialActiveAcc.messages).length > 0) {
+      Object.entries(initialActiveAcc.messages).forEach(([cId, mList]) => {
+        chatStore.saveMessages(cId, mList);
+      });
+      return initialActiveAcc.messages;
+    }
+    const cachedMsgs = chatStore.getAllCachedMessages();
+    if (cachedMsgs && Object.keys(cachedMsgs).length > 0) {
+      return cachedMsgs;
+    }
+    Object.entries(INITIAL_MESSAGES).forEach(([cId, mList]) => {
+      chatStore.saveMessages(cId, mList);
+    });
+    return INITIAL_MESSAGES;
+  });
+
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [activeChatId, setActiveChatId] = useState<string | null>(() => {
     // Only open a chat if explicitly requested via URL parameter or notification route
@@ -392,10 +557,58 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Default to null so the user always sees the Chat List (Dialogs) screen
     return null;
   });
+
+  const activeChatIdRef = useRef<string | null>(activeChatId);
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  /**
+   * Updates lastReadMessageId in chatStore if the user is currently viewing this chat
+   * and is scrolled to the bottom of the list.
+   */
+  const checkAndUpdateLastReadIfAtBottom = (targetChatId: string, messageId: string | number) => {
+    if (!targetChatId || !messageId) return;
+
+    const currentActiveId = activeChatIdRef.current;
+    if (!currentActiveId) return;
+
+    // Verify chat matches the active chat
+    const isTargetActive =
+      targetChatId === currentActiveId ||
+      targetChatId.replace(/^chat_/, '') === currentActiveId.replace(/^chat_/, '');
+
+    if (!isTargetActive) return;
+
+    const scrollContainer = typeof document !== 'undefined' ? document.getElementById('tg-messages-scroll-area') : null;
+    const isBottom = scrollContainer
+      ? chatStore.isNearBottom(scrollContainer)
+      : (chatStore.getLastReadPosition(currentActiveId)?.isNearBottom ?? true);
+
+    if (isBottom) {
+      const strId = String(messageId);
+      chatStore.saveLastReadPosition(currentActiveId, {
+        lastReadMessageId: strId,
+        isNearBottom: true,
+        scrollTop: scrollContainer ? scrollContainer.scrollTop : undefined,
+        scrollHeight: scrollContainer ? scrollContainer.scrollHeight : undefined,
+      });
+
+      const numId = Number(strId);
+      chatStore.setScrollPosition(currentActiveId, !isNaN(numId) ? numId : (scrollContainer?.scrollTop || 0));
+    }
+  };
   const [typingChatId, setTypingChatId] = useState<string | null>(null);
   const [activeFolderId, setActiveFolderId] = useState<string>('all');
-  const [folders] = useState<Folder[]>(DEFAULT_FOLDERS);
+  const [folders, setFolders] = useState<Folder[]>(DEFAULT_FOLDERS);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchFilter, setSearchFilter] = useState<'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private'>('all');
+  const [isSearchActive, setIsSearchActive] = useState<boolean>(false);
+
+  const chatsWithDraftsCount = chats.filter((chat) => {
+    const d = chat.draft || draftSyncService.getDraftText(chat.id);
+    return Boolean(d && d.trim().length > 0);
+  }).length;
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(false);
   const [activeModal, setActiveModal] = useState<
@@ -430,6 +643,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     | 'android-notification-shade'
     | 'restricted-content'
     | 'salam-activity-log'
+    | 'telemetry-log'
   >('none');
   const [selectedProfileUser, setSelectedProfileUser] = useState<ProfileUserInfo | null>(null);
 
@@ -624,11 +838,157 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch {}
   }, [autoJoinLinksEnabled]);
 
+  // Load persistent chats & messages from IndexedDB (telegramDB SQLite & messageCache)
+  useEffect(() => {
+    let isCancelled = false;
+    (async () => {
+      try {
+        await telegramDB.init();
+        const storedChats = telegramDB.getChats();
+        if (storedChats && storedChats.length > 0 && !isCancelled) {
+          setChats((prev) => {
+            const isPrevOnlyMock = prev.length === 0 || prev.every((c) => c.id.startsWith('chat_'));
+            if (isPrevOnlyMock) {
+              chatStore.saveChats(storedChats);
+              return storedChats;
+            }
+            // Merge unread and latest data
+            const existingIds = new Set(prev.map((c) => c.id));
+            const newFromDb = storedChats.filter((c) => !existingIds.has(c.id));
+            const merged = newFromDb.length > 0 ? [...prev, ...newFromDb] : prev;
+            chatStore.saveChats(merged);
+            return merged;
+          });
+        }
+      } catch (err) {
+        console.warn('[StorageEngine] Error hydrating chats from IndexedDB:', err);
+      }
+    })();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  // Offline-First Auto-Persistence: Ensure every chat and message is persisted to chatStore (localStorage + SQLite) immediately
+  useEffect(() => {
+    if (chats && chats.length > 0) {
+      chatStore.saveChats(chats);
+    }
+  }, [chats]);
+
+  useEffect(() => {
+    if (messages && Object.keys(messages).length > 0) {
+      for (const [chatId, msgs] of Object.entries(messages)) {
+        if (Array.isArray(msgs) && msgs.length > 0) {
+          chatStore.saveMessages(chatId, msgs);
+        }
+      }
+    }
+  }, [messages]);
+
+  // Online / Offline Global Network Listeners for Auto Reconnect & Re-sync
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleOnline = () => {
+      console.log('[Offline-First] Browser is online. Auto-resyncing with Telegram cloud...');
+      setIsOffline(false);
+      setNetworkStatus('updating');
+      // Trigger background sync without interrupting user interaction
+      syncInitializationRoutine().finally(() => {
+        setNetworkStatus('online');
+      });
+    };
+
+    const handleOffline = () => {
+      console.warn('[Offline-First] Browser is offline. Operating in Cache-First mode.');
+      setIsOffline(true);
+      setNetworkStatus('offline');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // When active chat changes, hydrate its conversation history: Cache-First immediate display, then IndexedDB
+  useEffect(() => {
+    if (!activeChatId) return;
+
+    // 0. Instant Cache-First synchronous lookup (ZERO white screen, instant display from localStorage/RAM)
+    const instantCached = chatStore.getCachedMessages(activeChatId);
+    if (instantCached && instantCached.length > 0) {
+      setMessages((prev) => {
+        const current = prev[activeChatId] || [];
+        if (current.length >= instantCached.length) return prev;
+        return {
+          ...prev,
+          [activeChatId]: instantCached,
+        };
+      });
+    }
+
+    let isCancelled = false;
+    (async () => {
+      try {
+        // 1. First check IndexedDB messageCache
+        const cached = await messageCache.getCachedMessages(activeChatId, { limit: 100 });
+        if (cached && cached.length > 0 && !isCancelled) {
+          setMessages((prev) => {
+            const current = prev[activeChatId] || [];
+            if (current.length >= cached.length) return prev;
+            return {
+              ...prev,
+              [activeChatId]: cached,
+            };
+          });
+          return;
+        }
+
+        // 2. Then check telegramDB SQLite messages table (backed by IndexedDB)
+        const sqliteMsgs = telegramDB.getMessagesForChat(activeChatId);
+        if (sqliteMsgs && sqliteMsgs.length > 0 && !isCancelled) {
+          setMessages((prev) => {
+            const current = prev[activeChatId] || [];
+            if (current.length >= sqliteMsgs.length) return prev;
+            return {
+              ...prev,
+              [activeChatId]: sqliteMsgs,
+            };
+          });
+        }
+      } catch (_) {}
+    })();
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeChatId]);
+
   const [isSessionValidating, setIsSessionValidating] = useState<boolean>(false);
 
   // Complete cleanup on auth_key revocation to prevent background automation stalls
   const performSessionPurge = (reason: string = 'AUTH_KEY_UNREGISTERED') => {
     console.warn(`[TelegramContext] Performing full session purge due to ${reason}`);
+    
+    // Stop any active flood retry timers to prevent infinite reconnect loops
+    if (floodRetryTimerRef.current) {
+      clearTimeout(floodRetryTimerRef.current);
+      floodRetryTimerRef.current = null;
+    }
+    floodWaitUntilRef.current = 0;
+    setFloodWaitRemaining(0);
+
+    // Telemetry log for session expiration
+    recordContextTelemetry('AUTH_KEY_UNREGISTERED', {
+      reason,
+      action: 'performSessionPurge',
+      message: 'Session revoked or unregistered on Telegram server',
+    });
+
     setIsAuthenticated(false);
     setActiveModal('none');
     setActiveChatId(null);
@@ -667,6 +1027,14 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       CoreNotificationCenter.appDidLogout,
       0,
       reason
+    );
+
+    // Display required user notification
+    showToast(
+      settings.language === 'ar'
+        ? 'انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى'
+        : 'Session expired. Please log in again.',
+      '⚠️'
     );
   };
 
@@ -707,6 +1075,12 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // Crucial: If server signals AUTH_KEY_UNREGISTERED or session revocation, purge immediately
       if (checkResult.revoked || (!checkResult.valid && checkResult.reason === 'AUTH_KEY_UNREGISTERED')) {
         console.warn('[SessionValidator] MTProto server confirmed session revocation / AUTH_KEY_UNREGISTERED.');
+        logTelemetry({
+          type: 'sync_error',
+          category: 'sync',
+          reason: checkResult.reason || 'AUTH_KEY_UNREGISTERED',
+          details: { action: 'validateSessionProactively' },
+        });
         performSessionPurge('AUTH_KEY_UNREGISTERED');
         showToast(
           settings.language === 'ar'
@@ -797,8 +1171,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       window.addEventListener('telegram:session_revoked', onSessionRevokedEvent);
     }
 
-    // Restore drafts into active chats state
-    const existingDrafts = storageSyncManager.getAllDrafts();
+    // Restore drafts into active chats state from DraftSyncService
+    const existingDrafts = draftSyncService.getAllDrafts();
     if (Object.keys(existingDrafts).length > 0) {
       setChats((prev) =>
         prev.map((c) =>
@@ -806,6 +1180,28 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         )
       );
     }
+
+    // Real-time synchronization across different browser sessions and tabs
+    const unsubscribeDrafts = draftSyncService.subscribe((chatId, draft) => {
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id === chatId) {
+            if (draft && draft.text && draft.text.trim().length > 0) {
+              const timeStr = new Date(draft.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              return {
+                ...c,
+                draft: draft.text,
+                draftTimestamp: timeStr,
+              };
+            } else {
+              const { draft: _d, draftTimestamp: _dt, ...rest } = c;
+              return rest as Chat;
+            }
+          }
+          return c;
+        })
+      );
+    });
 
     // Load persisted custom settings
     storageSyncManager.loadSettings().then((savedSettings) => {
@@ -852,6 +1248,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (typeof window !== 'undefined') {
         window.removeEventListener('telegram:session_revoked', onSessionRevokedEvent);
       }
+      unsubscribeDrafts();
     };
   }, []);
 
@@ -1259,8 +1656,28 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // Sync current account changes into accounts array & localStorage
+  // Sync current account changes into accounts array & IndexedDB persistence
   useEffect(() => {
+    // 1. Persist chats to IndexedDB (via telegramDB in sqliteStorage)
+    if (chats.length > 0) {
+      try {
+        telegramDB.saveChats(chats);
+      } catch (e) {
+        console.warn('[IndexedDB StorageEngine] Error saving chats:', e);
+      }
+    }
+
+    // 2. Persist messages to IndexedDB (via telegramDB & messageCache)
+    try {
+      for (const [chatId, msgs] of Object.entries(messages)) {
+        if (msgs && msgs.length > 0) {
+          telegramDB.saveMessages(msgs);
+        }
+      }
+    } catch (e) {
+      console.warn('[IndexedDB StorageEngine] Error saving messages:', e);
+    }
+
     setAccounts((prev) => {
       const next = prev.map((acc) => {
         if (acc.id === activeAccountId) {
@@ -1276,10 +1693,19 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return acc;
       });
       try {
-        localStorage.setItem('tg_multi_accounts_v3', JSON.stringify(next));
+        // Strip heavy chats and messages payloads before writing to localStorage
+        // This ensures 100% adherence to avoiding localStorage for chats/messages and prevents QuotaExceededError
+        const sanitizedAccounts = next.map((a) => ({
+          ...a,
+          chats: [],
+          messages: {},
+        }));
+        localStorage.setItem('tg_multi_accounts_v3', JSON.stringify(sanitizedAccounts));
         localStorage.setItem('tg_active_account_id_v3', activeAccountId);
-        multiAccountManager.syncWithStorage(next, activeAccountId);
-      } catch {}
+        multiAccountManager.syncWithStorage(sanitizedAccounts, activeAccountId);
+      } catch (e) {
+        console.warn('[StorageEngine] Error syncing accounts metadata:', e);
+      }
       return next;
     });
   }, [currentUser, settings, chats, messages, activeAccountId]);
@@ -1664,9 +2090,69 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     logout(targetAccountId);
   };
 
-  const updateAccountProfile = (data: Partial<User>) => {
+  const updateAccountProfile = async (data: Partial<User> & { photoBase64?: string }) => {
+    // 1. Optimistic local update
     setCurrentUser((prev) => ({ ...prev, ...data }));
-    showToast(settings.language === 'ar' ? 'تم تحديث الملف الشخصي' : 'Profile updated', '✅');
+
+    // 2. MTProto Telegram Server Update
+    const activeSession =
+      accounts.find((a) => a.id === activeAccountId)?.sessionString ||
+      (typeof window !== 'undefined' ? localStorage.getItem('tg_session_string') : null) ||
+      '';
+
+    if (!activeSession) {
+      showToast(settings.language === 'ar' ? 'تم حفظ التعديل محلياً' : 'Saved locally', '⚠️');
+      return;
+    }
+
+    try {
+      let firstName: string | undefined;
+      let lastName: string | undefined;
+
+      if (data.name !== undefined) {
+        const parts = data.name.trim().split(' ');
+        firstName = parts[0] || '';
+        lastName = parts.length > 1 ? parts.slice(1).join(' ') : '';
+      }
+
+      const resp = await fetch('/api/account/settings/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionString: activeSession,
+          firstName,
+          lastName,
+          about: data.bio,
+          username: data.username,
+          photoBase64: data.avatar || data.photoBase64,
+        }),
+      });
+
+      const resData = await resp.json().catch(() => ({}));
+      if (!resp.ok || !resData.success) {
+        showToast(
+          resData.error ||
+            (settings.language === 'ar' ? 'فشل تحديث الإعدادات في تيليجرام' : 'Failed to update profile on Telegram'),
+          '❌'
+        );
+        return;
+      }
+
+      if (resData.user) {
+        setCurrentUser((prev) => ({
+          ...prev,
+          ...resData.user,
+        }));
+      }
+
+      showToast(
+        settings.language === 'ar' ? 'تمت مزامنة الملف الشخصي مع تيليجرام بنجاح' : 'Profile synced with Telegram',
+        '✅'
+      );
+    } catch (e: any) {
+      console.warn('[TelegramContext] updateAccountProfile error:', e);
+      showToast(e?.message || (settings.language === 'ar' ? 'خطأ في الاتصال بالخادم' : 'Server connection error'), '❌');
+    }
   };
 
   const activeChat = chats.find((c) => c.id === activeChatId) || null;
@@ -1684,8 +2170,23 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setInAppNotifications(notifs);
     });
 
+    const unsubscribeNotifController = notificationsController.subscribe((notif) => {
+      notificationEngine.showNotification({
+        category: notif.category,
+        title: notif.title,
+        body: notif.body,
+        chatId: notif.chatId || '',
+        chatTitle: notif.chatTitle,
+        senderName: notif.senderName,
+        avatar: notif.avatar,
+        isSilent: notif.isSilent,
+        replyAction: notif.replyAction,
+      });
+    });
+
     return () => {
       unsubscribe();
+      unsubscribeNotifController();
     };
   }, []);
 
@@ -1860,6 +2361,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const trimmed = draftText.trim();
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+    draftSyncService.saveDraft(chatId, draftText);
     storageSyncManager.setDraft(chatId, draftText);
 
     setChats((prev) =>
@@ -1883,6 +2385,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const sendMessage = (text: string, media?: MessageMedia) => {
     if (!activeChatId) return;
+
+    // Clear draft for this chat immediately across sessions
+    draftSyncService.clearDraft(activeChatId);
 
     const now = new Date();
     const timeStr = formatTelegramTime(now);
@@ -1931,6 +2436,11 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     setReplyingTo(null);
+
+    // Update lastReadMessageId if user sent message while at bottom
+    if (activeChatId && messageId) {
+      checkAndUpdateLastReadIfAtBottom(activeChatId, messageId);
+    }
 
     // Persist to local IndexedDB Message Cache
     messageCache.putMessage(activeChatId, newMessage).catch(() => {});
@@ -1983,11 +2493,74 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               };
             });
           }
+          // Auto-refresh dialogs after message transmission
+          await syncInitializationRoutine().catch(() => {});
+        } else if (data && !data.success) {
+          const errCode = String(data.error || 'SEND_ERROR');
+          const errMsg = String(data.message || data.details || errCode);
+
+          if (errCode === 'CHAT_WRITE_FORBIDDEN' || errMsg.includes('CHAT_WRITE_FORBIDDEN')) {
+            recordContextTelemetry('CHAT_WRITE_FORBIDDEN', {
+              chatId: activeChatId,
+              message: errMsg,
+            });
+            showToast(
+              settings.language === 'ar'
+                ? 'النشر في هذه المحادثة أو القناة مقتصر على المشرفين فقط (CHAT_WRITE_FORBIDDEN)'
+                : 'Posting in this chat is restricted to administrators (CHAT_WRITE_FORBIDDEN)',
+              '🚫'
+            );
+          } else if (errCode === 'USER_BANNED_IN_CHANNEL' || errMsg.includes('USER_BANNED_IN_CHANNEL')) {
+            recordContextTelemetry('USER_BANNED_IN_CHANNEL', {
+              chatId: activeChatId,
+              message: errMsg,
+            });
+            showToast(
+              settings.language === 'ar'
+                ? 'أنت محظور من إرسال الرسائل في هذه القناة أو المجموعة (USER_BANNED_IN_CHANNEL)'
+                : 'You are banned from posting in this channel/group (USER_BANNED_IN_CHANNEL)',
+              '🚫'
+            );
+          } else if (errCode === 'FLOOD_WAIT' || errMsg.includes('FLOOD_WAIT')) {
+            let waitSeconds = 15;
+            const match = errMsg.match(/FLOOD_WAIT_?(\d+)/i) || errMsg.match(/wait of (\d+)/i) || errMsg.match(/(\d+)/);
+            if (match && match[1]) waitSeconds = parseInt(match[1], 10) || 15;
+            waitSeconds = Math.max(5, Math.min(waitSeconds, 300));
+            floodWaitUntilRef.current = Date.now() + (waitSeconds * 1000);
+            setFloodWaitRemaining(waitSeconds);
+
+            recordContextTelemetry('FLOOD_WAIT', {
+              chatId: activeChatId,
+              retryAfter: waitSeconds,
+              message: errMsg,
+            });
+            showToast(
+              settings.language === 'ar'
+                ? `تم تجاوز حد طلبات الإرسال (FLOOD_WAIT). يرجى الانتظار ${waitSeconds} ثانية.`
+                : `Send rate limited (FLOOD_WAIT). Please wait ${waitSeconds} seconds.`,
+              '⏳'
+            );
+          } else if (errCode === 'AUTH_KEY_UNREGISTERED' || errMsg.includes('AUTH_KEY_UNREGISTERED')) {
+            recordContextTelemetry('AUTH_KEY_UNREGISTERED', {
+              chatId: activeChatId,
+              message: errMsg,
+            });
+            performSessionPurge('AUTH_KEY_UNREGISTERED');
+          }
         }
-        // Auto-refresh dialogs after message transmission
-        await syncInitializationRoutine().catch(() => {});
       })
       .catch((err) => {
+        const errMsg = err?.message || String(err);
+        if (errMsg.includes('CHAT_WRITE_FORBIDDEN')) {
+          recordContextTelemetry('CHAT_WRITE_FORBIDDEN', { chatId: activeChatId, message: errMsg });
+        } else if (errMsg.includes('USER_BANNED_IN_CHANNEL')) {
+          recordContextTelemetry('USER_BANNED_IN_CHANNEL', { chatId: activeChatId, message: errMsg });
+        } else if (errMsg.includes('FLOOD_WAIT')) {
+          recordContextTelemetry('FLOOD_WAIT', { chatId: activeChatId, message: errMsg });
+        } else if (errMsg.includes('AUTH_KEY_UNREGISTERED')) {
+          recordContextTelemetry('AUTH_KEY_UNREGISTERED', { chatId: activeChatId, message: errMsg });
+          performSessionPurge('AUTH_KEY_UNREGISTERED');
+        }
         console.warn('[MTProto] Send message background error:', err);
       });
 
@@ -2091,6 +2664,11 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         telegramAudio.playMessageChime();
 
+        // Update lastReadMessageId if user is at the bottom of the active chat
+        if (incomingMsg.id) {
+          checkAndUpdateLastReadIfAtBottom(targetChatId, incomingMsg.id);
+        }
+
         if (activeChatId !== targetChatId) {
           triggerNotification({
             category: 'message',
@@ -2156,7 +2734,39 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // MTProto Cloud Synchronization & Initialization Routine (messages.getDialogs & users.getUsers)
   const syncInitializationRoutine = async (phoneOverride?: string, sessionStringOverride?: string) => {
+    // Offline Resilience Guard: If browser is currently offline, maintain local cache gracefully
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setIsOffline(true);
+      setNetworkStatus('offline');
+      const cached = await chatStore.getCachedChatsAsync();
+      if (cached && cached.length > 0) {
+        setChats((prev) => (prev && prev.length > 0 ? prev : cached));
+      }
+      return;
+    }
+
+    // Smart Retry Guard: If currently under FLOOD_WAIT cooldown, pause sync without calling server
+    const now = Date.now();
+    if (now < floodWaitUntilRef.current) {
+      const remainingSec = Math.max(1, Math.ceil((floodWaitUntilRef.current - now) / 1000));
+      console.warn(`[Smart Retry] Server sync paused during FLOOD_WAIT cooldown (${remainingSec}s remaining).`);
+      return;
+    }
+
+    // Throttle duplicate rapid sync calls (< 2500ms)
+    if (now - lastSyncAttemptTimeRef.current < 2500) {
+      console.log('[Smart Retry] Sync call throttled.');
+      return;
+    }
+    lastSyncAttemptTimeRef.current = now;
+
     setIsSyncing(true);
+    const syncStartTime = performance.now();
+    logTelemetry({
+      type: 'sync_start',
+      category: 'sync',
+      reason: 'MTProto sync initiated (messages.getDialogs)',
+    });
     try {
       const activeSessionStr = sessionStringOverride || SecureSessionStorage.getItem<string>('tg_session_string') || '';
       const activePhone = phoneOverride || currentUser.phone || '';
@@ -2173,25 +2783,121 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
       const data = await res.json();
 
-      if (data.sessionRevoked || data.error === 'SESSION_REVOKED') {
+      if (data.sessionRevoked || data.error === 'SESSION_REVOKED' || data.error === 'AUTH_KEY_UNREGISTERED') {
+        const revokedReason = data.reason || data.error || 'AUTH_KEY_UNREGISTERED';
+        recordContextTelemetry('AUTH_KEY_UNREGISTERED', {
+          message: 'MTProto sync confirmed session revoked on Telegram server',
+          details: { code: data.error, reason: revokedReason },
+          durationMs: performance.now() - syncStartTime,
+        });
         console.warn('[MTProto Sync] Session was revoked or expired on Telegram server.');
-        SecureSessionStorage.removeItem('tg_session_string');
-        setAccounts((prev) =>
-          prev.map((acc) =>
-            acc.id === activeAccountId ? { ...acc, sessionString: undefined } : acc
-          )
-        );
-        showToast(
-          settings.language === 'ar'
-            ? 'انتهت صلاحية جلسة تيليجرام أو تم تسجيل الخروج من أجهزة أخرى. يرجى تسجيل الدخول مجدداً.'
-            : 'Telegram session expired or revoked. Please log in again.',
-          '⚠️'
-        );
-        setChats((prev) => (prev && prev.length > 0 ? prev : INITIAL_CHATS));
+        if (floodRetryTimerRef.current) {
+          clearTimeout(floodRetryTimerRef.current);
+          floodRetryTimerRef.current = null;
+        }
+        floodWaitUntilRef.current = 0;
+        setFloodWaitRemaining(0);
+        performSessionPurge('AUTH_KEY_UNREGISTERED');
+        setIsSyncing(false);
         return;
       }
 
+      if (data.error && !data.success && !data.sessionRevoked && data.error !== 'SESSION_REVOKED') {
+        let errCode = data.error;
+        const errReasonStr = String(data.reason || data.message || data.error);
+        if (errReasonStr.includes('AUTH_KEY_UNREGISTERED') || data.error === 'AUTH_KEY_UNREGISTERED') {
+          errCode = 'AUTH_KEY_UNREGISTERED';
+        } else if (errReasonStr.includes('FLOOD_WAIT') || data.error === 'FLOOD_WAIT') {
+          errCode = 'FLOOD_WAIT';
+        } else if (errReasonStr.includes('CHAT_WRITE_FORBIDDEN') || data.error === 'CHAT_WRITE_FORBIDDEN') {
+          errCode = 'CHAT_WRITE_FORBIDDEN';
+        } else if (errReasonStr.includes('USER_BANNED_IN_CHANNEL') || data.error === 'USER_BANNED_IN_CHANNEL') {
+          errCode = 'USER_BANNED_IN_CHANNEL';
+        } else if (errReasonStr.includes('CHANNEL_PRIVATE') || data.error === 'CHANNEL_PRIVATE') {
+          errCode = 'CHANNEL_PRIVATE';
+        }
+
+        if (errCode === 'AUTH_KEY_UNREGISTERED') {
+          recordContextTelemetry('AUTH_KEY_UNREGISTERED', {
+            message: errReasonStr,
+            durationMs: performance.now() - syncStartTime,
+          });
+          performSessionPurge('AUTH_KEY_UNREGISTERED');
+          setIsSyncing(false);
+          return;
+        }
+
+        if (errCode === 'FLOOD_WAIT') {
+          let waitSeconds = 15;
+          if (typeof data.retryAfter === 'number' && data.retryAfter > 0) {
+            waitSeconds = data.retryAfter;
+          } else if (typeof data.retry_after === 'number' && data.retry_after > 0) {
+            waitSeconds = data.retry_after;
+          } else {
+            const match = errReasonStr.match(/FLOOD_WAIT_?(\d+)/i) || String(data.error).match(/FLOOD_WAIT_?(\d+)/i) || errReasonStr.match(/wait of (\d+)/i);
+            if (match && match[1]) {
+              waitSeconds = parseInt(match[1], 10) || 15;
+            }
+          }
+          waitSeconds = Math.max(5, Math.min(waitSeconds, 300));
+          floodWaitUntilRef.current = Date.now() + (waitSeconds * 1000);
+          setFloodWaitRemaining(waitSeconds);
+
+          recordContextTelemetry('FLOOD_WAIT', {
+            retryAfter: waitSeconds,
+            message: `Rate limited by Telegram MTProto. Cooldown for ${waitSeconds}s`,
+            durationMs: performance.now() - syncStartTime,
+          });
+
+          showToast(
+            settings.language === 'ar'
+              ? `تم تجاوز حد طلبات تيليجرام (FLOOD_WAIT). سيتم إيقاف المزامنة مؤقتاً لمدة ${waitSeconds} ثانية ثم إعادة المحاولة تلقائياً.`
+              : `Telegram rate limit (FLOOD_WAIT). Pausing sync for ${waitSeconds}s; auto-retrying shortly.`,
+            '⏳'
+          );
+
+          if (floodRetryTimerRef.current) {
+            clearTimeout(floodRetryTimerRef.current);
+          }
+          floodRetryTimerRef.current = setTimeout(() => {
+            floodWaitUntilRef.current = 0;
+            setFloodWaitRemaining(0);
+            floodRetryTimerRef.current = null;
+            console.log('[Smart Retry] FLOOD_WAIT cooldown elapsed. Resuming auto-sync...');
+            syncInitializationRoutine();
+          }, waitSeconds * 1000);
+
+          setIsSyncing(false);
+          return;
+        }
+
+        if (errCode === 'CHAT_WRITE_FORBIDDEN' || errCode === 'USER_BANNED_IN_CHANNEL') {
+          recordContextTelemetry(errCode, {
+            message: errReasonStr,
+            durationMs: performance.now() - syncStartTime,
+          });
+        } else {
+          logTelemetry({
+            type: 'sync_error',
+            category: 'sync',
+            reason: errCode,
+            durationMs: performance.now() - syncStartTime,
+            details: { code: errCode },
+          });
+        }
+      }
+
       if (data.success && data.user) {
+        logTelemetry({
+          type: 'sync_success',
+          category: 'sync',
+          reason: 'MTProto sync succeeded',
+          durationMs: performance.now() - syncStartTime,
+          details: { chatsCount: Array.isArray(data.chats) ? data.chats.length : 0, layer: data.layer || 184 },
+        });
+        setIsOffline(false);
+        setNetworkStatus('online');
+
         const updatedUser: User = {
           id: data.user.id || currentUser.id,
           name: data.user.name || currentUser.name,
@@ -2211,7 +2917,10 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (data.chats && Array.isArray(data.chats) && data.chats.length > 0) {
           finalChats = data.chats;
         } else {
-          finalChats = INITIAL_CHATS;
+          finalChats = chatStore.getCachedChats();
+          if (!finalChats || finalChats.length === 0) {
+            finalChats = INITIAL_CHATS;
+          }
         }
 
         // Guarantee Saved Messages exists and has user avatar
@@ -2242,6 +2951,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
 
         setChats(finalChats);
+        chatStore.saveChats(finalChats);
 
         // Preserve active chat if user already selected one, otherwise remain on Chat List (null)
         setActiveChatId((prev) => {
@@ -2257,9 +2967,11 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ...prev,
             ...data.messages,
           }));
-          // Asynchronously persist all synced messages to local IndexedDB
+          // Persist all synced messages to chatStore and local IndexedDB
           for (const [cId, msgList] of Object.entries(data.messages)) {
             if (Array.isArray(msgList) && msgList.length > 0) {
+              chatStore.saveMessages(cId, msgList as Message[], { isCloudVerified: true });
+              chatStore.markConversationSynced(cId, (msgList as Message[]).map((m) => m.id));
               messageCache.putMessages(cId, msgList as Message[], { isNetworkFetch: true }).catch(() => {});
             }
           }
@@ -2299,11 +3011,65 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         );
         telegramAudio.playSentPop();
       }
-    } catch (err) {
-      console.warn('[Sync] Cloud sync error:', err);
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      let detectedReason = 'SYNC_ERROR';
+      if (errMsg.includes('AUTH_KEY_UNREGISTERED')) detectedReason = 'AUTH_KEY_UNREGISTERED';
+      else if (errMsg.includes('FLOOD_WAIT')) detectedReason = 'FLOOD_WAIT';
+      else if (errMsg.includes('CHAT_WRITE_FORBIDDEN')) detectedReason = 'CHAT_WRITE_FORBIDDEN';
+      else if (errMsg.includes('USER_BANNED_IN_CHANNEL')) detectedReason = 'USER_BANNED_IN_CHANNEL';
+      else if (errMsg.includes('CHANNEL_PRIVATE')) detectedReason = 'CHANNEL_PRIVATE';
+      else if (errMsg.includes('TIMEOUT') || errMsg.includes('timeout') || errMsg.includes('NetworkError')) detectedReason = 'TIMEOUT';
+
+      if (detectedReason === 'AUTH_KEY_UNREGISTERED') {
+        recordContextTelemetry('AUTH_KEY_UNREGISTERED', {
+          message: errMsg,
+          durationMs: performance.now() - syncStartTime,
+        });
+        performSessionPurge('AUTH_KEY_UNREGISTERED');
+      } else if (detectedReason === 'FLOOD_WAIT') {
+        let waitSeconds = 15;
+        const match = errMsg.match(/FLOOD_WAIT_?(\d+)/i) || errMsg.match(/wait of (\d+)/i) || errMsg.match(/(\d+)/);
+        if (match && match[1]) waitSeconds = parseInt(match[1], 10) || 15;
+        waitSeconds = Math.max(5, Math.min(waitSeconds, 300));
+        floodWaitUntilRef.current = Date.now() + (waitSeconds * 1000);
+        setFloodWaitRemaining(waitSeconds);
+
+        recordContextTelemetry('FLOOD_WAIT', {
+          retryAfter: waitSeconds,
+          message: errMsg,
+          durationMs: performance.now() - syncStartTime,
+        });
+
+        if (floodRetryTimerRef.current) clearTimeout(floodRetryTimerRef.current);
+        floodRetryTimerRef.current = setTimeout(() => {
+          floodWaitUntilRef.current = 0;
+          setFloodWaitRemaining(0);
+          floodRetryTimerRef.current = null;
+          syncInitializationRoutine();
+        }, waitSeconds * 1000);
+      } else if (detectedReason === 'CHAT_WRITE_FORBIDDEN' || detectedReason === 'USER_BANNED_IN_CHANNEL') {
+        recordContextTelemetry(detectedReason, {
+          message: errMsg,
+          durationMs: performance.now() - syncStartTime,
+        });
+      } else {
+        logTelemetry({
+          type: 'sync_error',
+          category: 'sync',
+          reason: detectedReason,
+          durationMs: performance.now() - syncStartTime,
+          details: { snippet: errMsg.slice(0, 80) },
+        });
+      }
+
+      console.warn('[Sync] Cloud sync error (Cache-First offline fallback):', err);
+      setIsOffline(true);
+      setNetworkStatus('offline');
       // Guarantee chat store is never empty
-      setChats((prev) => (prev && prev.length > 0 ? prev : INITIAL_CHATS));
-      showToast('تم تحميل البيانات المحلية للمحادثات', 'ℹ️');
+      const localCached = chatStore.getCachedChats();
+      setChats((prev) => (prev && prev.length > 0 ? prev : (localCached && localCached.length > 0 ? localCached : INITIAL_CHATS)));
+      showToast(settings.language === 'ar' ? 'وضع عدم الاتصال: تم تحميل المحادثات المحفوظة محلياً' : 'Offline mode: viewing locally cached chats', 'ℹ️');
     } finally {
       setIsSyncing(false);
     }
@@ -2693,19 +3459,182 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
+  const sendMediaMessage = async (file: File, caption?: string, mediaType?: 'photo' | 'document') => {
+    if (!activeChatId) return;
+
+    // Clear draft for this chat immediately across sessions
+    draftSyncService.clearDraft(activeChatId);
+
+    const now = new Date();
+    const timeStr = formatTelegramTime(now);
+    const dateStr = now.toISOString().split('T')[0];
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const isPhoto = mediaType === 'photo' || file.type.startsWith('image/');
+    const localUrl = URL.createObjectURL(file);
+    const fileSizeStr = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+
+    const mediaObj: MessageMedia = {
+      type: isPhoto ? 'photo' : 'document',
+      url: localUrl,
+      fileName: file.name,
+      fileSize: fileSizeStr,
+    };
+
+    const newOptimisticMessage: Message = {
+      id: messageId,
+      chatId: activeChatId,
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderAvatar: currentUser.avatar,
+      text: (caption || '').trim(),
+      timestamp: timeStr,
+      date: dateStr,
+      epoch: now.getTime(),
+      rawDate: Math.floor(now.getTime() / 1000),
+      isOutgoing: true,
+      status: 'sending',
+      media: mediaObj,
+      replyTo: replyingTo || undefined,
+    };
+
+    setMessages((prev) => {
+      const currentList = prev[activeChatId] || [];
+      return {
+        ...prev,
+        [activeChatId]: [...currentList, newOptimisticMessage],
+      };
+    });
+
+    setChats((prev) =>
+      reorderChatsWithUpdate(prev, activeChatId, {
+        draft: undefined,
+        draftTimestamp: undefined,
+        lastMessage: {
+          id: messageId,
+          senderName: 'You',
+          text: (caption || '').trim() || (isPhoto ? 'Photo' : file.name),
+          timestamp: timeStr,
+          isOutgoing: true,
+          status: 'sending',
+          mediaType: isPhoto ? 'photo' : 'document',
+        },
+      })
+    );
+
+    setReplyingTo(null);
+
+    try {
+      const reader = new FileReader();
+      const fileData = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch('/api/telegram/messages/send-media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: activeChatId,
+          fileData,
+          fileName: file.name,
+          mimeType: file.type,
+          caption: (caption || '').trim(),
+          mediaType: isPhoto ? 'photo' : 'document',
+          replyToMsgId: replyingTo?.messageId,
+          phone: currentUser.phone,
+          sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+        }),
+      });
+
+      const data = await res.json();
+      if (data && data.success && data.result) {
+        const realMsgId = String(data.result.id || '');
+        setMessages((prev) => {
+          const currentList = prev[activeChatId] || [];
+          return {
+            ...prev,
+            [activeChatId]: currentList.map((m) =>
+              m.id === messageId
+                ? {
+                    ...m,
+                    id: realMsgId || m.id,
+                    status: 'sent',
+                    date: data.result.date || m.date,
+                    timestamp: data.result.timestamp || m.timestamp,
+                  }
+                : m
+            ),
+          };
+        });
+        showToast(settings.language === 'ar' ? 'تم إرسال الملف بنجاح عبر تيليجرام' : 'Media sent via Telegram', '📎');
+        await syncInitializationRoutine().catch(() => {});
+      } else {
+        const errMsg = data?.message || data?.error || 'Failed to send media';
+        showToast(errMsg, '❌');
+        setMessages((prev) => {
+          const currentList = prev[activeChatId] || [];
+          return {
+            ...prev,
+            [activeChatId]: currentList.map((m) =>
+              m.id === messageId ? { ...m, status: 'error' } : m
+            ),
+          };
+        });
+      }
+    } catch (err: any) {
+      console.error('sendMediaMessage error:', err);
+      showToast(err?.message || 'Error uploading file', '❌');
+      setMessages((prev) => {
+        const currentList = prev[activeChatId] || [];
+        return {
+          ...prev,
+          [activeChatId]: currentList.map((m) =>
+            m.id === messageId ? { ...m, status: 'error' } : m
+          ),
+        };
+      });
+    }
+  };
+
   const editMessageText = (messageId: string, newText: string) => {
     if (!activeChatId || !newText.trim()) return;
+    const trimmedText = newText.trim();
     setMessages((prev) => {
       const currentList = prev[activeChatId] || [];
       return {
         ...prev,
         [activeChatId]: currentList.map((m) =>
-          m.id === messageId ? { ...m, text: newText.trim(), isEdited: true } : m
+          m.id === messageId ? { ...m, text: trimmedText, isEdited: true } : m
         ),
       };
     });
     setEditingMessage(null);
     showToast(settings.language === 'ar' ? 'تم تعديل الرسالة' : 'Message edited', '✏️');
+
+    // Dispatch to Telegram MTProto server via POST /api/telegram/messages/edit
+    fetch('/api/telegram/messages/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatId: activeChatId,
+        messageId,
+        text: trimmedText,
+        phone: currentUser.phone,
+        sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (data && data.success) {
+          console.log('[MTProto] Message edited successfully on Telegram server');
+        } else {
+          console.warn('[MTProto] editMessage returned non-success:', data);
+        }
+      })
+      .catch((err) => {
+        console.error('[MTProto] editMessage network error:', err);
+      });
   };
 
   const forwardMessageTo = (targetChatId: string, msgToForward: Message) => {
@@ -2726,7 +3655,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       timestamp: timeStr,
       date: dateStr,
       isOutgoing: true,
-      status: 'read',
+      status: 'sent',
       media: msgToForward.media,
       forwardedFrom: {
         fromChatName: msgToForward.senderName || originalChat?.title || 'Unknown',
@@ -2751,7 +3680,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 text: `Forwarded: ${msgToForward.text || '[Media]'}`,
                 timestamp: timeStr,
                 isOutgoing: true,
-                status: 'read',
+                status: 'sent',
               },
             }
           : c
@@ -2766,6 +3695,31 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       targetChatId,
       false
     ).catch(() => {});
+
+    // Dispatch to Telegram MTProto server via POST /api/telegram/messages/forward
+    fetch('/api/telegram/messages/forward', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fromChatId: msgToForward.chatId || activeChatId,
+        toChatId: targetChatId,
+        messageIds: [Number(msgToForward.id)],
+        phone: currentUser.phone,
+        sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (data && data.success) {
+          console.log('[MTProto] Message forwarded successfully on Telegram server');
+          await syncInitializationRoutine().catch(() => {});
+        } else {
+          console.warn('[MTProto] forwardMessages returned non-success:', data);
+        }
+      })
+      .catch((err) => {
+        console.error('[MTProto] forwardMessages network error:', err);
+      });
 
     setActiveChatId(targetChatId);
     setForwardingMessage(null);
@@ -2844,6 +3798,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } catch {}
     }
 
+    let isRemoving = false;
+
     setMessages((prev) => {
       const currentList = prev[activeChatId] || [];
       const updated = currentList.map((msg) => {
@@ -2855,6 +3811,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (existing) {
           const hasUserReacted = existing.users.includes(currentUser.id);
           if (hasUserReacted) {
+            isRemoving = true;
             const newUsers = existing.users.filter((u) => u !== currentUser.id);
             const newCount = existing.count - 1;
             const updatedReactions = newCount > 0
@@ -2882,6 +3839,31 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         [activeChatId]: updated,
       };
     });
+
+    // Dispatch to Telegram MTProto server via POST /api/telegram/messages/react
+    fetch('/api/telegram/messages/react', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatId: activeChatId,
+        messageId,
+        emoji,
+        remove: isRemoving,
+        phone: currentUser.phone,
+        sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (data && data.success) {
+          console.log('[MTProto] Reaction synced successfully on Telegram server');
+        } else {
+          console.warn('[MTProto] SendReaction returned non-success:', data);
+        }
+      })
+      .catch((err) => {
+        console.error('[MTProto] SendReaction network error:', err);
+      });
   };
 
   const deleteMessage = (messageId: string) => {
@@ -2891,6 +3873,29 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       [activeChatId]: (prev[activeChatId] || []).filter((m) => m.id !== messageId),
     }));
     showToast(settings.language === 'ar' ? 'تم حذف الرسالة' : 'Message deleted', '🗑️');
+
+    // Dispatch to Telegram MTProto server via POST /api/telegram/messages/delete
+    fetch('/api/telegram/messages/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatId: activeChatId,
+        messageId,
+        phone: currentUser.phone,
+        sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (data && data.success) {
+          console.log('[MTProto] Message deleted successfully on Telegram server');
+        } else {
+          console.warn('[MTProto] deleteMessages returned non-success:', data);
+        }
+      })
+      .catch((err) => {
+        console.error('[MTProto] deleteMessages network error:', err);
+      });
   };
 
   const pinMessage = (messageId: string) => {
@@ -3050,6 +4055,184 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         : settings.language === 'ar' ? 'تم إلغاء تثبيت المحادثة' : 'Chat unpinned',
       '📌'
     );
+
+    // Dispatch to Telegram MTProto server via POST /api/telegram/dialogs/pin
+    fetch('/api/telegram/dialogs/pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatId,
+        pinned: isPinned,
+        phone: currentUser.phone,
+        sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.success) {
+          console.log('[MTProto] ToggleDialogPin synced on Telegram server');
+        } else {
+          console.warn('[MTProto] ToggleDialogPin returned non-success:', data);
+        }
+      })
+      .catch((err) => {
+        console.error('[MTProto] ToggleDialogPin network error:', err);
+      });
+  };
+
+  const toggleArchiveChat = async (chatId: string) => {
+    let isArchived = false;
+    setChats((prev) =>
+      prev.map((c) => {
+        if (c.id === chatId) {
+          isArchived = !c.isArchived;
+          return { ...c, isArchived };
+        }
+        return c;
+      })
+    );
+
+    showToast(
+      isArchived
+        ? settings.language === 'ar' ? 'تم نقل المحادثة إلى الأرشيف' : 'Chat moved to archive'
+        : settings.language === 'ar' ? 'تم إلغاء أرشفة المحادثة' : 'Chat unarchived',
+      '📦'
+    );
+
+    try {
+      const res = await fetch('/api/telegram/dialogs/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId,
+          archived: isArchived,
+          phone: currentUser.phone,
+          sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+        }),
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        console.log('[MTProto] EditPeerFolders synced on Telegram server');
+      } else {
+        console.warn('[MTProto] EditPeerFolders returned non-success:', data);
+      }
+    } catch (err) {
+      console.error('[MTProto] EditPeerFolders network error:', err);
+    }
+  };
+
+  const blockUser = async (userId: string, block = true) => {
+    try {
+      await (block ? privacyController.blockUser(userId) : privacyController.unblockUser(userId));
+    } catch {}
+
+    showToast(
+      block
+        ? settings.language === 'ar' ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully'
+        : settings.language === 'ar' ? 'تم إلغاء حظر المستخدم' : 'User unblocked',
+      block ? '🚫' : '✅'
+    );
+
+    try {
+      const res = await fetch('/api/telegram/users/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          block,
+          phone: currentUser.phone,
+          sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+        }),
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        console.log('[MTProto] Block/Unblock synced on Telegram server');
+      } else {
+        console.warn('[MTProto] Block/Unblock returned non-success:', data);
+      }
+    } catch (err) {
+      console.error('[MTProto] Block/Unblock network error:', err);
+    }
+  };
+
+  const searchTelegramGlobal = async (query: string): Promise<any[]> => {
+    if (!query || !query.trim()) return [];
+    try {
+      const res = await fetch('/api/telegram/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: query.trim(),
+          limit: 30,
+          phone: currentUser.phone,
+          sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+        }),
+      });
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.messages)) {
+        return data.messages;
+      }
+      return [];
+    } catch (err) {
+      console.error('[MTProto] SearchGlobal network error:', err);
+      return [];
+    }
+  };
+
+  const createChatFolder = async (folderData: {
+    title: string;
+    contacts?: boolean;
+    nonContacts?: boolean;
+    groups?: boolean;
+    broadcasts?: boolean;
+    bots?: boolean;
+    excludeMuted?: boolean;
+    excludeRead?: boolean;
+    excludeArchived?: boolean;
+  }) => {
+    const newFolderId = `folder_${Date.now()}`;
+    const newFolderItem = {
+      id: newFolderId,
+      name: folderData.title,
+      nameAr: folderData.title,
+      icon: 'folder',
+      filter: (chat: any) => {
+        if (folderData.contacts && (chat.type === 'private' || chat.type === 'saved')) return true;
+        if (folderData.groups && chat.type === 'group') return true;
+        if (folderData.broadcasts && chat.type === 'channel') return true;
+        if (folderData.bots && chat.type === 'bot') return true;
+        return false;
+      },
+    };
+
+    setFolders((prev) => [...prev, newFolderItem]);
+    showToast(
+      settings.language === 'ar'
+        ? `تم إنشاء مجلد "${folderData.title}"`
+        : `Folder "${folderData.title}" created`,
+      '📁'
+    );
+
+    try {
+      const res = await fetch('/api/telegram/folders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...folderData,
+          phone: currentUser.phone,
+          sessionString: SecureSessionStorage.getItem<string>('tg_session_string') || '',
+        }),
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        console.log('[MTProto] UpdateDialogFilter synced on Telegram server');
+        return data;
+      } else {
+        console.warn('[MTProto] UpdateDialogFilter returned non-success:', data);
+      }
+    } catch (err) {
+      console.error('[MTProto] UpdateDialogFilter network error:', err);
+    }
   };
 
   const markChatAsRead = (chatId: string) => {
@@ -3459,6 +4642,11 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           messageCache.putMessage(cId, { ...msg, isOutgoing: isOut }, update).catch(() => {});
         });
 
+        // Update lastReadMessageId if user is viewing this chat and at the bottom
+        if (isCurrentChat && msg.id) {
+          checkAndUpdateLastReadIfAtBottom(activeChatId || targetChatId, msg.id);
+        }
+
         return modified ? nextState : prev;
       });
 
@@ -3619,6 +4807,56 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }).catch(() => {});
       });
 
+      socket.on('settings_updated', (payload: any) => {
+        console.log('[Socket.IO] settings_updated received:', payload);
+        // 1. Profile / user updates
+        if (payload?.type === 'profile_updated' || payload?.subType === 'profile_updated' || payload?.user) {
+          const user = payload.user || payload.data?.user;
+          if (user) {
+            setCurrentUser((prev: any) => {
+              if (!prev) return user;
+              return {
+                ...prev,
+                ...user,
+                name: user.name || prev.name,
+                firstName: user.firstName !== undefined ? user.firstName : prev.firstName,
+                lastName: user.lastName !== undefined ? user.lastName : prev.lastName,
+                username: user.username !== undefined ? user.username : prev.username,
+                avatar: user.avatar !== undefined ? user.avatar : prev.avatar,
+                bio: user.bio !== undefined ? user.bio : prev.bio,
+              };
+            });
+            showToast(settings.language === 'ar' ? 'تمت مزامنة الملف الشخصي تلقائياً' : 'Profile synced with Telegram', '👤');
+          }
+        }
+        // 2. 2FA / Password updates
+        if (
+          payload?.subType === '2fa_updated' ||
+          payload?.type === '2fa_updated' ||
+          payload?.subType === 'email_verified'
+        ) {
+          import('../core/messenger/TwoStepVerificationController')
+            .then(({ TwoStepVerificationController }) => {
+              TwoStepVerificationController.getInstance().updateFromRemote(payload);
+            })
+            .catch(() => {});
+          showToast(settings.language === 'ar' ? 'تم تحديث إعدادات التحقق بخطوتين والبريد' : '2FA settings synced', '🔐');
+        }
+        // 3. Privacy updates
+        if (payload?.subType === 'privacy_updated' || payload?.type === 'privacy_updated' || payload?.target) {
+          import('../core/messenger/PrivacySettingsController')
+            .then(({ PrivacySettingsController }) => {
+              if (payload.target && payload.option) {
+                PrivacySettingsController.getInstance().updateRuleFromRemote(payload.target, payload.option);
+              } else {
+                PrivacySettingsController.getInstance().loadPrivacySettings();
+              }
+            })
+            .catch(() => {});
+          showToast(settings.language === 'ar' ? 'تم تحديث إعدادات الخصوصية' : 'Privacy settings synced', '🛡️');
+        }
+      });
+
       socket.on('telegram_update', (update: any) => {
         if (update?.type === 'new_alert' && update.alert) {
           handleIncomingAlert(update.alert);
@@ -3633,6 +4871,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       socket.on('raw_update', (rawUpdate: any) => {
         try {
+          if (rawUpdate?.message || rawUpdate?.type === 'new_message') {
+            handleIncomingUpdate(rawUpdate);
+          }
           import('../core/MessagesController').then(({ MessagesController }) => {
             const controller = MessagesController.getInstance();
             if (rawUpdate?.update) {
@@ -3785,6 +5026,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
           const lastMsg = data.messages[data.messages.length - 1];
           if (lastMsg) {
+            if (lastMsg.id) {
+              checkAndUpdateLastReadIfAtBottom(activeChatId, lastMsg.id);
+            }
             setChats((prev) =>
               prev.map((c) =>
                 c.id === activeChatId
@@ -4147,6 +5391,10 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const jumpToMessage = (chatId: string, messageId: string) => {
     setActiveChatId(chatId);
+    chatStore.saveLastReadPosition(chatId, {
+      lastReadMessageId: messageId,
+      isNearBottom: false,
+    });
     setTimeout(() => {
       window.dispatchEvent(
         new CustomEvent('tg-scroll-to-message', {
@@ -4272,6 +5520,120 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
+  // Smart App Update & Render Deploy Hook state
+  const [updateState, setUpdateState] = useState<AppUpdateState>({
+    hasUpdate: false,
+    updateCount: 0,
+    showUpdateNotification: false,
+    isUpdating: false,
+  });
+
+  const checkForAppUpdates = React.useCallback(async () => {
+    try {
+      // Read last known commit from localStorage
+      const lastKnownCommit = typeof window !== 'undefined'
+        ? (localStorage.getItem('last_shown_update_commit') || localStorage.getItem('tg_installed_commit') || '')
+        : '';
+      const url = lastKnownCommit
+        ? `/api/update/status?lastKnownCommit=${encodeURIComponent(lastKnownCommit)}`
+        : '/api/update/status';
+
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const count = typeof data.updateCount === 'number' ? data.updateCount : (data.hasUpdate ? 1 : 0);
+        const latestSha = data.fullCommitHash || data.commitHash || '';
+        const lastShown = typeof window !== 'undefined' ? localStorage.getItem('last_shown_update_commit') : null;
+
+        // STRICT RULES:
+        // 1. Never show if user is not authenticated (login screen)
+        // 2. Only show if updateCount > 0
+        // 3. Do not re-show if commit has not changed and was already shown/dismissed
+        const isSameAsLastShown = Boolean(lastShown && latestSha && lastShown.toLowerCase() === latestSha.toLowerCase());
+        const shouldShow = Boolean(data.hasUpdate && count > 0 && isAuthenticated && !isSameAsLastShown);
+
+        setUpdateState((prev) => ({
+          ...prev,
+          hasUpdate: Boolean(data.hasUpdate && count > 0),
+          updateCount: count,
+          showUpdateNotification: shouldShow,
+          commitHash: data.commitHash,
+          fullCommitHash: data.fullCommitHash,
+          commitMessage: data.commitMessage,
+          commitAuthor: data.commitAuthor,
+          commitDate: data.commitDate,
+          currentCommitHash: data.currentCommitHash,
+          commits: data.commits || [],
+        }));
+      }
+    } catch (err) {
+      console.warn('[TelegramContext] Failed to check for updates:', err);
+    }
+  }, [isAuthenticated]);
+
+  const triggerAppUpdate = React.useCallback(async (): Promise<boolean> => {
+    setUpdateState((prev) => ({ ...prev, isUpdating: true, error: undefined }));
+    try {
+      const res = await fetch('/api/update/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Record latest commit in localStorage to prevent notification from reappearing
+        const latestSha = updateState.fullCommitHash || updateState.commitHash || data.latestCommit || '';
+        if (latestSha && typeof window !== 'undefined') {
+          localStorage.setItem('last_shown_update_commit', latestSha);
+          localStorage.setItem('tg_installed_commit', latestSha);
+        }
+
+        setUpdateState((prev) => ({
+          ...prev,
+          isUpdating: false,
+          hasUpdate: false,
+          updateCount: 0,
+          showUpdateNotification: false,
+        }));
+        return true;
+      } else {
+        setUpdateState((prev) => ({
+          ...prev,
+          isUpdating: false,
+          error: data.error || 'Failed to trigger deploy hook',
+        }));
+        return false;
+      }
+    } catch (err: any) {
+      setUpdateState((prev) => ({
+        ...prev,
+        isUpdating: false,
+        error: err?.message || 'Network error',
+      }));
+      return false;
+    }
+  }, [updateState.fullCommitHash, updateState.commitHash]);
+
+  const dismissUpdateNotification = React.useCallback(() => {
+    const latestSha = updateState.fullCommitHash || updateState.commitHash || '';
+    if (latestSha && typeof window !== 'undefined') {
+      localStorage.setItem('last_shown_update_commit', latestSha);
+    }
+    setUpdateState((prev) => ({ ...prev, showUpdateNotification: false }));
+  }, [updateState.fullCommitHash, updateState.commitHash]);
+
+  // Check for updates on startup, upon authentication, and periodically every 5 minutes
+  useEffect(() => {
+    if (isAuthenticated) {
+      checkForAppUpdates();
+    }
+    const updateInterval = setInterval(() => {
+      if (isAuthenticated) {
+        checkForAppUpdates();
+      }
+    }, 5 * 60 * 1000);
+    return () => clearInterval(updateInterval);
+  }, [checkForAppUpdates, isAuthenticated]);
+
   return (
     <TelegramContext.Provider
       value={{
@@ -4283,6 +5645,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         activeFolderId,
         folders,
         searchQuery,
+        searchFilter,
+        isSearchActive,
+        chatsWithDraftsCount,
         isDrawerOpen,
         isRightPanelOpen,
         activeModal,
@@ -4325,6 +5690,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setActiveChatId,
         setActiveFolderId,
         setSearchQuery,
+        setSearchFilter,
+        setIsSearchActive,
         setIsDrawerOpen,
         setIsRightPanelOpen,
         setActiveModal,
@@ -4340,6 +5707,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setMessageContextMenu,
         showToast,
         sendMessage,
+        sendMediaMessage,
         editMessageText,
         forwardMessageTo,
         toggleReaction,
@@ -4352,6 +5720,10 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setChatDraft,
         toggleMuteChat,
         togglePinChat,
+        toggleArchiveChat,
+        blockUser,
+        searchTelegramGlobal,
+        createChatFolder,
         markChatReadUnread,
         markChatAsRead,
         clearChatHistory,
@@ -4369,6 +5741,11 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         createNewChat,
         jumpToMessage,
         openPrivateChat,
+        chatStore,
+        lastReadPositions: chatStore.lastReadPositions,
+        ScrollPositions: chatStore.ScrollPositions,
+        getLastReadPosition: (chatId: string) => chatStore.getLastReadPosition(chatId),
+        saveLastReadPosition: (chatId: string, data: any) => chatStore.saveLastReadPosition(chatId, data),
         resolveTelegramLink,
         syncCloudData,
         syncInitializationRoutine,
@@ -4376,6 +5753,10 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         validateSessionProactively,
         isSyncing,
         isSessionValidating,
+        telemetryLogs,
+        recordTelemetry: recordContextTelemetry,
+        isFloodWaitActive: floodWaitRemaining > 0,
+        floodWaitRemainingSeconds: floodWaitRemaining,
         solveChatCaptcha,
         forwardToSavedMessages,
         loadMoreChatMessages,
@@ -4386,7 +5767,14 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         testSimulateFcmPush,
         clearFcmDiagnosticHistory,
         triggerScreenshotBlocked,
+        isOffline,
+        networkStatus,
+        setNetworkStatus,
         messageCache,
+        updateState,
+        checkForAppUpdates,
+        triggerAppUpdate,
+        dismissUpdateNotification,
       }}
     >
       {children}

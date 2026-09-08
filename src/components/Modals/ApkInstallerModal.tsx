@@ -184,14 +184,17 @@ export const ApkInstallerModal: React.FC = () => {
         <div className="p-6">
           {installState === 'confirm' && (
             <div className="text-center space-y-5">
-              {/* App Icon */}
+              {/* App Icon - Matching Login Screen Icon Design */}
               <div className="relative w-20 h-20 mx-auto">
-                <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[#2481cc] via-[#2a93de] to-[#1c6fad] flex items-center justify-center shadow-xl shadow-sky-500/20 border-2 border-white/20">
-                  <svg className="w-11 h-11 text-white fill-current -translate-x-0.5 translate-y-0.5" viewBox="0 0 24 24">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z" />
+                <div className="relative w-20 h-20 rounded-full tg-multicolor-gradient flex items-center justify-center shadow-xl shadow-sky-500/25 cursor-default select-none">
+                  <div className="tg-multicolor-glow" />
+                  <svg className="w-11 h-11 text-white -translate-x-0.5 relative z-10 drop-shadow-md" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.77-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z" />
                   </svg>
+                  {/* Glowing Ring */}
+                  <div className="absolute inset-0 rounded-full border-2 border-white/40 animate-pulse pointer-events-none" />
                 </div>
-                <span className="absolute -bottom-1 -right-1 p-1 bg-emerald-500 text-white rounded-full ring-4 ring-[#17212b] shadow-md">
+                <span className="absolute -bottom-1 -right-1 p-1 bg-emerald-500 text-white rounded-full ring-4 ring-[#17212b] shadow-md z-20">
                   <ShieldCheck className="w-3.5 h-3.5" />
                 </span>
               </div>
@@ -291,8 +294,18 @@ export const ApkInstallerModal: React.FC = () => {
 
           {installState === 'completed' && (
             <div className="text-center py-4 space-y-5">
-              <div className="w-16 h-16 mx-auto rounded-3xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <CheckCircle2 className="w-9 h-9" />
+              {/* Completed Installed Icon */}
+              <div className="relative w-20 h-20 mx-auto">
+                <div className="relative w-20 h-20 rounded-full tg-multicolor-gradient flex items-center justify-center shadow-xl shadow-sky-500/25 cursor-default select-none">
+                  <div className="tg-multicolor-glow" />
+                  <svg className="w-11 h-11 text-white -translate-x-0.5 relative z-10 drop-shadow-md" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z" />
+                  </svg>
+                  <div className="absolute inset-0 rounded-full border-2 border-white/40 animate-pulse pointer-events-none" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 p-1 bg-emerald-500 text-white rounded-full ring-4 ring-[#17212b] shadow-md z-20">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                </span>
               </div>
 
               <div className="space-y-1">

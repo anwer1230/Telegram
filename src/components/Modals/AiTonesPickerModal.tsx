@@ -28,24 +28,32 @@ export const AiTonesPickerModal: React.FC<AiTonesPickerModalProps> = ({
 
   React.useEffect(() => {
     if (isOpen) {
-      setWorkingText(inputText || (isArabic ? 'مرحباً، هل يمكنك مراجعة الملفات وإرسال الملاحظات؟' : 'Hello, could you please review the files and send feedback?'));
+      const initialText = inputText || (isArabic ? 'مرحباً، هل يمكنك مراجعة الملفات وإرسال الملاحظات؟' : 'Hello, could you please review the files and send feedback?');
+      setWorkingText(initialText);
       const initial = aiTonesController.transformTextTone(
-        inputText || (isArabic ? 'مرحباً، هل يمكنك مراجعة الملفات وإرسال الملاحظات؟' : 'Hello, could you please review the files and send feedback?'),
+        initialText,
         'formal',
         isArabic
       );
       setTransformedText(initial);
+      aiTonesController.transformTextToneWithGroq(initialText, 'formal', isArabic)
+        .then((refined) => setTransformedText(refined))
+        .catch(() => {});
     }
   }, [isOpen, inputText, isArabic]);
 
-  const handleToneChange = (toneId: AiToneId) => {
+  const handleToneChange = async (toneId: AiToneId) => {
     setSelectedTone(toneId);
     setIsGenerating(true);
-    setTimeout(() => {
-      const result = aiTonesController.transformTextTone(workingText, toneId, isArabic);
+    try {
+      const result = await aiTonesController.transformTextToneWithGroq(workingText, toneId, isArabic);
       setTransformedText(result);
+    } catch {
+      const fallback = aiTonesController.transformTextTone(workingText, toneId, isArabic);
+      setTransformedText(fallback);
+    } finally {
       setIsGenerating(false);
-    }, 200);
+    }
   };
 
   const handleApply = () => {

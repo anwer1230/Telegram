@@ -34,6 +34,7 @@ export const UserProfileModal: React.FC = () => {
     settings,
     setViewerMedia,
     showToast,
+    blockUser,
   } = useTelegram();
 
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
@@ -372,10 +373,7 @@ export const UserProfileModal: React.FC = () => {
             </button>
             <button
               onClick={() => {
-                showToast(
-                  isArabic ? `تم حظر ${user.name} بنجاح` : `Blocked ${user.name}`,
-                  '🚫'
-                );
+                blockUser(user.id, true);
                 setActiveModal('none');
               }}
               className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-rose-500/10 text-rose-400 transition-colors text-xs font-medium"

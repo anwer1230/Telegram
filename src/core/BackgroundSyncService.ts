@@ -496,6 +496,12 @@ export class BackgroundSyncService {
     return this.autoReplyRules;
   }
 
+  public setAutoReplyRules(rules: AutoReplyRule[]) {
+    this.autoReplyRules = rules;
+    this.syncStateToWorker();
+    this.notifyStateChange();
+  }
+
   public addAutoReplyRule(rule: Omit<AutoReplyRule, 'id' | 'timesTriggered'>) {
     const newRule: AutoReplyRule = {
       ...rule,

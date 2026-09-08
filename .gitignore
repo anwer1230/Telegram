@@ -1,3 +1,4 @@
+node_modules
 node_modules/
 build/
 dist/
@@ -6,12 +7,17 @@ coverage/
 *.log
 .env*
 !.env.example
-# Sensitive configuration and keys
 config/
 config/serviceAccountKey.json
 config/firebase-service-account.json
-config/release.keystore 
+config/release.keystore
 # Isolated Telegram Account Sessions
 sessions/*.json
 !sessions/.gitkeep
+
+# SQLite Database Storage
+data/*.sqlite
+data/*.sqlite-journal
+!data/.gitkeep
+
 

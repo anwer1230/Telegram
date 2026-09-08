@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -23,29 +23,14 @@ import {
   Lock,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
-const COUNTRY_CODES = [
-  { code: '+967', country: 'اليمن 🇾🇪', flag: '🇾🇪', placeholder: '770 000 000' },
-  { code: '+966', country: 'السعودية 🇸🇦', flag: '🇸🇦', placeholder: '50 000 0000' },
-  { code: '+20', country: 'مصر 🇪🇬', flag: '🇪🇬', placeholder: '100 000 0000' },
-  { code: '+971', country: 'الإمارات 🇦🇪', flag: '🇦🇪', placeholder: '50 000 0000' },
-  { code: '+965', country: 'الكويت 🇰🇼', flag: '🇰🇼', placeholder: '9000 0000' },
-  { code: '+974', country: 'قطر 🇶🇦', flag: '🇶🇦', placeholder: '5000 0000' },
-  { code: '+968', country: 'عُمان 🇴🇲', flag: '🇴🇲', placeholder: '9000 0000' },
-  { code: '+962', country: 'الأردن 🇯🇴', flag: '🇯🇴', placeholder: '7 9000 0000' },
-  { code: '+964', country: 'العراق 🇮🇶', flag: '🇮🇶', placeholder: '770 000 0000' },
-  { code: '+963', country: 'سوريا 🇸🇾', flag: '🇸🇾', placeholder: '900 000 000' },
-  { code: '+961', country: 'لبنان 🇱🇧', flag: '🇱🇧', placeholder: '70 000 000' },
-  { code: '+212', country: 'المغرب 🇲🇦', flag: '🇲🇦', placeholder: '600 000 000' },
-  { code: '+213', country: 'الجزائر 🇩🇿', flag: '🇩🇿', placeholder: '600 000 000' },
-  { code: '+216', country: 'تونس 🇹🇳', flag: '🇹🇳', placeholder: '20 000 000' },
-  { code: '+249', country: 'السودان 🇸🇩', flag: '🇸🇩', placeholder: '90 000 0000' },
-  { code: '+970', country: 'فلسطين 🇵🇸', flag: '🇵🇸', placeholder: '59 000 0000' },
-  { code: '+973', country: 'البحرين 🇧🇭', flag: '🇧🇭', placeholder: '3000 0000' },
-  { code: '+1', country: 'USA / Canada 🇺🇸', flag: '🇺🇸', placeholder: '202 555 0123' },
-  { code: '+44', country: 'UK 🇬🇧', flag: '🇬🇧', placeholder: '7911 123456' },
-  { code: '+90', country: 'Turkey 🇹🇷', flag: '🇹🇷', placeholder: '500 000 0000' },
-];
+const normalizeFullPhone = (val: string): string => {
+  let clean = (val || '').trim().replace(/[\s\-\(\)]/g, '');
+  if (clean.startsWith('00')) clean = '+' + clean.slice(2);
+  else if (clean && !clean.startsWith('+')) clean = '+' + clean;
+  return clean;
+};
 
 const AVATAR_PRESETS = [
   { id: 'grad_blue', name: 'Blue', color: 'from-blue-500 to-indigo-600', icon: '👤' },
@@ -65,11 +50,43 @@ export const AddAccountModal: React.FC = () => {
 
   // Step management
   const [step, setStep] = useState<AuthStep>('phone');
-  const [selectedCountryCode, setSelectedCountryCode] = useState('+967');
-  const [rawPhone, setRawPhone] = useState('770123456');
+  const [rawPhone, setRawPhone] = useState('+967 770 123 456');
   const [deliveryType, setDeliveryType] = useState<DeliveryType>('app');
   const [isLoading, setIsLoading] = useState(false);
   const [phoneCodeHash, setPhoneCodeHash] = useState('');
+
+  const fullPhoneNumber = normalizeFullPhone(rawPhone);
+
+  const detectedCountry = useMemo(() => {
+    if (!rawPhone || rawPhone.trim().length < 3) return null;
+    const normalized = normalizeFullPhone(rawPhone);
+    try {
+      const parsed = parsePhoneNumberFromString(normalized);
+      if (parsed && parsed.country) {
+        const iso: string = parsed.country;
+        const codePoints = iso
+          .toUpperCase()
+          .split('')
+          .map((c) => 127397 + c.charCodeAt(0));
+        const flag = String.fromCodePoint(...codePoints);
+        let name: string = iso;
+        try {
+          const regionNames = new Intl.DisplayNames([isArabic ? 'ar' : 'en'], { type: 'region' });
+          name = regionNames.of(iso) || iso;
+        } catch (_) {}
+
+        return {
+          countryCode: iso,
+          callingCode: parsed.countryCallingCode ? `+${parsed.countryCallingCode}` : '',
+          nationalNumber: parsed.nationalNumber || '',
+          flag,
+          name,
+          internationalFormatted: parsed.formatInternational() || normalized,
+        };
+      }
+    } catch (_) {}
+    return null;
+  }, [rawPhone, isArabic]);
   
   // Verification code inputs (5 boxes)
   const [codeDigits, setCodeDigits] = useState(['', '', '', '', '']);
@@ -91,8 +108,6 @@ export const AddAccountModal: React.FC = () => {
   const [selectedAvatar, setSelectedAvatar] = useState('grad_blue');
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-
-  const fullPhoneNumber = `${selectedCountryCode} ${rawPhone}`.trim();
 
   // Reset when modal opens
   useEffect(() => {
@@ -222,7 +237,8 @@ export const AddAccountModal: React.FC = () => {
         }
         if (data.user) {
           const fetchedName = [data.user.firstName, data.user.lastName].filter(Boolean).join(' ');
-          setName(fetchedName || (isArabic ? `حساب (${selectedCountryCode})` : `Account (${selectedCountryCode})`));
+          const countryLabel = detectedCountry?.callingCode || fullPhoneNumber;
+          setName(fetchedName || (isArabic ? `حساب (${countryLabel})` : `Account (${countryLabel})`));
           if (data.user.username) {
             setUsername(data.user.username);
           }
@@ -335,9 +351,10 @@ export const AddAccountModal: React.FC = () => {
           setAccountSessionString(data.sessionString);
         }
         // Populate profile with real user details from Telegram if available
+        const countryLabel = detectedCountry?.callingCode || fullPhoneNumber;
         if (data.user) {
           const fetchedName = [data.user.firstName, data.user.lastName].filter(Boolean).join(' ');
-          setName(fetchedName || (isArabic ? `حساب (${selectedCountryCode})` : `Account (${selectedCountryCode})`));
+          setName(fetchedName || (isArabic ? `حساب (${countryLabel})` : `Account (${countryLabel})`));
           if (data.user.username) {
             setUsername(data.user.username);
           }
@@ -345,7 +362,7 @@ export const AddAccountModal: React.FC = () => {
             setUserAvatar(data.user.avatar);
           }
         } else {
-          setName(isArabic ? `حساب (${selectedCountryCode})` : `Account (${selectedCountryCode})`);
+          setName(isArabic ? `حساب (${countryLabel})` : `Account (${countryLabel})`);
         }
         setStep('profile');
       } else if (data.requiresPassword) {
@@ -468,38 +485,61 @@ export const AddAccountModal: React.FC = () => {
                   </p>
                 </div>
 
-                {/* Country Code & Phone Input */}
+                {/* Phone Input with Automatic Country Detection */}
                 <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-gray-300">
-                    {isArabic ? 'الدولة ورقم الهاتف *' : 'Country & Phone Number *'}
-                  </label>
-                  <div className="flex gap-2">
-                    {/* Country Selector */}
-                    <select
-                      value={selectedCountryCode}
-                      onChange={(e) => setSelectedCountryCode(e.target.value)}
-                      className="bg-[#0e1621] border border-[#2b394a] focus:border-[#5288c1] text-white text-xs rounded-xl px-2.5 py-2.5 outline-none font-mono"
-                    >
-                      {COUNTRY_CODES.map((c) => (
-                        <option key={c.code} value={c.code} className="bg-[#17212b] text-white">
-                          {c.flag} {c.code} ({c.country.split(' ')[0]})
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* Phone Number Field */}
-                    <div className="relative flex-1">
-                      <input
-                        type="tel"
-                        required
-                        dir="ltr"
-                        value={rawPhone}
-                        onChange={(e) => setRawPhone(e.target.value)}
-                        placeholder="770 000 000"
-                        className="w-full bg-[#0e1621] border border-[#2b394a] focus:border-[#5288c1] text-white text-sm rounded-xl py-2.5 px-3 outline-none font-mono text-left"
-                      />
-                    </div>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-gray-300">
+                      {isArabic ? 'رقم الهاتف مع رمز الدولة *' : 'Phone Number (with Country Code) *'}
+                    </label>
+                    {detectedCountry && (
+                      <div className="flex items-center gap-1.5 text-xs text-sky-400 font-medium">
+                        <span>{detectedCountry.flag}</span>
+                        <span>{detectedCountry.name}</span>
+                        <span className="font-mono text-gray-400 text-[11px]">({detectedCountry.callingCode})</span>
+                      </div>
+                    )}
                   </div>
+
+                  <div className="relative flex items-center" dir="ltr">
+                    <div className="absolute start-3 flex items-center gap-1.5 text-gray-400 pointer-events-none select-none">
+                      {detectedCountry ? (
+                        <span className="text-base leading-none">{detectedCountry.flag}</span>
+                      ) : (
+                        <Phone size={16} className="text-[#5288c1]" />
+                      )}
+                    </div>
+                    <input
+                      type="tel"
+                      required
+                      dir="ltr"
+                      value={rawPhone}
+                      onChange={(e) => setRawPhone(e.target.value)}
+                      placeholder={
+                        isArabic
+                          ? '+967 770 123 456 (رمز الدولة + الرقم)'
+                          : '+1 555 123 4567 (Country code + Phone)'
+                      }
+                      className="w-full bg-[#0e1621] border border-[#2b394a] focus:border-[#5288c1] text-white text-sm rounded-xl py-2.5 ps-10 pe-3 outline-none font-mono text-left tracking-wide placeholder:text-gray-500"
+                    />
+                  </div>
+
+                  {/* Auto-detected badge or helper */}
+                  {detectedCountry ? (
+                    <div className="flex items-center gap-2 px-3 py-1 bg-[#0e1621] border border-[#5288c1]/30 rounded-lg text-xs text-sky-400">
+                      <span>{detectedCountry.flag}</span>
+                      <span className="text-white font-medium">{detectedCountry.name}</span>
+                      <span className="text-gray-400 font-mono text-[11px]">({detectedCountry.callingCode})</span>
+                      <span className="ms-auto text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        {isArabic ? 'مكتشفة تلقائياً' : 'Auto-detected'}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-gray-400 px-0.5">
+                      {isArabic
+                        ? '💡 أدخل الرقم كاملاً مع مفتاح الدولة (مثل: +967... أو +966...)'
+                        : '💡 Enter the complete phone number with international country code'}
+                    </p>
+                  )}
                 </div>
 
                 {/* Delivery Channel Selection (أين تريد استلام الرمز؟) */}

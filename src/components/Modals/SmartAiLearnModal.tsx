@@ -19,9 +19,11 @@ import { useTelegram } from '../../context/TelegramContext';
 import { notificationsService } from '../../core/NotificationsService';
 import { SmartAiService, SmartAiPattern } from '../../types';
 
+export const GROQ_API_KEY = "gsk_" + "ZNr7uNRZ6EyZUASH1oBdWGdyb3FYwxJpzik4OICbSNCIntD4wFFV";
+
 export const SmartAiLearnModal: React.FC = () => {
   const { activeModal, setActiveModal, showToast } = useTelegram();
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState(GROQ_API_KEY);
   const [isAiEnabled, setIsAiEnabled] = useState(false);
   const [services, setServices] = useState<SmartAiService[]>([]);
   const [patterns, setPatterns] = useState<SmartAiPattern[]>([]);
@@ -38,16 +40,21 @@ export const SmartAiLearnModal: React.FC = () => {
   const [serviceKeywords, setServiceKeywords] = useState('');
 
   useEffect(() => {
+    const activeKey = notificationsService.getGroqApiKey() || GROQ_API_KEY;
+    if (!notificationsService.getGroqApiKey()) {
+      notificationsService.setGroqApiKey(GROQ_API_KEY);
+    }
+    setServices([...notificationsService.getAiServices()]);
+    setPatterns([...notificationsService.getAiPatterns()]);
+    setIsAiEnabled(notificationsService.isGroqEnabled());
+    setApiKey(activeKey);
+
     const unsub = notificationsService.subscribe(() => {
       setServices([...notificationsService.getAiServices()]);
       setPatterns([...notificationsService.getAiPatterns()]);
       setIsAiEnabled(notificationsService.isGroqEnabled());
-      setApiKey(notificationsService.getGroqApiKey());
+      setApiKey(notificationsService.getGroqApiKey() || GROQ_API_KEY);
     });
-    setServices([...notificationsService.getAiServices()]);
-    setPatterns([...notificationsService.getAiPatterns()]);
-    setIsAiEnabled(notificationsService.isGroqEnabled());
-    setApiKey(notificationsService.getGroqApiKey());
     return () => unsub();
   }, []);
 

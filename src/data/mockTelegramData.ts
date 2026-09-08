@@ -94,6 +94,8 @@ export const INITIAL_CHATS: Chat[] = [
     isPinned: false,
     isVerified: true,
     description: 'Founder and CEO of Telegram.',
+    draft: 'مرحباً بافل، نود مناقشة خطة التحديثات القادمة لتيليجرام.',
+    draftTimestamp: '10:45 AM',
     lastMessage: {
       id: 'm_dur_1',
       senderName: 'Pavel Durov',
@@ -243,6 +245,22 @@ export const INITIAL_MESSAGES: Record<string, Message[]> = {
       isOutgoing: true,
       status: 'read',
     },
+    {
+      id: 'm_s_voice_1',
+      chatId: 'chat_saved_messages',
+      senderId: 'user_anwer_main',
+      senderName: 'You',
+      text: '',
+      timestamp: '11:20 AM',
+      date: '2026-08-29',
+      isOutgoing: true,
+      status: 'read',
+      media: {
+        type: 'voice',
+        duration: 18,
+        waveform: [20, 35, 55, 75, 45, 28, 65, 88, 98, 60, 35, 50, 72, 92, 78, 42, 28, 58, 82, 68, 48, 32, 62, 76, 38, 22, 45, 68, 52, 25],
+      },
+    },
   ],
   chat_ai_bot: [
     {
@@ -298,6 +316,23 @@ export const INITIAL_MESSAGES: Record<string, Message[]> = {
       isOutgoing: false,
       status: 'read',
       reactions: [{ emoji: '❤️', count: 3, users: ['user_anwer_main'] }],
+    },
+    {
+      id: 'm_dur_voice_2',
+      chatId: 'chat_durov',
+      senderId: 'user_durov',
+      senderName: 'Pavel Durov',
+      senderAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+      text: '',
+      timestamp: '09:32 AM',
+      date: '2026-08-29',
+      isOutgoing: false,
+      status: 'read',
+      media: {
+        type: 'voice',
+        duration: 24,
+        waveform: [15, 30, 60, 90, 75, 40, 85, 95, 60, 30, 55, 70, 85, 100, 75, 50, 35, 65, 80, 65, 45, 30, 50, 75, 90, 60, 40, 25],
+      },
     },
   ],
   chat_tech_group: [

@@ -114,7 +114,7 @@ export const ChatHeader: React.FC = () => {
   return (
     <div
       id="tg-chat-header"
-      className="h-14 px-3 flex items-center justify-between border-b select-none shrink-0 z-10"
+      className="h-14 px-3 flex items-center justify-between border-b select-none shrink-0 z-10 bg-gradient-to-r from-[#8A2BE2]/10 via-transparent to-[#FF69B4]/10"
       style={{
         backgroundColor: 'var(--tg-theme-surface)',
         borderColor: 'var(--tg-theme-border)',
@@ -134,10 +134,10 @@ export const ChatHeader: React.FC = () => {
         {/* Avatar */}
         <div
           onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-          className="relative w-10 h-10 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-tr from-sky-600 to-cyan-500 text-white font-bold text-base cursor-pointer shrink-0 shadow-sm"
+          className="relative w-10 h-10 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-tr from-[#8A2BE2] to-[#FF69B4] text-white font-bold text-base cursor-pointer shrink-0 shadow-sm"
         >
           {isSavedMessages ? (
-            <div className="w-full h-full bg-[#2481cc] flex items-center justify-center">
+            <div className="w-full h-full bg-[#8A2BE2] flex items-center justify-center">
               <Bookmark className="w-5 h-5 fill-white text-white" />
             </div>
           ) : activeChat.avatar ? (

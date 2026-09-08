@@ -1,0 +1,1207 @@
+[
+  {
+    "id": "srv_tel_1788790744358_zwz7",
+    "timestamp": "2026-09-07T14:19:04.358Z",
+    "errorType": "latency_probe",
+    "message": "Network ping probe completed in 42ms",
+    "details": {},
+    "source": "client",
+    "ip": "127.0.0.1"
+  },
+  {
+    "id": "srv_tel_1788790554036_420p",
+    "timestamp": "2026-09-07T14:15:51.473Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790554035_plv0",
+    "timestamp": "2026-09-07T14:15:51.432Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790554034_l3qa",
+    "timestamp": "2026-09-07T14:15:51.335Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790554033_xnva",
+    "timestamp": "2026-09-07T14:15:51.380Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790554031_1obp",
+    "timestamp": "2026-09-07T14:15:51.286Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790554029_29iu",
+    "timestamp": "2026-09-07T14:15:51.236Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790554027_731s",
+    "timestamp": "2026-09-07T14:15:51.195Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790554026_xjy4",
+    "timestamp": "2026-09-07T14:15:51.157Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553974_a7l4",
+    "timestamp": "2026-09-07T14:15:51.118Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553961_k0td",
+    "timestamp": "2026-09-07T14:15:51.084Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553951_j761",
+    "timestamp": "2026-09-07T14:15:51.048Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553928_btw0",
+    "timestamp": "2026-09-07T14:15:50.931Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553926_4lc2",
+    "timestamp": "2026-09-07T14:15:50.967Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553925_fp6u",
+    "timestamp": "2026-09-07T14:15:51.007Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553923_9dig",
+    "timestamp": "2026-09-07T14:15:50.848Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553921_6e12",
+    "timestamp": "2026-09-07T14:15:50.762Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553919_kpyc",
+    "timestamp": "2026-09-07T14:15:50.889Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553918_t5i4",
+    "timestamp": "2026-09-07T14:15:50.722Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553915_ijoq",
+    "timestamp": "2026-09-07T14:15:50.539Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553912_qwgf",
+    "timestamp": "2026-09-07T14:15:50.586Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553910_0qt4",
+    "timestamp": "2026-09-07T14:15:50.805Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553909_rxom",
+    "timestamp": "2026-09-07T14:15:50.663Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553907_l69y",
+    "timestamp": "2026-09-07T14:15:50.627Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553894_bycj",
+    "timestamp": "2026-09-07T14:15:50.500Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553892_ryh0",
+    "timestamp": "2026-09-07T14:15:50.455Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553882_jcxr",
+    "timestamp": "2026-09-07T14:15:50.406Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553856_c3su",
+    "timestamp": "2026-09-07T14:15:50.281Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553854_ipb8",
+    "timestamp": "2026-09-07T14:15:50.350Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553844_sq4i",
+    "timestamp": "2026-09-07T14:15:50.238Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553842_54re",
+    "timestamp": "2026-09-07T14:15:50.193Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553823_ylyh",
+    "timestamp": "2026-09-07T14:15:49.926Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553822_2wm0",
+    "timestamp": "2026-09-07T14:15:49.975Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553820_vn3u",
+    "timestamp": "2026-09-07T14:15:50.139Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553817_jqwx",
+    "timestamp": "2026-09-07T14:15:49.800Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553810_sy3x",
+    "timestamp": "2026-09-07T14:15:49.847Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553807_vni0",
+    "timestamp": "2026-09-07T14:15:49.886Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553804_5hom",
+    "timestamp": "2026-09-07T14:15:49.757Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553798_xua6",
+    "timestamp": "2026-09-07T14:15:49.708Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553796_8ru5",
+    "timestamp": "2026-09-07T14:15:49.662Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553794_gadl",
+    "timestamp": "2026-09-07T14:15:49.614Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553782_2skw",
+    "timestamp": "2026-09-07T14:15:49.577Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553770_8vxq",
+    "timestamp": "2026-09-07T14:15:49.529Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553768_kuz7",
+    "timestamp": "2026-09-07T14:15:49.494Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553767_32hf",
+    "timestamp": "2026-09-07T14:15:49.452Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790553764_egs2",
+    "timestamp": "2026-09-07T14:15:49.411Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549530_j3p3",
+    "timestamp": "2026-09-07T14:15:47.176Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549529_m2o0",
+    "timestamp": "2026-09-07T14:15:47.226Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549527_xleh",
+    "timestamp": "2026-09-07T14:15:47.112Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549525_r574",
+    "timestamp": "2026-09-07T14:15:47.034Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549513_du32",
+    "timestamp": "2026-09-07T14:15:46.962Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549482_6moh",
+    "timestamp": "2026-09-07T14:15:46.899Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549468_l2bg",
+    "timestamp": "2026-09-07T14:15:46.852Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549465_2bx1",
+    "timestamp": "2026-09-07T14:15:46.797Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549448_vp1s",
+    "timestamp": "2026-09-07T14:15:46.745Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549446_1zi1",
+    "timestamp": "2026-09-07T14:15:46.688Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549445_vcx7",
+    "timestamp": "2026-09-07T14:15:46.631Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549443_hybi",
+    "timestamp": "2026-09-07T14:15:46.555Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549439_enn2",
+    "timestamp": "2026-09-07T14:15:46.511Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549436_c604",
+    "timestamp": "2026-09-07T14:15:46.458Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549406_z5hc",
+    "timestamp": "2026-09-07T14:15:46.414Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549404_ftxw",
+    "timestamp": "2026-09-07T14:15:46.349Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549402_kd6a",
+    "timestamp": "2026-09-07T14:15:46.292Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549400_ahvn",
+    "timestamp": "2026-09-07T14:15:46.177Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549399_yrnk",
+    "timestamp": "2026-09-07T14:15:46.229Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549397_mzmn",
+    "timestamp": "2026-09-07T14:15:46.131Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549396_mbkl",
+    "timestamp": "2026-09-07T14:15:46.077Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549395_teh2",
+    "timestamp": "2026-09-07T14:15:46.017Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549392_abe0",
+    "timestamp": "2026-09-07T14:15:45.953Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549391_4cv3",
+    "timestamp": "2026-09-07T14:15:45.887Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549389_z3so",
+    "timestamp": "2026-09-07T14:15:45.845Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549388_ui89",
+    "timestamp": "2026-09-07T14:15:45.796Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549386_okxa",
+    "timestamp": "2026-09-07T14:15:45.743Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549385_n7y6",
+    "timestamp": "2026-09-07T14:15:45.702Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549383_9w80",
+    "timestamp": "2026-09-07T14:15:45.651Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549380_jdrj",
+    "timestamp": "2026-09-07T14:15:45.608Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549376_gsmm",
+    "timestamp": "2026-09-07T14:15:45.557Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549349_hqsc",
+    "timestamp": "2026-09-07T14:15:45.296Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549347_j0vc",
+    "timestamp": "2026-09-07T14:15:45.246Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549346_gq6k",
+    "timestamp": "2026-09-07T14:15:45.184Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549344_rsfy",
+    "timestamp": "2026-09-07T14:15:45.140Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549342_f0qw",
+    "timestamp": "2026-09-07T14:15:45.087Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549341_ea74",
+    "timestamp": "2026-09-07T14:15:44.954Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549339_g35a",
+    "timestamp": "2026-09-07T14:15:45.008Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549312_xn3z",
+    "timestamp": "2026-09-07T14:15:44.872Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549310_p3yn",
+    "timestamp": "2026-09-07T14:15:44.823Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549308_mlg3",
+    "timestamp": "2026-09-07T14:15:44.702Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549306_gohx",
+    "timestamp": "2026-09-07T14:15:44.639Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549305_kyqu",
+    "timestamp": "2026-09-07T14:15:44.768Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549302_owwq",
+    "timestamp": "2026-09-07T14:15:44.552Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788790549300_uynq",
+    "timestamp": "2026-09-07T14:15:44.469Z",
+    "errorType": "AUTH_KEY_UNREGISTERED",
+    "message": "Session revoked or unregistered on Telegram server",
+    "details": {
+      "reason": "AUTH_KEY_UNREGISTERED",
+      "action": "performSessionPurge",
+      "message": "Session revoked or unregistered on Telegram server"
+    },
+    "source": "TelegramContext",
+    "ip": "209.198.132.1, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788789574337_kkqk",
+    "timestamp": "2026-09-07T13:59:32.090Z",
+    "errorType": "sync_failure",
+    "message": "تأخير حرج في مزامنة تيليجرام (376924ms) - تجاوز الحد المسموح",
+    "details": {
+      "endpoint": "/api/telegram/updates/stream",
+      "durationMs": 376924,
+      "transferSize": 1026,
+      "encodedBodySize": 726,
+      "connectTime": 0,
+      "tlsTime": 0,
+      "ttfb": 1344
+    },
+    "source": "client",
+    "ip": "150.228.11.134, 169.254.169.126"
+  },
+  {
+    "id": "srv_tel_1788789574334_ffda",
+    "timestamp": "2026-09-07T13:59:34.172Z",
+    "errorType": "latency_probe",
+    "message": "Network ping probe completed in 1151ms",
+    "details": {},
+    "source": "client",
+    "ip": "150.228.11.134, 169.254.169.126"
+  }
+]

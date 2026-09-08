@@ -2,79 +2,87 @@
 
 @layer base {
   :root {
-    --tg-theme-bg: #17212b;
-    --tg-theme-surface: #242f3d;
-    --tg-theme-sidebar: #17212b;
-    --tg-theme-primary: #5288c1;
-    --tg-theme-primary-hover: #6499d3;
-    --tg-theme-secondary: #7f91a4;
-    --tg-theme-border: #242f3d;
-    --tg-theme-chat-bg: #0e1621;
-    --tg-theme-bubble-in: #182533;
-    --tg-theme-bubble-in-text: #f5f5f5;
-    --tg-theme-bubble-out: #2b5278;
-    --tg-theme-bubble-out-text: #f5f5f5;
-    --tg-theme-time-out: #7ba6cf;
-    --tg-theme-time-in: #6c7883;
-    --tg-theme-accent: #5288c1;
-    --tg-theme-badge: #5288c1;
+    --primary-color: #8A2BE2;
+    --secondary-color: #FF69B4;
+    --tg-theme-bg: #1E1E2E;
+    --tg-theme-surface: #26263A;
+    --tg-theme-sidebar: #1E1E2E;
+    --tg-theme-primary: #8A2BE2;
+    --tg-theme-primary-hover: #9d4edd;
+    --tg-theme-secondary: #FF69B4;
+    --tg-theme-border: #33334d;
+    --tg-theme-chat-bg: #151522;
+    --tg-theme-bubble-in: #222234;
+    --tg-theme-bubble-in-text: #f8fafc;
+    --tg-theme-bubble-out: #7026b9;
+    --tg-theme-bubble-out-text: #ffffff;
+    --tg-theme-time-out: #f472b6;
+    --tg-theme-time-in: #94a3b8;
+    --tg-theme-accent: #8A2BE2;
+    --tg-theme-badge: #FF69B4;
   }
 
   .theme-dark {
-    --tg-theme-bg: #17212b;
-    --tg-theme-surface: #242f3d;
-    --tg-theme-sidebar: #17212b;
-    --tg-theme-primary: #5288c1;
-    --tg-theme-primary-hover: #6499d3;
-    --tg-theme-secondary: #7f91a4;
-    --tg-theme-border: #242f3d;
-    --tg-theme-chat-bg: #0e1621;
-    --tg-theme-bubble-in: #182533;
-    --tg-theme-bubble-in-text: #f5f5f5;
-    --tg-theme-bubble-out: #2b5278;
-    --tg-theme-bubble-out-text: #f5f5f5;
-    --tg-theme-time-out: #7ba6cf;
-    --tg-theme-time-in: #6c7883;
-    --tg-theme-accent: #5288c1;
-    --tg-theme-badge: #5288c1;
+    --primary-color: #8A2BE2;
+    --secondary-color: #FF69B4;
+    --tg-theme-bg: #1E1E2E;
+    --tg-theme-surface: #26263A;
+    --tg-theme-sidebar: #1E1E2E;
+    --tg-theme-primary: #8A2BE2;
+    --tg-theme-primary-hover: #9d4edd;
+    --tg-theme-secondary: #FF69B4;
+    --tg-theme-border: #33334d;
+    --tg-theme-chat-bg: #151522;
+    --tg-theme-bubble-in: #222234;
+    --tg-theme-bubble-in-text: #f8fafc;
+    --tg-theme-bubble-out: #7026b9;
+    --tg-theme-bubble-out-text: #ffffff;
+    --tg-theme-time-out: #f472b6;
+    --tg-theme-time-in: #94a3b8;
+    --tg-theme-accent: #8A2BE2;
+    --tg-theme-badge: #FF69B4;
   }
 
   .theme-night {
-    --tg-theme-bg: #0f0f0f;
-    --tg-theme-surface: #1e1e1e;
-    --tg-theme-sidebar: #141414;
-    --tg-theme-primary: #2fa6ea;
-    --tg-theme-primary-hover: #4bb4f0;
-    --tg-theme-secondary: #8c8c8c;
-    --tg-theme-border: #262626;
-    --tg-theme-chat-bg: #000000;
-    --tg-theme-bubble-in: #212121;
+    --primary-color: #8A2BE2;
+    --secondary-color: #FF69B4;
+    --tg-theme-bg: #12121c;
+    --tg-theme-surface: #1a1a27;
+    --tg-theme-sidebar: #14141e;
+    --tg-theme-primary: #8A2BE2;
+    --tg-theme-primary-hover: #a855f7;
+    --tg-theme-secondary: #FF69B4;
+    --tg-theme-border: #242436;
+    --tg-theme-chat-bg: #0b0b12;
+    --tg-theme-bubble-in: #1c1c28;
     --tg-theme-bubble-in-text: #ffffff;
-    --tg-theme-bubble-out: #1f3b58;
+    --tg-theme-bubble-out: #5b21b6;
     --tg-theme-bubble-out-text: #ffffff;
-    --tg-theme-time-out: #6bafe2;
-    --tg-theme-time-in: #757575;
-    --tg-theme-accent: #2fa6ea;
-    --tg-theme-badge: #2fa6ea;
+    --tg-theme-time-out: #f472b6;
+    --tg-theme-time-in: #94a3b8;
+    --tg-theme-accent: #8A2BE2;
+    --tg-theme-badge: #FF69B4;
   }
 
   .theme-day {
-    --tg-theme-bg: #ffffff;
-    --tg-theme-surface: #f7f9fa;
-    --tg-theme-sidebar: #ffffff;
-    --tg-theme-primary: #3390ec;
-    --tg-theme-primary-hover: #2679c9;
-    --tg-theme-secondary: #707579;
-    --tg-theme-border: #e0e4e8;
-    --tg-theme-chat-bg: #99b6d8;
+    --primary-color: #8A2BE2;
+    --secondary-color: #FF69B4;
+    --tg-theme-bg: #faf7fd;
+    --tg-theme-surface: #ffffff;
+    --tg-theme-sidebar: #faf7fd;
+    --tg-theme-primary: #8A2BE2;
+    --tg-theme-primary-hover: #7b1fa2;
+    --tg-theme-secondary: #FF69B4;
+    --tg-theme-border: #e9d5ff;
+    --tg-theme-chat-bg: #f3e8ff;
     --tg-theme-bubble-in: #ffffff;
-    --tg-theme-bubble-in-text: #000000;
-    --tg-theme-bubble-out: #e3f2fd;
-    --tg-theme-bubble-out-text: #000000;
-    --tg-theme-time-out: #2679c9;
-    --tg-theme-time-in: #8d969e;
-    --tg-theme-accent: #3390ec;
-    --tg-theme-badge: #3390ec;
+    --tg-theme-bubble-in-text: #0f172a;
+    --tg-theme-bubble-out: #fae8ff;
+    --tg-theme-bubble-out-text: #581c87;
+    --tg-theme-time-out: #8A2BE2;
+    --tg-theme-time-in: #64748b;
+    --tg-theme-accent: #8A2BE2;
+    --tg-theme-badge: #8A2BE2;
   }
 
   html, body {
@@ -241,5 +249,61 @@
   opacity: 0.7;
   z-index: 0;
   animation: tg-multicolor-shift 4s ease infinite;
+}
+
+/* Official Brand Purple-to-Pink Theme Gradients (#8A2BE2 -> #FF69B4) */
+.tg-header-gradient {
+  background: linear-gradient(135deg, #8A2BE2 0%, #FF69B4 100%);
+}
+
+.tg-brand-gradient {
+  background: linear-gradient(135deg, #8A2BE2 0%, #FF69B4 100%);
+}
+
+.tg-brand-text {
+  background: linear-gradient(135deg, #8A2BE2 0%, #FF69B4 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.tg-brand-border {
+  border-color: #8A2BE2;
+}
+
+/* Hardware acceleration & gesture smoothness */
+#tg-messages-scroll-area,
+#tg-chat-list-scroll,
+.virtual-scroll-viewport {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Subtle will-change for scrolling containers without memory bloating */
+#tg-messages-scroll-area {
+  will-change: scroll-position;
+}
+
+/* Accessibility & Performance: prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .tg-multicolor-gradient,
+  .tg-multicolor-text,
+  .tg-multicolor-glow,
+  .animate-tg-pulse,
+  .animate-ping,
+  .animate-pulse {
+    animation: none !important;
+  }
 }
 

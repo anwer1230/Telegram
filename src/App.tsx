@@ -38,6 +38,8 @@ import { ScheduledRotatorModal } from './components/Modals/ScheduledRotatorModal
 import { LiveLinkDiscoverModal } from './components/Modals/LiveLinkDiscoverModal';
 import { UserProfileModal } from './components/Modals/UserProfileModal';
 import { SalamActivityLog } from './components/SalamActivityLog';
+import { TelemetryLogModal } from './components/Modals/TelemetryLogModal';
+import { logTelemetry, isTelemetryEnabled } from './utils/telemetry';
 import { ForwardModal } from './components/Interactions/ForwardModal';
 import { ChatContextMenuView } from './components/Interactions/ChatContextMenu';
 import { MessageContextMenuView } from './components/Interactions/MessageContextMenu';
@@ -45,6 +47,7 @@ import { ToastContainer } from './components/Interactions/ToastContainer';
 import { InAppNotificationBanner } from './components/Notifications/InAppNotificationBanner';
 import { AndroidNotificationShade } from './components/Notifications/AndroidNotificationShade';
 import { InstallAppBanner } from './components/Notifications/InstallAppBanner';
+import { UpdateNotification } from './components/Notifications/UpdateNotification';
 import { TelegramAuthScreen } from './components/Auth/TelegramAuthScreen';
 import { useMobileNavigation } from './hooks/useMobileNavigation';
 import { AppUpdateAlertDialog } from './components/Modals/AppUpdateAlertDialog';
@@ -53,12 +56,81 @@ import { RestrictedContentModal } from './components/Modals/RestrictedContentMod
 import { ScreenshotBlockedToast } from './components/Notifications/ScreenshotBlockedToast';
 import { NotificationCenter } from './core/NotificationCenter';
 import { appUpdateController } from './core/messenger/AppUpdateController';
+import { NetworkTopStrip } from './components/Notifications/NetworkTopStrip';
 
 const TelegramAppContent: React.FC = () => {
-  const { isAuthenticated, inAppNotifications, dismissNotification, activeModal, setActiveModal, showToast, settings } = useTelegram();
+  const {
+    isAuthenticated,
+    inAppNotifications,
+    dismissNotification,
+    activeModal,
+    setActiveModal,
+    showToast,
+    settings,
+    isOffline,
+    networkStatus,
+    refreshDialogs,
+  } = useTelegram();
   const [showUpdateDialog, setShowUpdateDialog] = React.useState(false);
   const [showUpdateActivity, setShowUpdateActivity] = React.useState(false);
   const isArabic = settings.language === 'ar';
+
+  // Offline-First: Automatic reconnect & background re-sync on network restoration + Telemetry Listener
+  React.useEffect(() => {
+    const handleOnline = () => {
+      // Telemetry log for network restoration
+      logTelemetry({
+        type: 'network_online',
+        category: 'network',
+        reason: 'Browser online event triggered',
+        details: { onLine: true },
+      });
+      // Reconnected automatically: refresh data from cloud without user intervention
+      refreshDialogs();
+    };
+    const handleOffline = () => {
+      // Telemetry log for network loss
+      logTelemetry({
+        type: 'network_offline',
+        category: 'network',
+        reason: 'Browser offline event triggered',
+        details: { onLine: false },
+      });
+      // Offline mode: non-intrusive strip is displayed automatically via isOffline state
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Initial telemetry check when enabled
+    if (isTelemetryEnabled()) {
+      logTelemetry({
+        type: typeof navigator !== 'undefined' && navigator.onLine ? 'network_online' : 'network_offline',
+        category: 'network',
+        reason: `Initial connection state: ${typeof navigator !== 'undefined' && navigator.onLine ? 'Online' : 'Offline'}`,
+        details: { onLine: typeof navigator !== 'undefined' ? navigator.onLine : true },
+      });
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [refreshDialogs]);
+
+  // Secret trigger: Toggle Telemetry Log Modal with Alt+T or Ctrl+Shift+T
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        (e.altKey && (e.key === 't' || e.key === 'T' || e.key === 'd' || e.key === 'D')) ||
+        (e.ctrlKey && e.shiftKey && (e.key === 't' || e.key === 'T'))
+      ) {
+        e.preventDefault();
+        setActiveModal(activeModal === 'telemetry-log' ? 'none' : 'telemetry-log');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeModal, setActiveModal]);
 
   // Replicate LaunchActivity.java NotificationCenter observer
   React.useEffect(() => {
@@ -96,8 +168,16 @@ const TelegramAppContent: React.FC = () => {
 
   if (!isAuthenticated) {
     return (
-      <div id="tg-auth-wrapper" className="w-screen h-screen min-h-screen bg-[#0e1621] text-white overflow-hidden relative select-none">
-        <TelegramAuthScreen />
+      <div id="tg-auth-wrapper" className="w-screen h-screen min-h-screen bg-[#0e1621] text-white overflow-hidden relative select-none flex flex-col">
+        <NetworkTopStrip
+          isOffline={isOffline}
+          networkStatus={networkStatus}
+          isArabic={isArabic}
+          isAuthView={true}
+        />
+        <div className="flex-1 w-full h-full relative overflow-hidden">
+          <TelegramAuthScreen />
+        </div>
         <ToastContainer />
       </div>
     );
@@ -105,14 +185,29 @@ const TelegramAppContent: React.FC = () => {
 
   return (
     <div
-      id="tg-app-root"
-      className="fixed inset-0 w-full h-full h-[100dvh] flex overflow-hidden font-sans select-none"
+      className="fixed inset-0 w-full h-full h-[100dvh] flex flex-col overflow-hidden font-sans select-none"
       style={{
         backgroundColor: 'var(--tg-theme-bg)',
       }}
     >
-      {/* Left Sidebar (Chats, Folders, Search) */}
-      <Sidebar />
+      {/* Smart In-App Update Notification */}
+      <UpdateNotification />
+
+      {/* Telegram Official Offline Top Strip with smooth animations and reconnection feedback */}
+      <NetworkTopStrip
+        isOffline={isOffline}
+        networkStatus={networkStatus}
+        isArabic={isArabic}
+        onRetry={refreshDialogs}
+        isAuthView={false}
+      />
+
+      <div
+        id="tg-app-root"
+        className="flex-1 w-full h-full flex overflow-hidden relative"
+      >
+        {/* Left Sidebar (Chats, Folders, Search) */}
+        <Sidebar />
 
       {/* Center Chat Feed / Message View */}
       <ChatView />
@@ -175,6 +270,12 @@ const TelegramAppContent: React.FC = () => {
         onClose={() => setActiveModal('none')}
       />
 
+      {/* Telemetry Diagnostics & Latency Log Modal */}
+      <TelemetryLogModal
+        isOpen={activeModal === 'telemetry-log'}
+        onClose={() => setActiveModal('none')}
+      />
+
       <ForwardModal />
 
       {/* Dynamic Context Menus */}
@@ -221,6 +322,7 @@ const TelegramAppContent: React.FC = () => {
 
       {/* Android FLAG_SECURE Screenshot Blocked Alert */}
       <ScreenshotBlockedToast />
+      </div>
     </div>
   );
 };

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import {
   Phone,
   QrCode,
@@ -11,53 +12,22 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Search,
-  Globe,
   Radio,
   Server,
   Key,
   RefreshCw,
   User as UserIcon,
-  ChevronDown,
   X,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { loginController, AuthTokensHelper, UserConfig, NotificationCenter } from '../../core/messenger';
 
-interface Country {
-  name: string;
-  nameAr: string;
-  code: string;
-  flag: string;
-  format: string;
-}
-
-const COUNTRIES: Country[] = [
-  { name: 'Yemen', nameAr: 'اليمن', code: '+967', flag: '🇾🇪', format: '7XX XXX XXX' },
-  { name: 'Saudi Arabia', nameAr: 'المملكة العربية السعودية', code: '+966', flag: '🇸🇦', format: '5X XXX XXXX' },
-  { name: 'Egypt', nameAr: 'مصر', code: '+20', flag: '🇪🇬', format: '1X XXXX XXXX' },
-  { name: 'United Arab Emirates', nameAr: 'الإمارات العربية المتحدة', code: '+971', flag: '🇦🇪', format: '5X XXX XXXX' },
-  { name: 'Iraq', nameAr: 'العراق', code: '+964', flag: '🇮🇶', format: '7XX XXX XXXX' },
-  { name: 'Jordan', nameAr: 'الأردن', code: '+962', flag: '🇯🇴', format: '7X XXX XXXX' },
-  { name: 'Kuwait', nameAr: 'الكويت', code: '+965', flag: '🇰🇼', format: '9XX XXXXX' },
-  { name: 'Oman', nameAr: 'عُمان', code: '+968', flag: '🇴🇲', format: '9XXX XXXX' },
-  { name: 'Qatar', nameAr: 'قطر', code: '+974', flag: '🇶🇦', format: 'XXXX XXXX' },
-  { name: 'Bahrain', nameAr: 'البحرين', code: '+973', flag: '🇧🇭', format: 'XXXX XXXX' },
-  { name: 'Syria', nameAr: 'سوريا', code: '+963', flag: '🇸🇾', format: '9XX XXX XXX' },
-  { name: 'Lebanon', nameAr: 'لبنان', code: '+961', flag: '🇱🇧', format: 'XX XXX XXX' },
-  { name: 'Palestine', nameAr: 'فلسطين', code: '+970', flag: '🇵🇸', format: '5XX XXX XXX' },
-  { name: 'Morocco', nameAr: 'المغرب', code: '+212', flag: '🇲🇦', format: '6XX XX XX XX' },
-  { name: 'Algeria', nameAr: 'الجزائر', code: '+213', flag: '🇩🇿', format: '5XX XX XX XX' },
-  { name: 'Tunisia', nameAr: 'تونس', code: '+216', flag: '🇹🇳', format: 'XX XXX XXX' },
-  { name: 'Libya', nameAr: 'ليبيا', code: '+218', flag: '🇱🇾', format: '9X XXX XXXX' },
-  { name: 'Sudan', nameAr: 'السودان', code: '+249', flag: '🇸🇩', format: '9X XXX XXXX' },
-  { name: 'United States', nameAr: 'الولايات المتحدة', code: '+1', flag: '🇺🇸', format: '(XXX) XXX-XXXX' },
-  { name: 'United Kingdom', nameAr: 'المملكة المتحدة', code: '+44', flag: '🇬🇧', format: 'XXXX XXXXXX' },
-  { name: 'Germany', nameAr: 'ألمانيا', code: '+49', flag: '🇩🇪', format: 'XXXX XXXXXXX' },
-  { name: 'France', nameAr: 'فرنسا', code: '+33', flag: '🇫🇷', format: 'X XX XX XX XX' },
-  { name: 'Turkey', nameAr: 'تركيا', code: '+90', flag: '🇹🇷', format: '5XX XXX XXXX' },
-  { name: 'Russia', nameAr: 'روسيا', code: '+7', flag: '🇷🇺', format: 'XXX XXX-XX-XX' },
-];
+const normalizeFullPhone = (val: string): string => {
+  let clean = (val || '').trim().replace(/[\s\-\(\)]/g, '');
+  if (clean.startsWith('00')) clean = '+' + clean.slice(2);
+  else if (clean && !clean.startsWith('+')) clean = '+' + clean;
+  return clean;
+};
 
 interface TelegramAuthScreenProps {
   isAddingAccount?: boolean;
@@ -78,11 +48,40 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
   const [authStep, setAuthStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Phone Step State
-  const [selectedCountry, setSelectedCountry] = useState<Country>(COUNTRIES[0]);
-  const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
-  const [countrySearch, setCountrySearch] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [keepSignedIn, setKeepSignedIn] = useState(true);
+
+  // Detect Country in Real-Time via libphonenumber-js
+  const detectedCountry = useMemo(() => {
+    if (!phoneNumber.trim() || phoneNumber.trim().length < 3) return null;
+    const normalized = normalizeFullPhone(phoneNumber);
+    try {
+      const parsed = parsePhoneNumberFromString(normalized);
+      if (parsed && parsed.country) {
+        const iso: string = parsed.country;
+        const codePoints = iso
+          .toUpperCase()
+          .split('')
+          .map((c) => 127397 + c.charCodeAt(0));
+        const flag = String.fromCodePoint(...codePoints);
+        let name: string = iso;
+        try {
+          const regionNames = new Intl.DisplayNames([isArabic ? 'ar' : 'en'], { type: 'region' });
+          name = regionNames.of(iso) || iso;
+        } catch (_) {}
+
+        return {
+          countryCode: iso,
+          callingCode: parsed.countryCallingCode ? `+${parsed.countryCallingCode}` : '',
+          nationalNumber: parsed.nationalNumber || '',
+          flag,
+          name,
+          internationalFormatted: parsed.formatInternational() || normalized,
+        };
+      }
+    } catch (_) {}
+    return null;
+  }, [phoneNumber, isArabic]);
 
   // Code Step State
   const [verificationCode, setVerificationCode] = useState(['', '', '', '', '']);
@@ -103,6 +102,30 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
+  // App Logo Tooltip ('Telegram_Anwer') on Hover & Long Press
+  const [showLogoTooltip, setShowLogoTooltip] = useState(false);
+  const longPressTimerRef = React.useRef<any>(null);
+  const tooltipDismissTimerRef = React.useRef<any>(null);
+
+  const handleLogoPressStart = () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      setShowLogoTooltip(true);
+      // Auto dismiss after 2.5s if triggered by long press
+      if (tooltipDismissTimerRef.current) clearTimeout(tooltipDismissTimerRef.current);
+      tooltipDismissTimerRef.current = setTimeout(() => {
+        setShowLogoTooltip(false);
+      }, 2500);
+    }, 350);
+  };
+
+  const handleLogoPressEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   // Countdown timer for SMS code
   useEffect(() => {
     let interval: any;
@@ -116,22 +139,22 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
     return () => clearInterval(interval);
   }, [authStep, resendTimer]);
 
-  const filteredCountries = COUNTRIES.filter(
-    (c) =>
-      c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
-      c.nameAr.includes(countrySearch) ||
-      c.code.includes(countrySearch)
-  );
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      if (tooltipDismissTimerRef.current) clearTimeout(tooltipDismissTimerRef.current);
+    };
+  }, []);
 
   // 1. Submit Phone Number -> Send Code (MTProto auth.sendCode)
   const handleSendCode = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!phoneNumber.trim()) {
-      showToast(isArabic ? 'يرجى إدخال رقم الهاتف' : 'Please enter your phone number', '⚠️');
+      showToast(isArabic ? 'يرجى إدخال رقم الهاتف مع مفتاح الدولة' : 'Please enter your phone number with country code', '⚠️');
       return;
     }
 
-    const fullPhone = `${selectedCountry.code} ${phoneNumber}`.trim();
+    const fullPhone = normalizeFullPhone(phoneNumber);
     setIsLoading(true);
     setStatusMessage(isArabic ? 'جارٍ الاتصال بسحابة تيليجرام (MTProto 2.0)...' : 'Connecting to Telegram MTProto...');
 
@@ -149,7 +172,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
         setResendTimer(result.timeout || 60);
         setIsResendActive(false);
         showToast(
-          result.message || (isArabic ? `تم إرسال رمز التحقق إلى ${fullPhone}` : `Code sent to ${fullPhone}`),
+          result.message || (isArabic ? `تم إرسال رمز التحقق إلى ${result.formattedPhone || fullPhone}` : `Code sent to ${result.formattedPhone || fullPhone}`),
           '📩'
         );
       } else {
@@ -203,7 +226,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
   };
 
   const verifyCode = async (code: string) => {
-    const fullPhone = `${selectedCountry.code} ${phoneNumber}`.trim();
+    const fullPhone = normalizeFullPhone(phoneNumber);
     setIsLoading(true);
     setStatusMessage(isArabic ? 'جارٍ التحقق من الرمز وفك التشفير عبر MTProto...' : 'Verifying MTProto AuthKey...');
 
@@ -250,7 +273,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
       return;
     }
 
-    const fullPhone = `${selectedCountry.code} ${phoneNumber}`.trim();
+    const fullPhone = normalizeFullPhone(phoneNumber);
     setIsLoading(true);
     setStatusMessage(isArabic ? 'جارٍ التحقق من كلمة المرور وفك التشفير السحابي...' : 'Verifying 2FA password...');
 
@@ -292,7 +315,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
       return;
     }
 
-    const fullPhone = `${selectedCountry.code} ${phoneNumber}`.trim();
+    const fullPhone = normalizeFullPhone(phoneNumber);
     setIsLoading(true);
     setStatusMessage(isArabic ? 'جارٍ إنشاء الحساب الجديد في سحابة تيليجرام...' : 'Creating new Telegram account...');
 
@@ -333,7 +356,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
 
     setTimeout(() => {
       setIsLoading(false);
-      const fullPhone = `${selectedCountry.code} ${phoneNumber || '772 997 043'}`.trim();
+      const fullPhone = normalizeFullPhone(phoneNumber || '+967 772 997 043');
       login({
         name: firstName.trim() || 'أنور فؤاد',
         phone: fullPhone,
@@ -387,14 +410,50 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
           </button>
         )}
 
-        {/* Telegram Paper Airplane Logo - Multi-color animated gradient */}
+        {/* Telegram Paper Airplane Logo - Multi-color animated gradient with Telegram_Anwer tooltip */}
         <div
-          className="relative w-20 h-20 rounded-full tg-multicolor-gradient flex items-center justify-center shadow-xl shadow-sky-500/25 mb-5 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
+          id="telegram-app-logo"
+          title="Telegram_Anwer"
+          className="relative w-20 h-20 rounded-full tg-multicolor-gradient flex items-center justify-center shadow-xl shadow-sky-500/25 mb-5 cursor-pointer hover:scale-105 active:scale-95 transition-transform select-none"
           onClick={() => {
             if (authMode === 'phone') setAuthMode('qr');
             else setAuthMode('phone');
           }}
+          onMouseEnter={() => setShowLogoTooltip(true)}
+          onMouseLeave={() => {
+            setShowLogoTooltip(false);
+            handleLogoPressEnd();
+          }}
+          onTouchStart={handleLogoPressStart}
+          onTouchEnd={() => {
+            handleLogoPressEnd();
+            setTimeout(() => setShowLogoTooltip(false), 2000);
+          }}
+          onTouchCancel={() => {
+            handleLogoPressEnd();
+            setShowLogoTooltip(false);
+          }}
+          onMouseDown={handleLogoPressStart}
+          onMouseUp={handleLogoPressEnd}
         >
+          {/* Tooltip on Hover & Long Press */}
+          <AnimatePresence>
+            {showLogoTooltip && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.88 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 4, scale: 0.9 }}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+                className="absolute -top-10 left-1/2 -translate-x-1/2 z-40 pointer-events-none whitespace-nowrap px-3 py-1.5 bg-[#17212b]/95 border border-[#2481cc]/60 backdrop-blur-md rounded-xl shadow-2xl shadow-black/80 text-white text-[12px] font-bold tracking-wide flex items-center gap-1.5"
+              >
+                <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+                <span className="text-white drop-shadow">Telegram_Anwer</span>
+                {/* Arrow pointing down */}
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#17212b] border-b border-r border-[#2481cc]/60 rotate-45" />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="tg-multicolor-glow" />
           <svg className="w-11 h-11 text-white -translate-x-0.5 relative z-10 drop-shadow-md" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.77-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z" />
@@ -466,98 +525,65 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
         {/* ======================================================== */}
         {authMode === 'phone' && (
           <div className="w-full">
-            {/* STEP 1: Phone & Country Input */}
+            {/* STEP 1: Single Phone Input with Auto Country Detection */}
             {authStep === 1 && (
               <form onSubmit={handleSendCode} className="w-full space-y-4">
-                {/* Country Selector Dropdown */}
-                <div className="relative">
-                  <label className="block text-xs font-medium text-gray-300 text-start mb-1.5">
-                    {isArabic ? 'الدولة' : 'Country'}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setCountryDropdownOpen(!countryDropdownOpen)}
-                    className="w-full flex items-center justify-between bg-[#0e1621] border border-[#2b394a] hover:border-[#5288c1] rounded-2xl px-3.5 py-2.5 text-sm text-white transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="text-lg">{selectedCountry.flag}</span>
-                      <span className="font-semibold truncate">
-                        {isArabic ? selectedCountry.nameAr : selectedCountry.name}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-gray-400 shrink-0">
-                      <span className="font-mono text-xs text-[#5288c1]">{selectedCountry.code}</span>
-                      <ChevronDown size={16} />
-                    </div>
-                  </button>
-
-                  {/* Dropdown Menu */}
-                  <AnimatePresence>
-                    {countryDropdownOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        className="absolute z-20 top-full mt-1.5 start-0 end-0 bg-[#17212b] border border-[#2b394a] rounded-2xl shadow-2xl max-h-56 overflow-hidden flex flex-col"
-                      >
-                        <div className="p-2 border-b border-white/5">
-                          <div className="relative flex items-center">
-                            <Search className="absolute start-2.5 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-                            <input
-                              type="text"
-                              value={countrySearch}
-                              onChange={(e) => setCountrySearch(e.target.value)}
-                              placeholder={isArabic ? 'ابحث عن الدولة أو الرمز...' : 'Search country or code...'}
-                              className="w-full bg-[#0e1621] rounded-xl ps-8 pe-3 py-1.5 text-xs text-white outline-none border border-white/10"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto divide-y divide-white/5">
-                          {filteredCountries.map((c) => (
-                            <button
-                              key={c.name}
-                              type="button"
-                              onClick={() => {
-                                setSelectedCountry(c);
-                                setCountryDropdownOpen(false);
-                                setCountrySearch('');
-                              }}
-                              className="w-full flex items-center justify-between px-3.5 py-2 hover:bg-white/5 text-start transition-colors"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span>{c.flag}</span>
-                                <span className="text-xs text-white font-medium">
-                                  {isArabic ? c.nameAr : c.name}
-                                </span>
-                              </div>
-                              <span className="text-xs font-mono text-gray-400">{c.code}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {/* Phone Number Input */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-300 text-start mb-1.5">
-                    {isArabic ? 'رقم الهاتف' : 'Phone Number'}
-                  </label>
-                  <div className="flex items-center gap-2" dir="ltr">
-                    <div className="px-3.5 py-2.5 bg-[#0e1621] border border-[#2b394a] rounded-2xl text-sm font-mono font-bold text-[#5288c1] shrink-0">
-                      {selectedCountry.code}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-gray-200 text-start">
+                      {isArabic ? 'رقم الهاتف مع رمز الدولة' : 'Phone Number (with Country Code)'}
+                    </label>
+                    {detectedCountry && (
+                      <div className="flex items-center gap-1.5 text-xs text-sky-400 font-medium">
+                        <span>{detectedCountry.flag}</span>
+                        <span>{detectedCountry.name}</span>
+                        <span className="font-mono text-gray-400 text-[11px]">({detectedCountry.callingCode})</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="relative flex items-center" dir="ltr">
+                    <div className="absolute start-3.5 flex items-center gap-1.5 text-gray-400 pointer-events-none select-none">
+                      {detectedCountry ? (
+                        <span className="text-lg leading-none">{detectedCountry.flag}</span>
+                      ) : (
+                        <Phone size={18} className="text-[#5288c1]" />
+                      )}
                     </div>
                     <input
                       id="tg-auth-phone-input"
                       type="tel"
                       required
+                      autoFocus
                       value={phoneNumber}
                       onChange={(e) => setPhoneNumber(e.target.value)}
-                      placeholder={selectedCountry.format}
-                      className="w-full bg-[#0e1621] border border-[#2b394a] focus:border-[#2481cc] text-white text-sm font-mono rounded-2xl px-4 py-2.5 outline-none transition-colors"
+                      placeholder={
+                        isArabic
+                          ? '+967 777 777 777 (رمز الدولة + الرقم)'
+                          : '+1 555 123 4567 (Country code + Phone)'
+                      }
+                      className="w-full bg-[#0e1621] border border-[#2b394a] focus:border-[#2481cc] text-white text-base font-mono rounded-2xl ps-12 pe-4 py-3 outline-none transition-all placeholder:text-gray-500 tracking-wide focus:ring-2 focus:ring-[#2481cc]/25"
                     />
+                  </div>
+
+                  {/* Dynamic Country Status & Hint */}
+                  <div className="mt-2 text-start">
+                    {detectedCountry ? (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0e1621] border border-[#2481cc]/30 rounded-xl text-xs text-sky-400">
+                        <span className="text-base">{detectedCountry.flag}</span>
+                        <span className="text-white font-medium">{detectedCountry.name}</span>
+                        <span className="text-gray-400 font-mono text-[11px]">({detectedCountry.callingCode})</span>
+                        <span className="ms-auto text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                          {isArabic ? 'الدولة مكتشفة تلقائياً' : 'Auto-detected'}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-gray-400 px-1">
+                        {isArabic
+                          ? '💡 الصق أو اكتب الرقم كاملاً مع مفتاح الدولة (مثال: +967777777777 أو +966555555555)'
+                          : '💡 Enter or paste your full number with country code (e.g., +1..., +967..., +966...)'}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -576,7 +602,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
                 <button
                   type="submit"
                   disabled={isLoading || !phoneNumber.trim()}
-                  className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] active:scale-[0.99] disabled:opacity-50 text-white text-sm font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 flex items-center justify-center gap-2 transition-all mt-2"
+                  className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] active:scale-[0.99] disabled:opacity-50 text-white text-sm font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 flex items-center justify-center gap-2 transition-all mt-2 cursor-pointer"
                 >
                   {isLoading ? (
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -592,7 +618,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
                 <button
                   type="button"
                   onClick={handleQuickDemoLogin}
-                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 active:scale-[0.99] text-gray-300 text-xs font-semibold rounded-2xl border border-white/10 flex items-center justify-center gap-2 transition-all"
+                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 active:scale-[0.99] text-gray-300 text-xs font-semibold rounded-2xl border border-white/10 flex items-center justify-center gap-2 transition-all cursor-pointer"
                 >
                   <Sparkles size={14} className="text-amber-400" />
                   <span>{isArabic ? 'دخول فوري مباشر (Demo / Quick Connect)' : 'Instant Direct Connect (Demo)'}</span>
@@ -605,11 +631,14 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
               <div className="w-full space-y-5">
                 <div className="flex items-center justify-center gap-2 text-sm font-mono text-[#5288c1] bg-[#0e1621] p-2.5 rounded-2xl border border-white/5">
                   <Phone size={14} />
-                  <span>{selectedCountry.code} {phoneNumber}</span>
+                  <span>{detectedCountry?.internationalFormatted || normalizeFullPhone(phoneNumber)}</span>
+                  {detectedCountry && (
+                    <span className="text-xs text-gray-400">({detectedCountry.name})</span>
+                  )}
                   <button
                     type="button"
                     onClick={() => setAuthStep(1)}
-                    className="text-xs text-gray-400 hover:text-white underline ms-2"
+                    className="text-xs text-gray-400 hover:text-white underline ms-2 cursor-pointer"
                   >
                     {isArabic ? 'تعديل' : 'Edit'}
                   </button>

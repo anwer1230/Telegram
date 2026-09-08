@@ -17,12 +17,12 @@ import {
   Phone,
   Video,
   Sparkles,
-  RotateCcw,
+  Loader2,
   Copy,
   Check,
+  RotateCcw,
   ChevronDown,
   ChevronUp,
-  Loader2,
   AlertCircle,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
@@ -44,8 +44,9 @@ export const ChatInfoPanel: React.FC = () => {
 
   const [activeMediaTab, setActiveMediaTab] = useState<'media' | 'files' | 'voice' | 'links' | 'members'>('media');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const isArabic = settings.language === 'ar';
 
-  // Gemini AI Chat Summarizer States
+  // Gemini AI Chat Summarizer State
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summaryData, setSummaryData] = useState<{
     text: string;
@@ -62,16 +63,6 @@ export const ChatInfoPanel: React.FC = () => {
     setIsSummarizing(false);
   }, [activeChatId]);
 
-  if (!isRightPanelOpen || !activeChat) return null;
-
-  const currentMessages = (activeChatId && messages[activeChatId]) || [];
-  const photoMessages = currentMessages.filter((m) => m.media?.type === 'photo' && m.media?.url);
-  const fileMessages = currentMessages.filter((m) => m.media?.type === 'document');
-  const voiceMessages = currentMessages.filter((m) => m.media?.type === 'voice');
-
-  const isSavedMessages = activeChat.type === 'saved';
-  const isArabic = settings.language === 'ar';
-
   const handleCopySummary = async () => {
     if (!summaryData?.text) return;
     try {
@@ -85,8 +76,8 @@ export const ChatInfoPanel: React.FC = () => {
     if (isSummarizing || !activeChat) return;
     setIsSummarizing(true);
     setSummaryError(null);
-
     try {
+      const currentMessages = (activeChatId && messages[activeChatId]) || [];
       const last100 = currentMessages.slice(-100);
       const payloadMessages = last100.map((m) => ({
         id: m.id,
@@ -126,6 +117,56 @@ export const ChatInfoPanel: React.FC = () => {
       setIsSummarizing(false);
     }
   };
+
+  // Real Group Members State (GramJS MTProto backed)
+  const [members, setMembers] = useState<any[]>([]);
+  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+
+  const fetchMembers = async () => {
+    if (!activeChat || activeChat.type !== 'group') return;
+    setIsLoadingMembers(true);
+    setMembersError(null);
+    try {
+      const sessionString = localStorage.getItem('tg_session_string') || localStorage.getItem('telegram_session') || '';
+      const phone = localStorage.getItem('tg_phone') || '';
+      const res = await fetch('/api/telegram/group/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: activeChat.id,
+          sessionString,
+          phone,
+          limit: 200,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.members)) {
+        setMembers(data.members);
+      } else {
+        setMembersError(data.message || (isArabic ? 'تعذر جلب قائمة أعضاء المجموعة من تيليجرام' : 'Failed to fetch members'));
+      }
+    } catch (err: any) {
+      setMembersError(err?.message || (isArabic ? 'حدث خطأ في الاتصال بالخادم' : 'Server connection error'));
+    } finally {
+      setIsLoadingMembers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeMediaTab === 'members' && activeChat?.type === 'group') {
+      fetchMembers();
+    }
+  }, [activeMediaTab, activeChat?.id, isArabic]);
+
+  if (!isRightPanelOpen || !activeChat) return null;
+
+  const currentMessages = (activeChatId && messages[activeChatId]) || [];
+  const photoMessages = currentMessages.filter((m) => m.media?.type === 'photo' && m.media?.url);
+  const fileMessages = currentMessages.filter((m) => m.media?.type === 'document');
+  const voiceMessages = currentMessages.filter((m) => m.media?.type === 'voice');
+
+  const isSavedMessages = activeChat.type === 'saved';
 
   return (
     <div
@@ -325,7 +366,6 @@ export const ChatInfoPanel: React.FC = () => {
                 </button>
               </div>
             </div>
-
             {isSummaryExpanded && (
               <div className="p-3 max-h-64 overflow-y-auto leading-relaxed text-gray-200 text-[11px] whitespace-pre-wrap select-text space-y-1">
                 {summaryData.text}
@@ -398,7 +438,13 @@ export const ChatInfoPanel: React.FC = () => {
                 : 'text-gray-400 hover:text-white'
             }`}
           >
-            {isArabic ? 'الأعضاء' : 'Members'}
+            {isArabic
+              ? members.length > 0
+                ? `الأعضاء (${members.length})`
+                : 'الأعضاء'
+              : members.length > 0
+                ? `Members (${members.length})`
+                : 'Members'}
           </button>
         )}
       </div>
@@ -493,89 +539,102 @@ export const ChatInfoPanel: React.FC = () => {
 
         {activeMediaTab === 'members' && activeChat.type === 'group' && (
           <div className="space-y-2">
-            <div
-              onClick={() => {
-                openUserProfile({
-                  id: currentUser.id,
-                  name: currentUser.name,
-                  username: currentUser.username,
-                  avatar: currentUser.avatar,
-                  bio: currentUser.bio,
-                  phone: currentUser.phone,
-                  isVerified: currentUser.isVerified,
-                  isPremium: currentUser.isPremium,
-                  isOnline: true,
-                  sourceChatId: activeChat.id,
-                  sourceChatTitle: activeChat.title,
-                });
-              }}
-              className="flex items-center gap-2.5 p-1.5 text-xs rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
-            >
-              <div className="w-8 h-8 rounded-full bg-[#2481cc] text-white flex items-center justify-center font-bold">
-                {currentUser.name.charAt(0)}
+            {isLoadingMembers ? (
+              <div className="flex flex-col items-center justify-center py-10 text-gray-400 gap-2.5">
+                <div className="w-6 h-6 border-2 border-[#2481cc] border-t-transparent rounded-full animate-spin" />
+                <span className="text-xs">
+                  {isArabic ? 'جاري جلب الأعضاء الحقيقيين من تيليجرام...' : 'Fetching members from Telegram...'}
+                </span>
               </div>
-              <div className="flex-1">
-                <div className="font-bold flex items-center gap-1">
-                  <span>{currentUser.name} (You)</span>
-                  <span className="text-[10px] text-amber-400 bg-amber-400/15 px-1 rounded">Owner</span>
-                </div>
-                <div className="text-[10px] text-emerald-400 font-medium">online</div>
+            ) : membersError ? (
+              <div className="p-3 text-center text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg space-y-2 my-2">
+                <p>{membersError}</p>
+                <button
+                  onClick={fetchMembers}
+                  className="px-3 py-1 text-[11px] bg-red-500/20 hover:bg-red-500/30 text-red-200 rounded font-medium transition-colors"
+                >
+                  {isArabic ? 'إعادة المحاولة' : 'Retry'}
+                </button>
               </div>
-            </div>
+            ) : members.length === 0 ? (
+              <div className="text-center text-xs text-gray-500 py-8">
+                {isArabic ? 'لا يوجد أعضاء متوفرون حالياً' : 'No members found'}
+              </div>
+            ) : (
+              members.map((member) => {
+                const isCurrentUser = String(member.id) === String(currentUser?.id);
+                const roleBadge = member.role === 'owner' ? (
+                  <span className="text-[10px] text-amber-400 bg-amber-400/15 px-1.5 py-0.5 rounded font-medium">
+                    {member.rank || (isArabic ? 'المنشئ' : 'Owner')}
+                  </span>
+                ) : member.role === 'admin' ? (
+                  <span className="text-[10px] text-sky-400 bg-sky-400/15 px-1.5 py-0.5 rounded font-medium">
+                    {member.rank || (isArabic ? 'مشرف' : 'Admin')}
+                  </span>
+                ) : member.rank ? (
+                  <span className="text-[10px] text-gray-400 bg-white/10 px-1 rounded">
+                    {member.rank}
+                  </span>
+                ) : null;
 
-            <div
-              onClick={() => {
-                openUserProfile({
-                  id: 'user_nikolay_durov',
-                  name: 'Nikolay Durov',
-                  username: 'durov_math',
-                  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-                  bio: 'Co-founder & Lead Architect 💻',
-                  isVerified: true,
-                  isOnline: false,
-                  lastSeen: 'last seen recently',
-                  sourceChatId: activeChat.id,
-                  sourceChatTitle: activeChat.title,
-                });
-              }}
-              className="flex items-center gap-2.5 p-1.5 text-xs rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
-            >
-              <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">
-                N
-              </div>
-              <div className="flex-1">
-                <div className="font-bold flex items-center gap-1">
-                  <span>Nikolay Durov</span>
-                  <span className="text-[10px] text-sky-400 bg-sky-400/15 px-1 rounded">Admin</span>
-                </div>
-                <div className="text-[10px] text-gray-400">last seen recently</div>
-              </div>
-            </div>
-
-            <div
-              onClick={() => {
-                openUserProfile({
-                  id: 'user_elena_rostova',
-                  name: 'Elena Rostova',
-                  username: 'elena_designer',
-                  avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
-                  bio: 'Product Designer & UI Specialist 🎨',
-                  isOnline: false,
-                  lastSeen: 'last seen 2 hours ago',
-                  sourceChatId: activeChat.id,
-                  sourceChatTitle: activeChat.title,
-                });
-              }}
-              className="flex items-center gap-2.5 p-1.5 text-xs rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
-            >
-              <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold">
-                E
-              </div>
-              <div className="flex-1">
-                <div className="font-bold">Elena Rostova</div>
-                <div className="text-[10px] text-gray-400">last seen 2 hours ago</div>
-              </div>
-            </div>
+                return (
+                  <div
+                    key={member.id}
+                    onClick={() => {
+                      openUserProfile({
+                        id: member.id,
+                        name: member.name,
+                        username: member.username,
+                        avatar: member.avatar,
+                        bio: member.bio || '',
+                        phone: member.phone || '',
+                        isVerified: member.isVerified,
+                        isPremium: member.isPremium,
+                        isOnline: member.isOnline,
+                        sourceChatId: activeChat.id,
+                        sourceChatTitle: activeChat.title,
+                      });
+                    }}
+                    className="flex items-center gap-2.5 p-2 text-xs rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                  >
+                    <div className="w-9 h-9 rounded-full overflow-hidden bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
+                      {member.avatar ? (
+                        <img
+                          src={member.avatar}
+                          alt={member.name}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <span>{(member.name || 'U').charAt(0).toUpperCase()}</span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold flex items-center gap-1.5 truncate">
+                        <span className="truncate">{member.name}</span>
+                        {isCurrentUser && (
+                          <span className="text-[11px] text-gray-400 font-normal">
+                            ({isArabic ? 'أنت' : 'You'})
+                          </span>
+                        )}
+                        {roleBadge}
+                      </div>
+                      <div className="text-[11px] mt-0.5">
+                        {member.isOnline ? (
+                          <span className="text-emerald-400 font-medium">
+                            {isArabic ? 'متصل الآن' : 'online'}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">
+                            {member.lastSeen || (isArabic ? 'آخر ظهور قريباً' : 'last seen recently')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
       </div>

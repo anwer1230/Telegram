@@ -103,10 +103,14 @@ export const PrivacyControlView: React.FC<SubViewProps & { target: PrivacyTarget
 
   const info = titles[target] || titles.phone_number;
 
-  const handleSelectOption = (opt: PrivacyOption) => {
+  const handleSelectOption = async (opt: PrivacyOption) => {
     setCurrentOption(opt);
-    privacyController.setPrivacy(target, opt);
-    showToast(isArabic ? 'تم تحديث إعدادات الخصوصية' : 'Privacy settings updated', '🔒');
+    try {
+      await privacyController.setPrivacy(target, opt);
+      showToast(isArabic ? 'تم تحديث إعدادات الخصوصية في سيرفر تيليجرام' : 'Privacy settings synced with Telegram', '🔒');
+    } catch (e: any) {
+      showToast(e?.message || (isArabic ? 'فشل تحديث الخصوصية' : 'Failed to set privacy'), '❌');
+    }
   };
 
   return (
@@ -895,7 +899,7 @@ export const SessionsView: React.FC<SubViewProps> = ({ onBack }) => {
 // 5. BLOCKED USERS VIEW (BlockedUsersActivity.java)
 // ==========================================
 export const BlockedUsersView: React.FC<SubViewProps> = ({ onBack }) => {
-  const { settings, showToast } = useTelegram();
+  const { settings, showToast, blockUser } = useTelegram();
   const isArabic = settings.language === 'ar';
   const BackIcon = isArabic ? ArrowRight : ArrowLeft;
 
@@ -904,16 +908,14 @@ export const BlockedUsersView: React.FC<SubViewProps> = ({ onBack }) => {
   );
 
   const handleUnblock = async (userId: string | number) => {
-    await privacyController.unblockUser(userId);
+    await blockUser(String(userId), false);
     setBlockedList([...privacyController.getState().blockedUsers]);
-    showToast(isArabic ? 'تم إلغاء حظر المستخدم' : 'User unblocked', '✅');
   };
 
   const handleBlockDemo = async () => {
     const randomId = Math.floor(Math.random() * 90000) + 10000;
-    await privacyController.blockUser(randomId);
+    await blockUser(String(randomId), true);
     setBlockedList([...privacyController.getState().blockedUsers]);
-    showToast(isArabic ? 'تم حظر المستخدم' : 'User blocked', '🚫');
   };
 
   return (

@@ -1,17 +1,41 @@
-import React, { useState } from 'react';
-import { Send, ShieldAlert, Lock, Info } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Send, ShieldAlert, Lock, Info, Mic } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { ChatHeader } from './ChatHeader';
+import { VoicePlaybackTopBar } from './VoicePlaybackTopBar';
 import { PinnedMessageBar } from './PinnedMessageBar';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { RestrictedContentModal } from '../Modals/RestrictedContentModal';
+import { ChatSpeechRecognition } from './ChatSpeechRecognition';
 
 export const ChatView: React.FC = () => {
-  const { activeChat, activeChatId, settings } = useTelegram();
+  const { activeChat, activeChatId, settings, sendMessage, showToast } = useTelegram();
   const [isRestrictedModalOpen, setIsRestrictedModalOpen] = useState(false);
+  const [isSpeechDictationOpen, setIsSpeechDictationOpen] = useState(false);
 
   const isArabic = settings.language === 'ar';
+
+  // Listen to external toggle events from ChatInput
+  useEffect(() => {
+    const handleToggle = () => {
+      setIsSpeechDictationOpen((prev) => !prev);
+    };
+    window.addEventListener('tg_toggle_dictation', handleToggle);
+    return () => window.removeEventListener('tg_toggle_dictation', handleToggle);
+  }, []);
+
+  const handleSendDictatedText = useCallback((text: string) => {
+    if (!text.trim()) return;
+    sendMessage(text.trim());
+    showToast(isArabic ? 'تم إرسال الرسالة الصوتية بنجاح 🚀' : 'Dictated message sent 🚀', '🎙️');
+  }, [sendMessage, showToast, isArabic]);
+
+  const handleInsertDictatedText = useCallback((text: string) => {
+    if (!text.trim()) return;
+    window.dispatchEvent(new CustomEvent('tg_dictation_insert', { detail: text.trim() }));
+    showToast(isArabic ? 'تم إدراج النص في صندوق الكتابة ✍️' : 'Text inserted into input ✍️', '📝');
+  }, [showToast, isArabic]);
 
   if (!activeChatId || !activeChat) {
     return (
@@ -110,14 +134,40 @@ export const ChatView: React.FC = () => {
   return (
     <div
       id="tg-chat-view"
-      className="flex-1 flex flex-col h-full overflow-hidden min-w-0"
+      className="flex-1 flex flex-col h-full overflow-hidden min-w-0 relative"
       style={{
         fontSize: `${settings.fontSize}px`,
       }}
     >
       <ChatHeader />
+      <VoicePlaybackTopBar />
       <PinnedMessageBar />
       <MessageList />
+
+      {/* Floating Quick Dictation Launcher (Visible when dictation is closed) */}
+      {!isSpeechDictationOpen && (
+        <button
+          type="button"
+          onClick={() => setIsSpeechDictationOpen(true)}
+          className="absolute bottom-20 left-4 z-20 px-3 py-1.5 rounded-full bg-[#17212b]/95 hover:bg-[#1f2d3d] border border-cyan-500/40 text-cyan-300 hover:text-white text-xs font-semibold shadow-xl backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 group select-none"
+          title={isArabic ? 'إملاء الرسائل بالصوت مباشرة (Web Speech API)' : 'Voice Dictate messages'}
+        >
+          <div className="w-5 h-5 rounded-full bg-cyan-500/20 flex items-center justify-center text-cyan-400 group-hover:bg-cyan-500/30">
+            <Mic className="w-3.5 h-3.5 animate-pulse" />
+          </div>
+          <span>{isArabic ? 'إملاء صوتي' : 'Dictate'}</span>
+        </button>
+      )}
+
+      {/* Web Speech API Live Voice Dictation Interface */}
+      <ChatSpeechRecognition
+        isOpen={isSpeechDictationOpen}
+        onClose={() => setIsSpeechDictationOpen(false)}
+        onSendText={handleSendDictatedText}
+        onInsertText={handleInsertDictatedText}
+        chatTitle={activeChat.title}
+      />
+
       <ChatInput />
     </div>
   );

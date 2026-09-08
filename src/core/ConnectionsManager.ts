@@ -360,121 +360,377 @@ export class ConnectionsManager {
           return;
         }
 
-        // 3. Process Account Settings & 2FA Password Updates
+        // 3. Process Account Settings & 2FA Password Updates (Real Telegram MTProto)
+        const activeSession = typeof window !== 'undefined' ? (localStorage.getItem('tg_session_string') || '') : '';
+
         if (reqType === 'account.getPassword' || reqType === 'TL_account_getPassword') {
-          const passRes: TLRPC.TL_account_password = {
-            _: 'account.password',
-            has_password: true,
-            has_recovery: true,
-            hint: 'Security Hint',
-            login_email_pattern: 'a***@gmail.com',
-            current_algo: {
-              _: 'passwordKdfAlgoSHA256SHA256PBKDF2',
-              salt1: 'c8f1e09214b7a19283f120194821',
-              salt2: '8912efacb1928471928301928471',
-            },
-          };
-          notifySuccess(passRes as unknown as T);
-          resolve(passRes as unknown as T);
+          fetch(`/api/telegram/account/password-settings?sessionString=${encodeURIComponent(activeSession)}`)
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                const err: TLRPC.TL_error = {
+                  code: resp.status || 400,
+                  text: data.error || 'GET_PASSWORD_FAILED',
+                };
+                notifyError(err);
+                reject(err);
+                return;
+              }
+              const passRes: TLRPC.TL_account_password = {
+                _: 'account.password',
+                has_password: Boolean(data.hasPassword),
+                has_recovery: Boolean(data.hasRecovery),
+                hint: data.hint || '',
+                login_email_pattern: data.loginEmailPattern || undefined,
+                email_unconfirmed_pattern: data.emailUnconfirmedPattern || undefined,
+                pending_reset_date: data.pendingResetDate || undefined,
+              };
+              notifySuccess(passRes as unknown as T);
+              resolve(passRes as unknown as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
+          return;
+        }
+
+        if (reqType === 'account.updatePasswordSettings' || reqType === 'TL_account_updatePasswordSettings') {
+          fetch('/api/telegram/account/password-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionString: activeSession,
+              currentPassword: request.password?.hash || request.currentPassword,
+              newPassword: request.new_settings?.new_password || request.newPassword,
+              hint: request.new_settings?.hint ?? request.hint,
+              email: request.new_settings?.email ?? request.email,
+            }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                const err: TLRPC.TL_error = {
+                  code: resp.status || 400,
+                  text: data.error || data.message || 'UPDATE_PASSWORD_FAILED',
+                };
+                notifyError(err);
+                reject(err);
+                return;
+              }
+              const success: any = { _: 'TL_boolTrue', value: true, needEmailConfirm: data.needEmailConfirm };
+              notifySuccess(success);
+              resolve(success as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
           return;
         }
 
         if (
-          reqType === 'account.updatePasswordSettings' ||
-          reqType === 'TL_account_updatePasswordSettings' ||
           reqType === 'account.confirmPasswordEmail' ||
           reqType === 'TL_account_confirmPasswordEmail' ||
-          reqType === 'account.resendPasswordEmail' ||
-          reqType === 'TL_account_resendPasswordEmail' ||
-          reqType === 'account.cancelPasswordEmail' ||
-          reqType === 'TL_account_cancelPasswordEmail' ||
-          reqType === 'account.resetPassword' ||
-          reqType === 'TL_account_resetPassword'
+          reqType === 'account.verifyEmail' ||
+          reqType === 'TL_account_verifyEmail'
         ) {
-          const success: any = { _: 'TL_boolTrue', value: true };
-          notifySuccess(success);
-          resolve(success as T);
+          fetch('/api/telegram/account/email/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionString: activeSession,
+              code: request.code || request.verification?.code,
+              email: request.email,
+            }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                const err: TLRPC.TL_error = {
+                  code: resp.status || 400,
+                  text: data.error || 'VERIFY_EMAIL_FAILED',
+                };
+                notifyError(err);
+                reject(err);
+                return;
+              }
+              const success: any = { _: 'TL_boolTrue', value: true };
+              notifySuccess(success);
+              resolve(success as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
           return;
         }
 
-        // 4. Privacy Settings (getPrivacy / setPrivacy)
+        if (
+          reqType === 'account.resendPasswordEmail' ||
+          reqType === 'TL_account_resendPasswordEmail' ||
+          reqType === 'account.sendVerifyEmailCode' ||
+          reqType === 'TL_account_sendVerifyEmailCode'
+        ) {
+          fetch('/api/telegram/account/email/send-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionString: activeSession,
+              email: request.email,
+            }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                const err: TLRPC.TL_error = {
+                  code: resp.status || 400,
+                  text: data.error || 'SEND_CODE_FAILED',
+                };
+                notifyError(err);
+                reject(err);
+                return;
+              }
+              const success: any = { _: 'TL_boolTrue', value: true, pattern: data.pattern };
+              notifySuccess(success);
+              resolve(success as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
+          return;
+        }
+
+        if (reqType === 'account.cancelPasswordEmail' || reqType === 'TL_account_cancelPasswordEmail') {
+          fetch('/api/telegram/account/email/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionString: activeSession }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                const err: TLRPC.TL_error = { code: resp.status || 400, text: data.error || 'CANCEL_EMAIL_FAILED' };
+                notifyError(err);
+                reject(err);
+                return;
+              }
+              const success: any = { _: 'TL_boolTrue', value: true };
+              notifySuccess(success);
+              resolve(success as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
+          return;
+        }
+
+        // 4. Privacy Settings (Real Telegram MTProto)
         if (reqType === 'account.getPrivacy' || reqType === 'TL_account_getPrivacy') {
-          const privRes: any = {
-            _: 'account.privacyRules',
-            rules: [{ _: 'privacyValueAllowAll' }],
-            users: [],
-            chats: [],
-          };
-          notifySuccess(privRes);
-          resolve(privRes as T);
+          fetch(`/api/telegram/account/privacy?sessionString=${encodeURIComponent(activeSession)}`)
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              const rules = data.settings || {};
+              const privRes: any = {
+                _: 'account.privacyRules',
+                rules: [{ _: 'privacyValueAllowAll' }],
+                settings: rules,
+                users: [],
+                chats: [],
+              };
+              notifySuccess(privRes);
+              resolve(privRes as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
           return;
         }
 
         if (reqType === 'account.setPrivacy' || reqType === 'TL_account_setPrivacy') {
-          const privRes: any = {
-            _: 'account.privacyRules',
-            rules: request.rules || [{ _: 'privacyValueAllowAll' }],
-            users: [],
-            chats: [],
-          };
-          notifySuccess(privRes);
-          resolve(privRes as T);
+          let target = 'last_seen';
+          const keyType = request.key?._ || request.key?.className || '';
+          if (keyType.includes('Phone') || keyType.includes('phone')) target = 'phone_number';
+          else if (keyType.includes('Photo') || keyType.includes('photo')) target = 'profile_photos';
+          else if (keyType.includes('Forward') || keyType.includes('forward')) target = 'forwards';
+          else if (keyType.includes('Call') || keyType.includes('call')) target = 'calls';
+          else if (keyType.includes('Voice') || keyType.includes('voice')) target = 'voice_messages';
+          else if (keyType.includes('About') || keyType.includes('about')) target = 'bio';
+
+          let option = 'everybody';
+          const firstRule = (request.rules && request.rules[0]?._) || '';
+          if (firstRule.includes('Contacts') || firstRule.includes('contacts')) option = 'contacts';
+          else if (firstRule.includes('Disallow') || firstRule.includes('disallow')) option = 'nobody';
+
+          fetch('/api/telegram/account/privacy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionString: activeSession,
+              target,
+              option,
+            }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                const err: TLRPC.TL_error = { code: resp.status || 400, text: data.error || 'SET_PRIVACY_FAILED' };
+                notifyError(err);
+                reject(err);
+                return;
+              }
+              const privRes: any = {
+                _: 'account.privacyRules',
+                rules: request.rules || [{ _: 'privacyValueAllowAll' }],
+                users: [],
+                chats: [],
+              };
+              notifySuccess(privRes);
+              resolve(privRes as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
           return;
         }
 
-        // 5. Active Sessions & Authorizations (getAuthorizations / resetAuthorization)
+        // 5. Active Sessions & Authorizations (Real Telegram MTProto)
         if (reqType === 'account.getAuthorizations' || reqType === 'TL_account_getAuthorizations') {
-          const authRes: any = {
-            _: 'account.authorizations',
-            authorizations: [
-              {
-                _: 'authorization',
-                hash: '1001',
-                device_model: 'Samsung Galaxy S24 Ultra',
-                platform: 'Android',
-                system_version: 'Android 14 (API 34)',
-                app_name: 'Telegram Android',
-                app_version: '10.14.5 (4890)',
-                date_created: Math.floor(Date.now() / 1000) - 86400 * 30,
-                date_active: Math.floor(Date.now() / 1000),
-                ip: '197.38.112.44',
-                country: 'Egypt',
-                region: 'Cairo',
-                current: true,
-                official_app: true,
-              },
-              {
-                _: 'authorization',
-                hash: '1002',
-                device_model: 'Telegram Desktop',
-                platform: 'Windows',
-                system_version: 'Windows 11 Pro 64-bit',
-                app_name: 'Telegram Desktop',
-                app_version: '5.2.1 x64',
-                date_created: Math.floor(Date.now() / 1000) - 86400 * 12,
-                date_active: Math.floor(Date.now() / 1000) - 3600 * 2,
-                ip: '156.204.18.91',
-                country: 'Egypt',
-                region: 'Alexandria',
-                current: false,
-                official_app: true,
-              },
-            ],
-          };
-          notifySuccess(authRes);
-          resolve(authRes as T);
+          fetch(`/api/telegram/sessions?sessionString=${encodeURIComponent(activeSession)}`)
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              const authRes: any = {
+                _: 'account.authorizations',
+                authorizations: data.authorizations || [],
+                authorization_ttl_days: data.authorization_ttl_days || 180,
+              };
+              notifySuccess(authRes);
+              resolve(authRes as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
           return;
         }
 
+        if (reqType === 'account.resetAuthorization' || reqType === 'TL_account_resetAuthorization') {
+          fetch('/api/telegram/sessions/terminate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionString: activeSession,
+              hash: request.hash,
+            }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              const success: any = { _: 'TL_boolTrue', value: Boolean(data.success) };
+              notifySuccess(success);
+              resolve(success as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
+          return;
+        }
+
+        if (reqType === 'auth.resetAuthorizations' || reqType === 'TL_auth_resetAuthorizations') {
+          fetch('/api/telegram/sessions/terminate-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionString: activeSession }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              const success: any = { _: 'TL_boolTrue', value: Boolean(data.success) };
+              notifySuccess(success);
+              resolve(success as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
+          return;
+        }
+
+        // 5.1 Profile & Notify Settings Updates (Real Telegram MTProto)
         if (
-          reqType === 'account.resetAuthorization' ||
-          reqType === 'TL_account_resetAuthorization' ||
-          reqType === 'auth.resetAuthorizations' ||
-          reqType === 'TL_auth_resetAuthorizations'
+          reqType === 'account.updateProfile' ||
+          reqType === 'TL_account_updateProfile' ||
+          reqType === 'account.updateUsername' ||
+          reqType === 'TL_account_updateUsername'
         ) {
-          const success: any = { _: 'TL_boolTrue', value: true };
-          notifySuccess(success);
-          resolve(success as T);
+          fetch('/api/telegram/account/update-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionString: activeSession,
+              firstName: request.first_name || request.firstName,
+              lastName: request.last_name || request.lastName,
+              about: request.about,
+              username: request.username,
+              photoBase64: request.photoBase64,
+            }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                const err: TLRPC.TL_error = { code: resp.status || 400, text: data.error || 'UPDATE_PROFILE_FAILED' };
+                notifyError(err);
+                reject(err);
+                return;
+              }
+              const userRes: any = { _: 'TL_user', ...data.user };
+              notifySuccess(userRes);
+              resolve(userRes as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
+          return;
+        }
+
+        if (reqType === 'account.updateNotifySettings' || reqType === 'TL_account_updateNotifySettings') {
+          fetch('/api/telegram/account/notify-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionString: activeSession,
+              peerType: request.peerType || 'users',
+              muteUntil: request.settings?.mute_until || request.settings?.muteUntil,
+              showPreviews: request.settings?.show_previews ?? true,
+              silent: request.settings?.silent ?? false,
+            }),
+          })
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              const success: any = { _: 'TL_boolTrue', value: Boolean(data.success) };
+              notifySuccess(success);
+              resolve(success as T);
+            })
+            .catch((networkErr) => {
+              const err: TLRPC.TL_error = { code: 500, text: networkErr?.message || 'NETWORK_ERROR' };
+              notifyError(err);
+              reject(err);
+            });
           return;
         }
 
@@ -608,6 +864,21 @@ export class ConnectionsManager {
       throw err;
     }
   }
+  /**
+   * Fetches updates.getChannelDifference for a channel/supergroup
+   */
+  public async getChannelDifference(channelId: string | number, pts: number): Promise<any> {
+    return this.sendRequest({
+      _: 'updates.getChannelDifference',
+      channel: channelId,
+      pts: Number(pts) || 0,
+      limit: 100,
+    });
+  }
+}
+
+export async function getChannelDifference(channelId: string | number, pts: number): Promise<any> {
+  return ConnectionsManager.getInstance().getChannelDifference(channelId, pts);
 }
 
 export const connectionsManager = ConnectionsManager.getInstance();

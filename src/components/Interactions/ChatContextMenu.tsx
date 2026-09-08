@@ -9,6 +9,7 @@ import {
   Eraser,
   Bookmark,
   Share2,
+  Archive,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 
@@ -18,6 +19,7 @@ export const ChatContextMenuView: React.FC = () => {
     setChatContextMenu,
     chats,
     togglePinChat,
+    toggleArchiveChat,
     toggleMuteChat,
     markChatReadUnread,
     clearChatHistory,
@@ -63,6 +65,22 @@ export const ChatContextMenuView: React.FC = () => {
           {chat.isPinned
             ? isArabic ? 'إلغاء التثبيت' : 'Unpin from Top'
             : isArabic ? 'تثبيت في الأعلى' : 'Pin to Top'}
+        </span>
+      </button>
+
+      {/* Archive / Unarchive */}
+      <button
+        onClick={() => {
+          toggleArchiveChat(chat.id);
+          setChatContextMenu(null);
+        }}
+        className="w-full flex items-center gap-3 px-3.5 py-2 hover:bg-white/10 text-left rtl:text-right transition-colors"
+      >
+        <Archive className="w-4 h-4 text-emerald-400" />
+        <span>
+          {chat.isArchived
+            ? isArabic ? 'إلغاء الأرشفة' : 'Unarchive'
+            : isArabic ? 'أرشفة المحادثة' : 'Archive Chat'}
         </span>
       </button>
 

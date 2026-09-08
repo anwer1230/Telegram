@@ -26,6 +26,11 @@ export const ChatListHeader: React.FC = () => {
   const {
     searchQuery,
     setSearchQuery,
+    searchFilter,
+    setSearchFilter,
+    isSearchActive,
+    setIsSearchActive,
+    chatsWithDraftsCount,
     setIsDrawerOpen,
     setActiveModal,
     resolveTelegramLink,
@@ -38,11 +43,11 @@ export const ChatListHeader: React.FC = () => {
     triggerScreenshotBlocked,
   } = useTelegram();
 
-  const [isSearchActive, setIsSearchActive] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const isArabic = settings.language === 'ar';
+  const isSearchMode = isSearchActive || !!searchQuery.trim() || searchFilter !== 'all';
   const isLinkSearch =
     searchQuery.startsWith('@') ||
     searchQuery.startsWith('t.me') ||
@@ -64,6 +69,7 @@ export const ChatListHeader: React.FC = () => {
 
   const handleCloseSearch = () => {
     setSearchQuery('');
+    setSearchFilter('all');
     setIsSearchActive(false);
   };
 
@@ -89,9 +95,12 @@ export const ChatListHeader: React.FC = () => {
         borderColor: 'var(--tg-theme-border)',
       }}
     >
-      {/* Official Telegram Android Action Bar (56px standard) */}
-      <div className="h-14 px-2 flex items-center justify-between gap-1 relative">
-        {isSearchActive || searchQuery ? (
+      {/* Top Brand Gradient Accent Bar (#8A2BE2 to #FF69B4) */}
+      <div className="h-[2.5px] w-full bg-gradient-to-r from-[#8A2BE2] via-[#d946ef] to-[#FF69B4] shrink-0" />
+
+      {/* Official Telegram Android Action Bar (56px standard) with subtle gradient hue */}
+      <div className="h-14 px-2 flex items-center justify-between gap-1 relative bg-gradient-to-r from-[#8A2BE2]/10 via-transparent to-[#FF69B4]/10">
+        {isSearchMode ? (
           /* Search Mode (ActionBarSearchItem) */
           <div className="flex items-center w-full gap-2 px-1 animate-in fade-in duration-150">
             <button
@@ -112,9 +121,11 @@ export const ChatListHeader: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
                 placeholder={
-                  isArabic
-                    ? 'بحث، أو رابط t.me/+ أو @معرف...'
-                    : 'Search, or paste t.me/link or @handle...'
+                  searchFilter === 'drafts'
+                    ? (isArabic ? 'بحث داخل المسودات غير المرسلة...' : 'Search within unsent drafts...')
+                    : (isArabic
+                        ? 'بحث، أو رابط t.me/+ أو @معرف...'
+                        : 'Search, or paste t.me/link or @handle...')
                 }
                 className="w-full py-1.5 px-3 text-sm rounded-full bg-black/20 focus:bg-black/30 focus:outline-none border border-transparent focus:border-[#2481cc]/50 text-white placeholder-gray-400 transition-all"
               />
@@ -155,6 +166,25 @@ export const ChatListHeader: React.FC = () => {
 
             {/* Right: Actions (Search, Radar, Install, New Chat) */}
             <div className="flex items-center gap-0.5 text-gray-300 shrink-0">
+              {/* Quick Unsent Drafts shortcut button if drafts exist */}
+              {chatsWithDraftsCount > 0 && (
+                <button
+                  id="tg-quick-drafts-shortcut"
+                  onClick={() => {
+                    setIsSearchActive(true);
+                    setSearchFilter('drafts');
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-full bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition-all shrink-0 cursor-pointer"
+                  title={isArabic ? `عرض ${chatsWithDraftsCount} مسودات غير مرسلة` : `View ${chatsWithDraftsCount} unsent drafts`}
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-rose-400" />
+                  <span className="hidden sm:inline text-[11px]">{isArabic ? 'مسودات' : 'Drafts'}</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-rose-500 text-white leading-tight">
+                    {chatsWithDraftsCount}
+                  </span>
+                </button>
+              )}
+
               {/* Search Button */}
               <button
                 id="tg-open-search-btn"
@@ -343,6 +373,96 @@ export const ChatListHeader: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Search Category Filter Pills (Drafts, Channels, Groups, Bots, Direct) */}
+      {isSearchMode && (
+        <div
+          id="tg-search-filter-pills"
+          className="flex items-center gap-1.5 px-2.5 py-2 overflow-x-auto no-scrollbar border-t border-white/5 bg-black/25"
+        >
+          <button
+            id="tg-search-pill-all"
+            onClick={() => setSearchFilter('all')}
+            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
+              searchFilter === 'all'
+                ? 'bg-[#2481cc] text-white shadow-sm'
+                : 'bg-white/5 hover:bg-white/10 text-gray-300'
+            }`}
+          >
+            {isArabic ? 'الكل' : 'All'}
+          </button>
+
+          <button
+            id="tg-search-pill-drafts"
+            onClick={() => setSearchFilter('drafts')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+              searchFilter === 'drafts'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-950/60 ring-1 ring-rose-400'
+                : 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30'
+            }`}
+          >
+            <Edit3 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span>{isArabic ? 'المسودات' : 'Drafts'}</span>
+            {chatsWithDraftsCount > 0 && (
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full leading-tight ${
+                  searchFilter === 'drafts' ? 'bg-white text-rose-600' : 'bg-rose-500 text-white'
+                }`}
+              >
+                {chatsWithDraftsCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            id="tg-search-pill-channels"
+            onClick={() => setSearchFilter('channels')}
+            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
+              searchFilter === 'channels'
+                ? 'bg-[#2481cc] text-white shadow-sm'
+                : 'bg-white/5 hover:bg-white/10 text-gray-300'
+            }`}
+          >
+            {isArabic ? 'القنوات' : 'Channels'}
+          </button>
+
+          <button
+            id="tg-search-pill-groups"
+            onClick={() => setSearchFilter('groups')}
+            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
+              searchFilter === 'groups'
+                ? 'bg-[#2481cc] text-white shadow-sm'
+                : 'bg-white/5 hover:bg-white/10 text-gray-300'
+            }`}
+          >
+            {isArabic ? 'المجموعات' : 'Groups'}
+          </button>
+
+          <button
+            id="tg-search-pill-bots"
+            onClick={() => setSearchFilter('bots')}
+            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
+              searchFilter === 'bots'
+                ? 'bg-[#2481cc] text-white shadow-sm'
+                : 'bg-white/5 hover:bg-white/10 text-gray-300'
+            }`}
+          >
+            {isArabic ? 'البوتات' : 'Bots'}
+          </button>
+
+          <button
+            id="tg-search-pill-private"
+            onClick={() => setSearchFilter('private')}
+            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
+              searchFilter === 'private'
+                ? 'bg-[#2481cc] text-white shadow-sm'
+                : 'bg-white/5 hover:bg-white/10 text-gray-300'
+            }`}
+          >
+            {isArabic ? 'المحادثات المباشرة' : 'Direct Chats'}
+          </button>
+        </div>
+      )}
 
       {/* Global Link / Invite Quick Join Action Bar */}
       {isLinkSearch && (

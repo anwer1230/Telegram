@@ -289,17 +289,16 @@ export class MessagesStorage {
   }
 
   public putPrivacyRules(rules: any[], type: number): void {
-    if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(`tg_privacy_rules_${this.currentAccount}_${type}`, JSON.stringify(rules));
-    } catch {}
+      telegramDB.savePrivacyRules(this.currentAccount, type, rules);
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to save privacy rules in SQLite:`, e);
+    }
   }
 
   public getPrivacyRules(type: number): any[] | null {
-    if (typeof window === 'undefined') return null;
     try {
-      const saved = localStorage.getItem(`tg_privacy_rules_${this.currentAccount}_${type}`);
-      return saved ? JSON.parse(saved) : null;
+      return telegramDB.getPrivacyRules(this.currentAccount, type);
     } catch {
       return null;
     }
@@ -427,11 +426,21 @@ export class MessagesStorage {
    */
   public saveDiffParams(pts: number, seq: number, date: number, qts: number): void {
     try {
-      localStorage.setItem(
-        `tg_diff_params_${this.currentAccount}`,
-        JSON.stringify({ pts, seq, date, qts })
-      );
-    } catch (e) {}
+      telegramDB.saveDiffParams(this.currentAccount, pts, seq, date, qts);
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to save diff params in SQLite:`, e);
+    }
+  }
+
+  /**
+   * Retrieves sync difference state parameters
+   */
+  public getDiffParams(): { pts: number; seq: number; date: number; qts: number } | null {
+    try {
+      return telegramDB.getDiffParams(this.currentAccount);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -441,10 +450,6 @@ export class MessagesStorage {
     const id = String(channelId);
     try {
       telegramDB.saveChannelPts(id, pts);
-      if (typeof window !== 'undefined') {
-        const key = `tg_channel_pts_${this.currentAccount}_${id}`;
-        localStorage.setItem(key, String(pts));
-      }
     } catch (e) {
       console.warn(`[MessagesStorage ${this.currentAccount}] Failed to save channel pts:`, e);
     }
@@ -459,11 +464,6 @@ export class MessagesStorage {
       const sqlitePts = telegramDB.getChannelPts(id);
       if (sqlitePts && sqlitePts > 0) {
         return sqlitePts;
-      }
-      if (typeof window !== 'undefined') {
-        const key = `tg_channel_pts_${this.currentAccount}_${id}`;
-        const val = localStorage.getItem(key);
-        if (val) return Number(val) || 0;
       }
     } catch (e) {
       console.warn(`[MessagesStorage ${this.currentAccount}] Failed to get channel pts:`, e);
@@ -532,18 +532,17 @@ export class MessagesStorage {
   ): void {
     const id = String(dialogId);
     try {
-      if (typeof window !== 'undefined') {
-        const payload = {
-          dialogId: id,
-          position,
-          topOffset,
-          messageId: String(messageId),
-          isAtBottom,
-          timestamp: Date.now(),
-        };
-        localStorage.setItem(`tg_scroll_pos_${this.currentAccount}_${id}`, JSON.stringify(payload));
-      }
-    } catch (e) {}
+      telegramDB.saveChatScroll(
+        this.currentAccount,
+        id,
+        position,
+        topOffset,
+        messageId,
+        isAtBottom
+      );
+    } catch (e) {
+      console.warn(`[MessagesStorage ${this.currentAccount}] Failed to save chat scroll in SQLite:`, e);
+    }
   }
 
   /**
@@ -558,12 +557,10 @@ export class MessagesStorage {
   } | null {
     const id = String(dialogId);
     try {
-      if (typeof window !== 'undefined') {
-        const saved = localStorage.getItem(`tg_scroll_pos_${this.currentAccount}_${id}`);
-        return saved ? JSON.parse(saved) : null;
-      }
-    } catch (e) {}
-    return null;
+      return telegramDB.getChatScroll(this.currentAccount, id);
+    } catch {
+      return null;
+    }
   }
 }
 

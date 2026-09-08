@@ -118,10 +118,104 @@ class TelegramSQLiteDatabase {
         updated_at INTEGER
       );
 
+      CREATE TABLE IF NOT EXISTS diff_params (
+        account_id TEXT PRIMARY KEY,
+        pts INTEGER,
+        seq INTEGER,
+        date INTEGER,
+        qts INTEGER,
+        updated_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS privacy_rules (
+        rule_key TEXT PRIMARY KEY,
+        rules_json TEXT,
+        updated_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_scroll (
+        scroll_key TEXT PRIMARY KEY,
+        dialog_id TEXT,
+        position INTEGER,
+        top_offset INTEGER,
+        message_id TEXT,
+        is_bottom INTEGER,
+        updated_at INTEGER
+      );
+
       CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
     `);
 
+    // Auto-migrate tables to ensure any new columns (like data_json) exist on restored databases
+    this.runSchemaMigrations();
+
     this.persist();
+  }
+
+  private ensureColumnExists(table: string, column: string, colDef: string): void {
+    if (!this.db) return;
+    try {
+      const res = this.db.exec(`PRAGMA table_info(${table})`);
+      if (res.length > 0 && res[0].values) {
+        const hasColumn = res[0].values.some((row: any[]) => row[1] === column);
+        if (!hasColumn) {
+          this.db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${colDef}`);
+          console.log(`[SQLite Migration] Added missing column '${column}' to table '${table}'.`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[SQLite Migration] Note checking column ${column} on ${table}:`, err);
+    }
+  }
+
+  public runSchemaMigrations(): void {
+    if (!this.db) return;
+    try {
+      // Ensure all columns exist on chats table
+      this.ensureColumnExists('chats', 'data_json', 'TEXT');
+      this.ensureColumnExists('chats', 'last_message_text', 'TEXT');
+      this.ensureColumnExists('chats', 'last_message_time', 'TEXT');
+      this.ensureColumnExists('chats', 'is_secret', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('chats', 'ttl_seconds', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('chats', 'encryption_key', 'TEXT');
+      this.ensureColumnExists('chats', 'unread_count', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('chats', 'is_pinned', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('chats', 'is_muted', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('chats', 'username', 'TEXT');
+      this.ensureColumnExists('chats', 'avatar', 'TEXT');
+      this.ensureColumnExists('chats', 'title', 'TEXT');
+      this.ensureColumnExists('chats', 'type', 'TEXT');
+
+      // Ensure all columns exist on messages table
+      this.ensureColumnExists('messages', 'media_json', 'TEXT');
+      this.ensureColumnExists('messages', 'is_secret', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('messages', 'expires_at', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('messages', 'status', 'TEXT');
+      this.ensureColumnExists('messages', 'sender_name', 'TEXT');
+      this.ensureColumnExists('messages', 'timestamp', 'TEXT');
+      this.ensureColumnExists('messages', 'date', 'TEXT');
+      this.ensureColumnExists('messages', 'is_outgoing', 'INTEGER DEFAULT 0');
+
+      // Ensure columns on users table
+      this.ensureColumnExists('users', 'is_online', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('users', 'is_premium', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('users', 'bio', 'TEXT');
+      this.ensureColumnExists('users', 'avatar', 'TEXT');
+      this.ensureColumnExists('users', 'phone', 'TEXT');
+      this.ensureColumnExists('users', 'username', 'TEXT');
+
+      // Ensure columns on stories table
+      this.ensureColumnExists('stories', 'media_url', 'TEXT');
+      this.ensureColumnExists('stories', 'media_type', 'TEXT');
+      this.ensureColumnExists('stories', 'caption', 'TEXT');
+      this.ensureColumnExists('stories', 'timestamp', 'TEXT');
+      this.ensureColumnExists('stories', 'expires_at', 'INTEGER');
+      this.ensureColumnExists('stories', 'views_count', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('stories', 'is_viewed', 'INTEGER DEFAULT 0');
+      this.ensureColumnExists('stories', 'is_my_story', 'INTEGER DEFAULT 0');
+    } catch (e) {
+      console.warn('[SQLite Migration] Error running schema migrations:', e);
+    }
   }
 
   public async persist(): Promise<void> {
@@ -163,8 +257,42 @@ class TelegramSQLiteDatabase {
       stmt.free();
       this.db.run('COMMIT');
       this.persist();
-    } catch (e) {
+    } catch (e: any) {
       try { this.db.run('ROLLBACK'); } catch (_) {}
+      if (e?.message && e.message.includes('has no column named')) {
+        this.runSchemaMigrations();
+        try {
+          this.db.run('BEGIN TRANSACTION');
+          const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO chats (id, type, title, username, avatar, unread_count, is_pinned, is_muted, last_message_text, last_message_time, data_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+          for (const c of chats) {
+            if (!c || !c.id) continue;
+            stmt.run([
+              c.id,
+              c.type,
+              c.title,
+              c.username || '',
+              c.avatar || '',
+              c.unreadCount || 0,
+              c.isPinned ? 1 : 0,
+              c.isMuted ? 1 : 0,
+              c.lastMessage?.text || '',
+              c.lastMessage?.timestamp || '',
+              JSON.stringify(c),
+            ]);
+          }
+          stmt.free();
+          this.db.run('COMMIT');
+          this.persist();
+          return;
+        } catch (retryErr) {
+          try { this.db.run('ROLLBACK'); } catch (_) {}
+          console.error('[SQLite] saveChats retry error:', retryErr);
+          return;
+        }
+      }
       console.error('[SQLite] saveChats error:', e);
     }
   }
@@ -238,7 +366,32 @@ class TelegramSQLiteDatabase {
         ]
       );
       this.persist();
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.message && e.message.includes('has no column named')) {
+        this.runSchemaMigrations();
+        try {
+          this.db.run(
+            `INSERT OR REPLACE INTO messages (id, chat_id, sender_id, sender_name, text, timestamp, date, is_outgoing, status, media_json, is_secret, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              msg.id,
+              msg.chatId,
+              msg.senderId,
+              msg.senderName || '',
+              msg.text,
+              msg.timestamp,
+              msg.date,
+              msg.isOutgoing ? 1 : 0,
+              msg.status,
+              msg.media ? JSON.stringify(msg.media) : null,
+              isSecret ? 1 : 0,
+              expiresAt,
+            ]
+          );
+          this.persist();
+          return;
+        } catch (_) {}
+      }
       console.error('[SQLite] saveMessage error:', e);
     }
   }
@@ -271,8 +424,43 @@ class TelegramSQLiteDatabase {
       stmt.free();
       this.db.run('COMMIT');
       this.persist();
-    } catch (e) {
+    } catch (e: any) {
       try { this.db.run('ROLLBACK'); } catch (_) {}
+      if (e?.message && e.message.includes('has no column named')) {
+        this.runSchemaMigrations();
+        try {
+          this.db.run('BEGIN TRANSACTION');
+          const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO messages (id, chat_id, sender_id, sender_name, text, timestamp, date, is_outgoing, status, media_json, is_secret, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+          for (const msg of messages) {
+            if (!msg || !msg.id) continue;
+            stmt.run([
+              msg.id,
+              msg.chatId,
+              msg.senderId,
+              msg.senderName || '',
+              msg.text,
+              msg.timestamp,
+              msg.date,
+              msg.isOutgoing ? 1 : 0,
+              msg.status,
+              msg.media ? JSON.stringify(msg.media) : null,
+              isSecret ? 1 : 0,
+              expiresAt,
+            ]);
+          }
+          stmt.free();
+          this.db.run('COMMIT');
+          this.persist();
+          return;
+        } catch (retryErr) {
+          try { this.db.run('ROLLBACK'); } catch (_) {}
+          console.error('[SQLite] saveMessages retry error:', retryErr);
+          return;
+        }
+      }
       console.error('[SQLite] saveMessages error:', e);
     }
   }
@@ -470,6 +658,128 @@ class TelegramSQLiteDatabase {
     }
     return result;
   }
+
+  // SQLite Ops for Diff Params
+  public saveDiffParams(accountId: string | number, pts: number, seq: number, date: number, qts: number): void {
+    if (!this.db) return;
+    try {
+      this.db.run(
+        'INSERT OR REPLACE INTO diff_params (account_id, pts, seq, date, qts, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [String(accountId), Number(pts) || 0, Number(seq) || 0, Number(date) || 0, Number(qts) || 0, Date.now()]
+      );
+      this.persist();
+    } catch (e) {
+      console.warn('[SQLite] saveDiffParams error:', e);
+    }
+  }
+
+  public getDiffParams(accountId: string | number): { pts: number; seq: number; date: number; qts: number } | null {
+    if (!this.db) return null;
+    try {
+      const stmt = this.db.prepare('SELECT pts, seq, date, qts FROM diff_params WHERE account_id = ?');
+      stmt.bind([String(accountId)]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject() as any;
+        stmt.free();
+        return {
+          pts: Number(row.pts) || 0,
+          seq: Number(row.seq) || 0,
+          date: Number(row.date) || 0,
+          qts: Number(row.qts) || 0,
+        };
+      }
+      stmt.free();
+    } catch (e) {
+      console.warn('[SQLite] getDiffParams error:', e);
+    }
+    return null;
+  }
+
+  // SQLite Ops for Privacy Rules
+  public savePrivacyRules(account: number, type: number, rules: any[]): void {
+    if (!this.db) return;
+    try {
+      const ruleKey = `privacy_${account}_${type}`;
+      this.db.run(
+        'INSERT OR REPLACE INTO privacy_rules (rule_key, rules_json, updated_at) VALUES (?, ?, ?)',
+        [ruleKey, JSON.stringify(rules), Date.now()]
+      );
+      this.persist();
+    } catch (e) {
+      console.warn('[SQLite] savePrivacyRules error:', e);
+    }
+  }
+
+  public getPrivacyRules(account: number, type: number): any[] | null {
+    if (!this.db) return null;
+    try {
+      const ruleKey = `privacy_${account}_${type}`;
+      const stmt = this.db.prepare('SELECT rules_json FROM privacy_rules WHERE rule_key = ?');
+      stmt.bind([ruleKey]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject() as any;
+        stmt.free();
+        if (row.rules_json) {
+          return JSON.parse(row.rules_json);
+        }
+      }
+      stmt.free();
+    } catch (e) {
+      console.warn('[SQLite] getPrivacyRules error:', e);
+    }
+    return null;
+  }
+
+  // SQLite Ops for Chat Scroll Position
+  public saveChatScroll(
+    account: number,
+    dialogId: string,
+    position: number,
+    topOffset: number,
+    messageId: string | number,
+    isAtBottom: boolean
+  ): void {
+    if (!this.db) return;
+    try {
+      const scrollKey = `scroll_${account}_${dialogId}`;
+      this.db.run(
+        'INSERT OR REPLACE INTO chat_scroll (scroll_key, dialog_id, position, top_offset, message_id, is_bottom, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [scrollKey, dialogId, position, topOffset, String(messageId), isAtBottom ? 1 : 0, Date.now()]
+      );
+      this.persist();
+    } catch (e) {
+      console.warn('[SQLite] saveChatScroll error:', e);
+    }
+  }
+
+  public getChatScroll(
+    account: number,
+    dialogId: string
+  ): { dialogId: string; position: number; topOffset: number; messageId: string; isAtBottom: boolean } | null {
+    if (!this.db) return null;
+    try {
+      const scrollKey = `scroll_${account}_${dialogId}`;
+      const stmt = this.db.prepare('SELECT * FROM chat_scroll WHERE scroll_key = ?');
+      stmt.bind([scrollKey]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject() as any;
+        stmt.free();
+        return {
+          dialogId: row.dialog_id || dialogId,
+          position: Number(row.position) || 0,
+          topOffset: Number(row.top_offset) || 0,
+          messageId: String(row.message_id || ''),
+          isAtBottom: Boolean(row.is_bottom),
+        };
+      }
+      stmt.free();
+    } catch (e) {
+      console.warn('[SQLite] getChatScroll error:', e);
+    }
+    return null;
+  }
 }
 
 export const telegramDB = new TelegramSQLiteDatabase();
+export const sqliteStorage = telegramDB;
+export { TelegramSQLiteDatabase };

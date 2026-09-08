@@ -41,6 +41,7 @@ import { messagesController } from '../../core/MessagesController';
 import { ChatObject } from '../../core/ChatObject';
 import { UserObject } from '../../core/UserObject';
 import { NotificationCenter } from '../../core/NotificationCenter';
+import { draftSyncService } from '../../services/DraftSyncService';
 import confetti from 'canvas-confetti';
 
 export const ChatInput: React.FC = () => {
@@ -48,6 +49,7 @@ export const ChatInput: React.FC = () => {
     activeChat,
     activeChatId,
     sendMessage,
+    sendMediaMessage,
     editMessageText,
     replyingTo,
     setReplyingTo,
@@ -66,7 +68,13 @@ export const ChatInput: React.FC = () => {
     showToast,
   } = useTelegram();
 
-  const [text, setText] = useState(() => activeChat?.draft || '');
+  const [text, setText] = useState(() => {
+    if (activeChatId) {
+      const persistedDraft = draftSyncService.getDraftText(activeChatId);
+      if (persistedDraft) return persistedDraft;
+    }
+    return activeChat?.draft || '';
+  });
   const [isRecording, setIsRecording] = useState(false);
   const [isRecordLocked, setIsRecordLocked] = useState(false);
   const [recordDuration, setRecordDuration] = useState(0);
@@ -118,19 +126,61 @@ export const ChatInput: React.FC = () => {
     { cmd: '/help', desc: isArabic ? 'دليل الأوامر' : 'Help & manual' },
   ];
 
-  // Sync draft state across conversation switches
+  // Sync draft state across conversation switches and restore cursor position
   useEffect(() => {
     const prevChatId = currentChatIdRef.current;
     if (prevChatId && prevChatId !== activeChatId && !editingMessage) {
+      const cursorPos = textareaRef.current ? textareaRef.current.selectionStart : undefined;
+      draftSyncService.saveDraft(prevChatId, text, { cursorPosition: cursorPos, immediate: true });
       setChatDraft(prevChatId, text);
     }
     currentChatIdRef.current = activeChatId;
 
     if (!editingMessage) {
-      setText(activeChat?.draft || '');
+      const persistedDraft = activeChatId ? draftSyncService.getDraft(activeChatId) : null;
+      const initialText = persistedDraft ? persistedDraft.text : (activeChat?.draft || '');
+      setText(initialText);
+
+      // Restore cursor position if available
+      if (persistedDraft?.cursorPosition !== undefined) {
+        requestAnimationFrame(() => {
+          if (textareaRef.current) {
+            try {
+              textareaRef.current.setSelectionRange(
+                persistedDraft.cursorPosition!,
+                persistedDraft.cursorPosition!
+              );
+            } catch (_) {}
+          }
+        });
+      }
     }
     setDismissedPreviewUrl(null);
   }, [activeChatId]);
+
+  // Real-time listener for cross-tab / cross-session draft sync
+  useEffect(() => {
+    const unsubscribe = draftSyncService.subscribe((chatId, draft) => {
+      if (chatId === activeChatId && !editingMessage) {
+        const currentVal = textareaRef.current?.value ?? text;
+        const incomingText = draft?.text || '';
+        if (currentVal !== incomingText) {
+          setText(incomingText);
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeChatId, editingMessage, text]);
+
+  // Flush pending draft writes on unmount
+  useEffect(() => {
+    return () => {
+      draftSyncService.flushPendingWrites();
+    };
+  }, []);
 
   // Real-time NotificationCenter listener (chatInfoDidLoad & updateInterfaces)
   const [, setInterfaceVersion] = useState(0);
@@ -160,7 +210,39 @@ export const ChatInput: React.FC = () => {
   const updateTextAndDraft = (newVal: string) => {
     setText(newVal);
     if (!editingMessage && activeChatId) {
+      const cursorPos = textareaRef.current ? textareaRef.current.selectionStart : undefined;
+      draftSyncService.saveDraft(activeChatId, newVal, { cursorPosition: cursorPos });
       setChatDraft(activeChatId, newVal);
+    }
+  };
+
+  // Listen to Web Speech API dictation insertion
+  useEffect(() => {
+    const handleDictationInsert = (e: any) => {
+      const speechText = e.detail;
+      if (speechText) {
+        setText((prev) => {
+          const updated = prev && prev.trim() ? `${prev.trim()} ${speechText}` : speechText;
+          if (activeChatId) {
+            draftSyncService.saveDraft(activeChatId, updated);
+            setChatDraft(activeChatId, updated);
+          }
+          return updated;
+        });
+        setTimeout(() => {
+          textareaRef.current?.focus();
+        }, 80);
+      }
+    };
+
+    window.addEventListener('tg_dictation_insert', handleDictationInsert);
+    return () => window.removeEventListener('tg_dictation_insert', handleDictationInsert);
+  }, [activeChatId, setChatDraft]);
+
+  const handleBlur = () => {
+    if (activeChatId && !editingMessage) {
+      const cursorPos = textareaRef.current ? textareaRef.current.selectionStart : undefined;
+      draftSyncService.saveDraft(activeChatId, text, { cursorPosition: cursorPos, immediate: true });
     }
   };
 
@@ -179,6 +261,7 @@ export const ChatInput: React.FC = () => {
     }
 
     if (activeChatId) {
+      draftSyncService.clearDraft(activeChatId);
       setChatDraft(activeChatId, '');
       messagesController.recordMessageSent(activeChatId);
     }
@@ -336,27 +419,19 @@ export const ChatInput: React.FC = () => {
     setRecordDuration(0);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const url = URL.createObjectURL(file);
-    const isImage = file.type.startsWith('image/');
-
-    const media: MessageMedia = {
-      type: isImage ? 'photo' : 'document',
-      url,
-      fileName: file.name,
-      fileSize: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-    };
-
+    const caption = text;
     if (activeChatId) {
       setChatDraft(activeChatId, '');
     }
-    sendMessage(text, media);
     setText('');
     setShowAttachMenu(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+
+    await sendMediaMessage(file, caption);
   };
 
   const sendSticker = (stickerUrl: string) => {
@@ -936,6 +1011,7 @@ export const ChatInput: React.FC = () => {
                   rows={1}
                   value={text}
                   onChange={(e) => updateTextAndDraft(e.target.value)}
+                  onBlur={handleBlur}
                   onKeyDown={handleKeyDown}
                   placeholder={
                     isSavedMessages
@@ -982,18 +1058,28 @@ export const ChatInput: React.FC = () => {
               <Send className="w-5 h-5 ml-0.5 rtl:ml-0 rtl:mr-0.5" />
             </button>
           ) : (
-            <button
-              onClick={() => startRecording()}
-              onTouchStart={(e) => startRecording(e)}
-              onTouchMove={handleMicTouchMove}
-              onTouchEnd={handleMicTouchEnd}
-              onMouseDown={(e) => startRecording(e)}
-              onMouseUp={handleMicTouchEnd}
-              className="p-2.5 rounded-full hover:bg-white/10 text-gray-400 hover:text-sky-400 active:scale-110 active:text-[#2481cc] transition-all shrink-0 select-none"
-              title={isArabic ? 'تسجيل رسالة صوتية (اضغط أو اسحب)' : 'Record voice note'}
-            >
-              <Mic className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('tg_toggle_dictation'))}
+                className="p-2.5 rounded-full hover:bg-cyan-500/15 text-cyan-400/80 hover:text-cyan-300 active:scale-110 transition-all shrink-0 select-none"
+                title={isArabic ? 'إملاء الرسائل صوتياً بدلاً من الكتابة (Web Speech API)' : 'Voice dictation (Speech to text)'}
+              >
+                <Sparkles className="w-5 h-5 text-cyan-400" />
+              </button>
+              <button
+                onClick={() => startRecording()}
+                onTouchStart={(e) => startRecording(e)}
+                onTouchMove={handleMicTouchMove}
+                onTouchEnd={handleMicTouchEnd}
+                onMouseDown={(e) => startRecording(e)}
+                onMouseUp={handleMicTouchEnd}
+                className="p-2.5 rounded-full hover:bg-white/10 text-gray-400 hover:text-sky-400 active:scale-110 active:text-[#2481cc] transition-all shrink-0 select-none"
+                title={isArabic ? 'تسجيل رسالة صوتية (اضغط أو اسحب)' : 'Record voice note'}
+              >
+                <Mic className="w-5 h-5" />
+              </button>
+            </div>
           )}
         </div>
       )}

@@ -54,13 +54,13 @@ export class PrivacySettingsController {
   private currentAccount: number = 0;
 
   private state: PrivacySettingsState = {
-    twoStepEnabled: true,
+    twoStepEnabled: false,
     autoDeletePeriod: 0,
     passcodeEnabled: false,
     passcodeType: 'pin',
-    loginEmail: 's***@gmail.com',
+    loginEmail: '',
     blockedUsersCount: 0,
-    activeSessionsCount: 3,
+    activeSessionsCount: 0,
     phoneNumber: 'everybody',
     lastSeen: 'everybody',
     profilePhotos: 'everybody',
@@ -68,62 +68,7 @@ export class PrivacySettingsController {
     calls: 'everybody',
     voiceMessages: 'everybody',
     bio: 'everybody',
-    sessions: [
-      {
-        _: 'authorization',
-        hash: '1001',
-        flags: 0,
-        device_model: 'Samsung Galaxy S24 Ultra',
-        platform: 'Android',
-        system_version: 'Android 14 (API 34)',
-        api_id: 2040,
-        app_name: 'Telegram Android',
-        app_version: '10.14.5 (4890)',
-        date_created: Math.floor(Date.now() / 1000) - 86400 * 30,
-        date_active: Math.floor(Date.now() / 1000),
-        ip: '197.38.112.44',
-        country: 'Egypt',
-        region: 'Cairo',
-        current: true,
-        official_app: true,
-      },
-      {
-        _: 'authorization',
-        hash: '1002',
-        flags: 0,
-        device_model: 'Telegram Desktop',
-        platform: 'Windows',
-        system_version: 'Windows 11 Pro 64-bit',
-        api_id: 2040,
-        app_name: 'Telegram Desktop',
-        app_version: '5.2.1 x64',
-        date_created: Math.floor(Date.now() / 1000) - 86400 * 12,
-        date_active: Math.floor(Date.now() / 1000) - 3600 * 2,
-        ip: '156.204.18.91',
-        country: 'Egypt',
-        region: 'Alexandria',
-        current: false,
-        official_app: true,
-      },
-      {
-        _: 'authorization',
-        hash: '1003',
-        flags: 0,
-        device_model: 'Chrome Browser (WebK)',
-        platform: 'Web',
-        system_version: 'macOS Sonoma',
-        api_id: 2496,
-        app_name: 'Telegram Web',
-        app_version: '2.0.18',
-        date_created: Math.floor(Date.now() / 1000) - 86400 * 5,
-        date_active: Math.floor(Date.now() / 1000) - 86400,
-        ip: '82.129.40.12',
-        country: 'United Arab Emirates',
-        region: 'Dubai',
-        current: false,
-        official_app: true,
-      },
-    ],
+    sessions: [],
     blockedUsers: [],
   };
 
@@ -139,6 +84,39 @@ export class PrivacySettingsController {
   constructor(account: number) {
     this.currentAccount = account;
     this.loadState();
+  }
+
+  public updateRuleFromRemote(target: PrivacyTarget, option: PrivacyOption) {
+    this.state[target] = option;
+    this.saveState();
+    NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+      NotificationCenter.updateInterfaces,
+      0x0008
+    );
+  }
+
+  public async loadPrivacySettings(): Promise<PrivacySettingsState> {
+    const activeSession = typeof window !== 'undefined' ? (localStorage.getItem('tg_session_string') || '') : '';
+    try {
+      const resp = await fetch(`/api/telegram/account/privacy?sessionString=${encodeURIComponent(activeSession)}`);
+      const data = await resp.json().catch(() => ({}));
+      if (data && data.success && data.settings) {
+        const s = data.settings;
+        if (s.phoneNumber) this.state.phoneNumber = s.phoneNumber;
+        if (s.lastSeen) this.state.lastSeen = s.lastSeen;
+        if (s.profilePhotos) this.state.profilePhotos = s.profilePhotos;
+        if (s.forwards) this.state.forwards = s.forwards;
+        if (s.calls) this.state.calls = s.calls;
+        if (s.voiceMessages) this.state.voiceMessages = s.voiceMessages;
+        if (s.bio) this.state.bio = s.bio;
+        this.saveState();
+        NotificationCenter.getInstance(this.currentAccount).postNotificationName(
+          NotificationCenter.updateInterfaces,
+          0x0008
+        );
+      }
+    } catch (_) {}
+    return { ...this.state };
   }
 
   private loadState() {

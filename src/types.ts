@@ -133,11 +133,14 @@ export interface Message {
   epoch?: number;
   out?: boolean;
   peerId?: string;
+  syncStatus?: "synced" | "partial" | "syncing";
+  isCloudVerified?: boolean;
 }
 
 export interface Chat {
   id: string;
   type: ChatType;
+  syncStatus?: "synced" | "partial" | "syncing";
   title: string;
   username?: string;
   avatar: string;
@@ -518,6 +521,15 @@ export interface AutoReplyRule {
   lastTriggeredAt?: string;
 }
 
+export interface PrivateAutoReplyRule {
+  id: string;
+  keyword: string;
+  reply: string;
+  is_active: boolean;
+  created_at?: number;
+  updated_at?: number;
+}
+
 // 6. Smart AI Learn (Groq LLM)
 export interface SmartAiService {
   id: string;
@@ -849,3 +861,27 @@ export interface PlusConfig {
 }
 
 
+
+
+// ==========================================
+// APP UPDATE & DEPLOYMENT STATE
+// ==========================================
+export interface AppUpdateState {
+  hasUpdate: boolean;
+  updateCount: number;
+  showUpdateNotification: boolean;
+  isUpdating: boolean;
+  commitHash?: string;
+  fullCommitHash?: string;
+  commitMessage?: string;
+  commitAuthor?: string;
+  commitDate?: string;
+  currentCommitHash?: string;
+  commits?: Array<{
+    sha: string;
+    message: string;
+    author: string;
+    date: string;
+  }>;
+  error?: string;
+}

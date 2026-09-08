@@ -29,6 +29,7 @@ export const ScheduledRotatorModal: React.FC = () => {
   const [selectedMsgTab, setSelectedMsgTab] = useState(0);
   const [rawGroups, setRawGroups] = useState('');
   const [intervalMinutes, setIntervalMinutes] = useState(5);
+  const [durationHours, setDurationHours] = useState(0);
   const [isPersistent, setIsPersistent] = useState(true);
 
   const [isActive, setIsActive] = useState(false);
@@ -112,12 +113,7 @@ export const ScheduledRotatorModal: React.FC = () => {
       .filter(Boolean);
 
     try {
-      notificationsService.startRotating(messages, groups, intervalMinutes);
-      fetch('/api/rotating/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, groups, interval_minutes: intervalMinutes }),
-      }).catch(() => {});
+      notificationsService.startRotating(messages, groups, intervalMinutes, durationHours);
       showToast('تم بدء النشر الدوري المجدول بنجاح 🔄', '🚀');
     } catch (err: any) {
       showToast(err?.message || 'حدث خطأ أثناء بدء النشر الدوري', '⚠️');
@@ -323,6 +319,35 @@ chat_123456"
                       }`}
                     >
                       {min} د
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Duration Hours Selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  <span>مدة التشغيل التلقائي:</span>
+                </label>
+                <div className="grid grid-cols-5 gap-1">
+                  {[
+                    { h: 0, label: 'مستمر' },
+                    { h: 1, label: '1 س' },
+                    { h: 2, label: '2 س' },
+                    { h: 6, label: '6 س' },
+                    { h: 24, label: '24 س' },
+                  ].map((item) => (
+                    <button
+                      key={item.h}
+                      onClick={() => setDurationHours(item.h)}
+                      className={`py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        durationHours === item.h
+                          ? 'bg-amber-500 text-black shadow font-extrabold'
+                          : 'bg-black/40 border border-white/10 text-gray-300 hover:bg-white/5'
+                      }`}
+                    >
+                      {item.label}
                     </button>
                   ))}
                 </div>

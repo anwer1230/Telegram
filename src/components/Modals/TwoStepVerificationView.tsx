@@ -108,8 +108,7 @@ export const TwoStepVerificationView: React.FC<TwoStepVerificationViewProps> = (
     setLoading(true);
     setErrorMessage('');
 
-    setTimeout(async () => {
-      setLoading(false);
+    try {
       if (pendingAction === 'disable') {
         await twoStepController.updatePasswordSettings({
           currentPassword,
@@ -125,7 +124,11 @@ export const TwoStepVerificationView: React.FC<TwoStepVerificationViewProps> = (
         setRecoveryEmail('');
         setCurrentStep('set_new_password');
       }
-    }, 400);
+    } catch (err: any) {
+      setErrorMessage(err?.message || (isArabic ? 'كلمة المرور غير صحيحة' : 'Invalid current password'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleNextFromNewPassword = () => {

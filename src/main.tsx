@@ -13,19 +13,28 @@ window.addEventListener('error', (event) => {
   }
 });
 
-// PWA Service Worker Registration with automatic update checks
+// PWA Service Worker Registration with automatic update checks (Google AI Studio pattern)
 if ('serviceWorker' in navigator) {
-  registerSW({
+  const updateSW = registerSW({
     immediate: true,
     onNeedRefresh() {
-      console.log('[PWA] New content available, reloading...');
+      console.log('[PWA] New content available. Automatically reloading to apply updates...');
+      // Safe reload: localStorage and IndexedDB user sessions/chats are fully preserved
       window.location.reload();
     },
     onOfflineReady() {
       console.log('[PWA] App is ready to work offline.');
     },
-    onRegistered(r) {
-      console.log('[PWA] Service Worker registered successfully:', r?.scope);
+    onRegistered(registration) {
+      console.log('[PWA] Service Worker registered successfully:', registration?.scope);
+      // Periodically check for SW updates every 30 minutes
+      if (registration) {
+        setInterval(() => {
+          registration.update().catch((err) => {
+            console.warn('[PWA] Error checking for SW update:', err);
+          });
+        }, 30 * 60 * 1000);
+      }
     },
     onRegisterError(error) {
       console.warn('[PWA] Service Worker registration failed:', error);
