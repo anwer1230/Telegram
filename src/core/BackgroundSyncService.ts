@@ -210,6 +210,15 @@ export class BackgroundSyncService {
   private isInstantAutoJoinEnabled = false;
   private discoveredLinks: LiveDiscoveredLink[] = [];
 
+  // Rate Limiting & Queue state for link joins (strictly 1 join per 10 seconds)
+  private lastJoinTime: number = 0;
+  private joinQueue: Array<{
+    linkId: string;
+    resolve: (success: boolean) => void;
+    reject: (err: any) => void;
+  }> = [];
+  private isProcessingQueue: boolean = false;
+
   // Metrics
   private statusMetrics: BackgroundWorkerStatus = {
     isWorkerActive: false,
@@ -238,6 +247,9 @@ export class BackgroundSyncService {
   public handleSessionRevoked(reason: string = 'AUTH_KEY_UNREGISTERED') {
     console.warn(`[BackgroundSyncService] Handling session revocation (${reason}): halting automation & clearing pending callbacks.`);
     this.pendingCallbacks.clear();
+    this.joinQueue.forEach((q) => q.resolve(false));
+    this.joinQueue = [];
+    this.isProcessingQueue = false;
     this.isInstantAutoJoinEnabled = false;
     this.notifyStateChange();
   }
@@ -319,12 +331,19 @@ export class BackgroundSyncService {
         // 1. Handle off-thread Discovered Links
         if (Array.isArray(data.discoveredLinks) && data.discoveredLinks.length > 0) {
           for (const newLink of data.discoveredLinks) {
+            // Point 2: Strictly prohibit private channels (+ or joinchat)
+            if (this.isPrivateChannelLink(newLink.url)) {
+              newLink.status = 'failed';
+              newLink.failReason = 'PRIVATE_CHANNEL_NOT_ALLOWED';
+              newLink.autoJoined = false;
+            }
+
             this.discoveredLinks.unshift(newLink);
             telegramDb.discoveredLinks.put(newLink).catch(() => {});
             this.statusMetrics.totalLinksDiscovered++;
 
-            // Trigger instant auto-join if enabled
-            if (this.isInstantAutoJoinEnabled) {
+            // Trigger rate-limited auto-join queue if enabled and not failed
+            if (this.isInstantAutoJoinEnabled && newLink.status !== 'failed') {
               this.manualJoinDiscoveredLink(newLink.id);
             }
           }
@@ -424,6 +443,7 @@ export class BackgroundSyncService {
         const fullUrl =
           rawUrl.startsWith('http') || rawUrl.startsWith('tg://') ? rawUrl : 'https://' + rawUrl;
 
+        const isPrivate = this.isPrivateChannelLink(fullUrl);
         const discItem: LiveDiscoveredLink = {
           id: 'disc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
           url: fullUrl,
@@ -431,15 +451,16 @@ export class BackgroundSyncService {
           sourceChatId: message.chatId || 'chat_unknown',
           senderName: message.senderName || 'مستخدم',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: this.isInstantAutoJoinEnabled ? 'joining' : 'pending',
-          autoJoined: this.isInstantAutoJoinEnabled,
+          status: isPrivate ? 'failed' : (this.isInstantAutoJoinEnabled ? 'pending' : 'pending'),
+          autoJoined: isPrivate ? false : this.isInstantAutoJoinEnabled,
+          failReason: isPrivate ? 'PRIVATE_CHANNEL_NOT_ALLOWED' : undefined,
         };
 
         this.discoveredLinks.unshift(discItem);
         telegramDb.discoveredLinks.put(discItem).catch(() => {});
         this.statusMetrics.totalLinksDiscovered++;
 
-        if (this.isInstantAutoJoinEnabled) {
+        if (this.isInstantAutoJoinEnabled && !isPrivate) {
           this.manualJoinDiscoveredLink(discItem.id);
         }
       }
@@ -566,55 +587,167 @@ export class BackgroundSyncService {
   }
 
   public clearDiscoveredLinks() {
+    this.joinQueue.forEach((q) => q.resolve(false));
+    this.joinQueue = [];
+    this.isProcessingQueue = false;
     this.discoveredLinks = [];
     telegramDb.discoveredLinks.clear().catch(() => {});
     this.notifyStateChange();
   }
 
+  // Point 2: Helper to detect private channel invite links (+ or joinchat)
+  public isPrivateChannelLink(url: string): boolean {
+    if (!url) return false;
+    return url.includes('+') || url.includes('joinchat') || url.includes('invite=');
+  }
+
+  // Point 1: Rate-limited join function (queued sequentially with 10s cooldown)
   public async manualJoinDiscoveredLink(linkId: string): Promise<boolean> {
     const item = this.discoveredLinks.find((l) => l.id === linkId);
     if (!item) return false;
 
-    item.status = 'joining';
-    this.notifyStateChange();
-
-    try {
-      if (item.url.includes('+') || item.url.includes('joinchat')) {
-        const hash = item.url.split('+')[1] || item.url.split('joinchat/')[1] || '';
-        await connectionsManager.sendRequest({
-          _: 'TL_messages_importChatInvite',
-          hash: hash.split('?')[0].split('/')[0],
-        });
-        item.status = 'joined';
-        item.autoJoined = false;
-        await telegramDb.discoveredLinks
-          .update(linkId, { status: 'joined', autoJoined: false })
-          .catch(() => {});
-        this.notifyStateChange();
-        return true;
-      } else {
-        const username = item.url.replace('https://t.me/', '').replace('http://t.me/', '').split('/')[0];
-        await connectionsManager.sendRequest({
-          _: 'TL_channels_joinChannel',
-          channel: { _: 'inputChannel', channel_id: username, access_hash: '0' },
-        });
-        item.status = 'joined';
-        item.autoJoined = false;
-        await telegramDb.discoveredLinks
-          .update(linkId, { status: 'joined', autoJoined: false })
-          .catch(() => {});
-        this.notifyStateChange();
-        return true;
-      }
-    } catch (e: any) {
+    // Point 2: Prevent private channels immediately
+    if (this.isPrivateChannelLink(item.url)) {
       item.status = 'failed';
-      item.failReason = e?.text || 'INVITE_EXPIRED_OR_PRIVATE';
+      item.failReason = 'PRIVATE_CHANNEL_NOT_ALLOWED';
+      item.autoJoined = false;
       await telegramDb.discoveredLinks
-        .update(linkId, { status: 'failed', failReason: item.failReason })
+        .update(linkId, { status: 'failed', failReason: 'PRIVATE_CHANNEL_NOT_ALLOWED' })
         .catch(() => {});
       this.notifyStateChange();
       return false;
     }
+
+    // Already joined
+    if (item.status === 'joined') {
+      return true;
+    }
+
+    // Prevent duplicate entries in queue
+    if (this.joinQueue.some((q) => q.linkId === linkId)) {
+      return false;
+    }
+
+    // Update status to pending while waiting in queue
+    if (item.status !== 'joining') {
+      item.status = 'pending';
+      this.notifyStateChange();
+    }
+
+    return new Promise<boolean>((resolve, reject) => {
+      this.joinQueue.push({ linkId, resolve, reject });
+      this.processJoinQueue();
+    });
+  }
+
+  // Sequential Queue Processor: enforces 10s delay between any join actions
+  private async processJoinQueue(): Promise<void> {
+    if (this.isProcessingQueue) {
+      return;
+    }
+    if (this.joinQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingQueue = true;
+
+    while (this.joinQueue.length > 0) {
+      const queueItem = this.joinQueue[0];
+      const item = this.discoveredLinks.find((l) => l.id === queueItem.linkId);
+
+      if (!item) {
+        this.joinQueue.shift();
+        queueItem.resolve(false);
+        continue;
+      }
+
+      // Point 1: Rate Limiting - wait 10 seconds since last join execution
+      const now = Date.now();
+      const timeSinceLastJoin = now - this.lastJoinTime;
+      const cooldownMs = 10000; // 10 seconds
+
+      if (this.lastJoinTime > 0 && timeSinceLastJoin < cooldownMs) {
+        const waitMs = cooldownMs - timeSinceLastJoin;
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+
+      // Point 2: Strictly verify not private before executing
+      if (this.isPrivateChannelLink(item.url)) {
+        this.joinQueue.shift();
+        item.status = 'failed';
+        item.failReason = 'PRIVATE_CHANNEL_NOT_ALLOWED';
+        item.autoJoined = false;
+        await telegramDb.discoveredLinks
+          .update(item.id, { status: 'failed', failReason: 'PRIVATE_CHANNEL_NOT_ALLOWED' })
+          .catch(() => {});
+        this.notifyStateChange();
+        queueItem.resolve(false);
+        continue;
+      }
+
+      // Set status to joining
+      item.status = 'joining';
+      this.notifyStateChange();
+
+      let success = false;
+      try {
+        const username = item.url
+          .replace(/^https?:\/\/(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\//i, '')
+          .replace(/^tg:\/\/resolve\?domain=/i, '')
+          .replace(/^@/, '')
+          .split('/')[0]
+          .split('?')[0];
+
+        await connectionsManager.sendRequest({
+          _: 'TL_channels_joinChannel',
+          channel: { _: 'inputChannel', channel_id: username, access_hash: '0' },
+        });
+
+        // Point 3: Immediate notification to Saved Messages upon successful join
+        const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const groupTitle =
+          item.sourceChatTitle && item.sourceChatTitle !== 'محادثة تلغرام'
+            ? item.sourceChatTitle
+            : `@${username}`;
+        const savedMessageText = `✅ تم الانضمام إلى [${groupTitle}] عبر الرابط: [${item.url}] في [${nowTime}].`;
+
+        try {
+          await connectionsManager.sendRequest({
+            _: 'TL_messages_sendMessage',
+            peer_id: 'chat_saved_messages',
+            message: savedMessageText,
+            random_id: Math.floor(Math.random() * 1000000),
+          });
+        } catch (savedErr) {
+          console.warn('[BackgroundSyncService] Notice: could not deliver notification to Saved Messages:', savedErr);
+        }
+
+        item.status = 'joined';
+        item.autoJoined = this.isInstantAutoJoinEnabled;
+        await telegramDb.discoveredLinks
+          .update(item.id, { status: 'joined', autoJoined: item.autoJoined })
+          .catch(() => {});
+        this.notifyStateChange();
+        success = true;
+      } catch (e: any) {
+        item.status = 'failed';
+        item.failReason = e?.text || 'INVITE_EXPIRED_OR_PRIVATE';
+        await telegramDb.discoveredLinks
+          .update(item.id, { status: 'failed', failReason: item.failReason })
+          .catch(() => {});
+        this.notifyStateChange();
+        success = false;
+      }
+
+      // Record last join timestamp to enforce 10s cooldown for subsequent joins
+      this.lastJoinTime = Date.now();
+
+      // Dequeue and resolve promise
+      this.joinQueue.shift();
+      queueItem.resolve(success);
+    }
+
+    this.isProcessingQueue = false;
   }
 
   // ==========================================

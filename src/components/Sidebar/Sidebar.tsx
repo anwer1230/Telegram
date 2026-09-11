@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { List as FixedSizeList, type RowComponentProps } from 'react-window';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTelegram } from '../../context/TelegramContext';
 import { ChatListHeader } from './ChatListHeader';
 import { FolderBar } from './FolderBar';
@@ -16,26 +15,62 @@ import {
   Plus,
   Lock,
   Megaphone,
+  Zap,
+  Phone,
+  UserCheck,
 } from 'lucide-react';
 import { usePullToRefresh, useEdgeSwipeDrawer } from '../../hooks/useTouchGestures';
 import { messagesController } from '../../core/MessagesController';
 import { draftSyncService } from '../../services/DraftSyncService';
-import { Chat } from '../../types';
+import { messageCache } from '../../services/IndexedDBMessageCache';
+import { Message, Chat, User } from '../../types';
+import { List, type RowComponentProps } from 'react-window';
+import {
+  sqliteSearchIndex,
+  type SQLiteMessageHit,
+} from '../../services/SQLiteSearchIndex';
+import { contactsController } from '../../core/messenger/ContactsController';
+import { telegramDB } from '../../utils/sqliteStorage';
 
 interface ChatRowCustomProps {
   sortedChats: Chat[];
   activeChatId: string | null;
 }
 
-const ChatRow = React.memo(({ index, style, sortedChats, activeChatId }: RowComponentProps<ChatRowCustomProps>) => {
+const ChatRow = React.memo(({
+  index,
+  style,
+  sortedChats,
+  activeChatId,
+}: RowComponentProps<ChatRowCustomProps>) => {
   const chat = sortedChats[index];
   if (!chat) return <div style={style} />;
+
   return (
-    <div style={style}>
+    <div style={style} className="w-full">
       <ChatListItem chat={chat} isActive={activeChatId === chat.id} />
     </div>
   );
 });
+
+const renderHighlightedText = (text: string, query: string) => {
+  if (!query || !query.trim() || !text) return text;
+  const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.trim().toLowerCase() ? (
+          <span key={i} className="text-amber-300 font-bold bg-amber-500/25 px-0.5 rounded">
+            {part}
+          </span>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+};
 
 export const Sidebar: React.FC = () => {
   const {
@@ -59,6 +94,7 @@ export const Sidebar: React.FC = () => {
     isSyncing,
     showToast,
     searchTelegramGlobal,
+    openPrivateChat,
   } = useTelegram();
 
   const isArabic = settings.language === 'ar';
@@ -66,8 +102,150 @@ export const Sidebar: React.FC = () => {
   const isSearching = !!searchQuery.trim();
   const q = searchQuery.toLowerCase().trim();
 
+  const [sqliteMsgHits, setSqliteMsgHits] = useState<SQLiteMessageHit[]>([]);
+  const [sqliteContactHits, setSqliteContactHits] = useState<User[]>([]);
+  const [sqliteSearchLatency, setSqliteSearchLatency] = useState<number>(0);
+  const [sqliteEngineName, setSqliteEngineName] = useState<string>('SQLite WASM (Worker FTS4)');
+
   const [cloudSearchResults, setCloudSearchResults] = useState<any[]>([]);
   const [isSearchingCloud, setIsSearchingCloud] = useState(false);
+  const [offlineIndexedMessages, setOfflineIndexedMessages] = useState<Message[]>([]);
+
+  // Prime and synchronize SQLite WASM database with chats, messages & contacts
+  useEffect(() => {
+    let isCancelled = false;
+    const primeIndex = async () => {
+      try {
+        const contactMap = new Map<string, User>();
+        // 1. Gather from ContactsController
+        const ccList = contactsController.getContacts();
+        ccList.forEach((c) => {
+          if (c && c.name) contactMap.set(c.id || c.name, c);
+        });
+
+        // 2. Gather from localStorage saved contacts
+        try {
+          const saved = localStorage.getItem('tg_saved_contacts_v1');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+              parsed.forEach((c: any) => {
+                if (c && c.name) {
+                  contactMap.set(c.id || c.name, {
+                    id: c.id,
+                    name: c.name,
+                    phone: c.phone,
+                    username: c.username,
+                    avatar: c.avatar || '',
+                    isOnline: Boolean(c.isOnline),
+                    bio: c.bio || '',
+                  });
+                }
+              });
+            }
+          }
+        } catch (_) {}
+
+        // 3. Gather from telegramDB
+        try {
+          const dbContacts = telegramDB.getContacts();
+          dbContacts.forEach((c) => {
+            if (c && c.name) contactMap.set(c.id || c.name, c);
+          });
+        } catch (_) {}
+
+        // 4. Gather from direct private chats
+        chats.forEach((chat) => {
+          if (chat.type === 'private' && !chat.isSecret) {
+            const id = chat.id.replace('chat_', '');
+            if (!contactMap.has(id) && !contactMap.has(chat.title)) {
+              contactMap.set(id, {
+                id: chat.id,
+                name: chat.title,
+                username: chat.username,
+                phone: (chat as any).phone,
+                avatar: chat.avatar || '',
+                isOnline: Boolean(chat.isOnline),
+                bio: chat.description || '',
+              });
+            }
+          }
+        });
+
+        if (!isCancelled) {
+          await sqliteSearchIndex.syncFromStore(chats, messages, Array.from(contactMap.values()));
+          const stats = sqliteSearchIndex.getStats();
+          const label = stats.isWorker
+            ? (stats.isWasmEngine ? 'SQLite Worker (FTS4)' : 'SQLite Worker (Indexed)')
+            : (stats.isWasmEngine ? 'SQLite WASM (FTS4)' : 'SQLite WASM');
+          setSqliteEngineName(label);
+        }
+      } catch (err) {
+        console.warn('[Sidebar] Prime SQLite index error:', err);
+      }
+    };
+    primeIndex();
+    return () => {
+      isCancelled = true;
+    };
+  }, [chats, messages]);
+
+  // Instant SQLite WASM search for messages and contacts
+  useEffect(() => {
+    if (!q || q.length < 1) {
+      setSqliteMsgHits([]);
+      setSqliteContactHits([]);
+      setSqliteSearchLatency(0);
+      return;
+    }
+
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      try {
+        const [contactRes, msgRes] = await Promise.all([
+          sqliteSearchIndex.searchContacts(q, { limit: 30 }),
+          sqliteSearchIndex.searchMessages(q, { limit: 40 }),
+        ]);
+
+        if (isMounted) {
+          setSqliteContactHits(contactRes.users);
+          setSqliteMsgHits(msgRes.hits);
+          setSqliteSearchLatency(Math.max(contactRes.latencyMs, msgRes.latencyMs));
+          setSqliteEngineName(msgRes.engine);
+        }
+      } catch (err) {
+        console.warn('[Sidebar] SQLite search error:', err);
+      }
+    }, 40);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [q]);
+
+  useEffect(() => {
+    if (!q || q.length < 2) {
+      setOfflineIndexedMessages([]);
+      return;
+    }
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      try {
+        const results = await messageCache.searchMessagesOffline(q, { limit: 40 });
+        if (isMounted) {
+          setOfflineIndexedMessages(results);
+        }
+      } catch (err) {
+        console.warn('[Sidebar] IndexedDB message search error:', err);
+      }
+    }, 150);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [q]);
 
   useEffect(() => {
     if (!q || q.length < 2) {
@@ -112,72 +290,65 @@ export const Sidebar: React.FC = () => {
     }
   });
 
-  // Collect all conversations with an unsent draft (memoized)
-  const allChatsWithDrafts = useMemo(() => {
-    return chats.filter((chat) => {
-      const d = chat.draft || draftSyncService.getDraftText(chat.id);
-      return Boolean(d && d.trim().length > 0);
-    });
-  }, [chats]);
+  // Collect all conversations with an unsent draft
+  const allChatsWithDrafts = chats.filter((chat) => {
+    const d = chat.draft || draftSyncService.getDraftText(chat.id);
+    return Boolean(d && d.trim().length > 0);
+  });
 
-  // Filter drafts matching current search query (memoized)
-  const matchingDraftChats = useMemo(() => {
-    return allChatsWithDrafts.filter((chat) => {
-      if (!q) return true;
-      const d = chat.draft || draftSyncService.getDraftText(chat.id);
-      return (
-        chat.title.toLowerCase().includes(q) ||
-        chat.username?.toLowerCase().includes(q) ||
-        (d && d.toLowerCase().includes(q))
-      );
-    });
-  }, [allChatsWithDrafts, q]);
+  // Filter drafts matching current search query (title, handle, or draft text)
+  const matchingDraftChats = allChatsWithDrafts.filter((chat) => {
+    if (!q) return true;
+    const d = chat.draft || draftSyncService.getDraftText(chat.id);
+    return (
+      chat.title.toLowerCase().includes(q) ||
+      chat.username?.toLowerCase().includes(q) ||
+      (d && d.toLowerCase().includes(q))
+    );
+  });
 
-  // Grouped search categories for search overlay (memoized)
-  const matchingChats = useMemo(() => {
-    if (!isSearching) return [];
-    return chats.filter((chat) => {
-      const d = chat.draft || draftSyncService.getDraftText(chat.id);
-      return (
-        chat.title.toLowerCase().includes(q) ||
-        chat.username?.toLowerCase().includes(q) ||
-        chat.lastMessage?.text?.toLowerCase().includes(q) ||
-        (d && d.toLowerCase().includes(q))
-      );
-    });
-  }, [chats, isSearching, q]);
-
-  const matchingBots = useMemo(() => matchingChats.filter((c) => c.type === 'bot'), [matchingChats]);
-  const matchingChannelsAndGroups = useMemo(
-    () => matchingChats.filter((c) => c.type === 'channel' || c.type === 'group'),
-    [matchingChats]
+  // Grouped search categories for search overlay
+  const matchingChats = chats.filter((chat) => {
+    if (!isSearching) return true;
+    const d = chat.draft || draftSyncService.getDraftText(chat.id);
+    return (
+      chat.title.toLowerCase().includes(q) ||
+      chat.username?.toLowerCase().includes(q) ||
+      chat.lastMessage?.text?.toLowerCase().includes(q) ||
+      (d && d.toLowerCase().includes(q))
+    );
+  });
+  const matchingBots = matchingChats.filter((c) => c.type === 'bot');
+  const matchingChannelsAndGroups = matchingChats.filter(
+    (c) => c.type === 'channel' || c.type === 'group'
   );
-  const matchingChannels = useMemo(() => matchingChats.filter((c) => c.type === 'channel'), [matchingChats]);
-  const matchingGroups = useMemo(() => matchingChats.filter((c) => c.type === 'group'), [matchingChats]);
-  const matchingPrivateChats = useMemo(
-    () => matchingChats.filter((c) => c.type === 'private' || c.type === 'saved' || c.isSecret),
-    [matchingChats]
+  const matchingChannels = matchingChats.filter((c) => c.type === 'channel');
+  const matchingGroups = matchingChats.filter((c) => c.type === 'group');
+  const matchingPrivateChats = matchingChats.filter(
+    (c) => c.type === 'private' || c.type === 'saved' || c.isSecret
   );
 
-  // Search inside all messages (memoized with cap to keep UI ultra-responsive)
-  const matchingMessagesList = useMemo(() => {
-    if (!isSearching) return [];
-    const results: {
-      chatId: string;
-      chatTitle: string;
-      chatAvatar: string;
-      msgId: string;
-      text: string;
-      date: string;
-    }[] = [];
+  // Search inside all messages (combining in-memory state + IndexedDB MultiEntry token index)
+  const matchingMessagesList: {
+    chatId: string;
+    chatTitle: string;
+    chatAvatar: string;
+    msgId: string;
+    text: string;
+    date: string;
+  }[] = [];
 
-    const chatMap = new Map(chats.map((c) => [c.id, c]));
-    for (const [cId, msgList] of Object.entries(messages)) {
-      const parentChat = chatMap.get(cId);
+  if (isSearching) {
+    const seenMsgIds = new Set<string>();
+
+    // 1. In-memory messages for active conversations
+    Object.entries(messages).forEach(([cId, msgList]) => {
+      const parentChat = chats.find((c) => c.id === cId);
       const list = Array.isArray(msgList) ? msgList : [];
-      for (const m of list) {
+      list.forEach((m) => {
         if (m.text && m.text.toLowerCase().includes(q)) {
-          results.push({
+          seenMsgIds.add(String(m.id));
+          matchingMessagesList.push({
             chatId: cId,
             chatTitle: parentChat?.title || m.senderName || 'Chat',
             chatAvatar: parentChat?.avatar || m.senderAvatar || '',
@@ -185,25 +356,57 @@ export const Sidebar: React.FC = () => {
             text: m.text,
             date: m.timestamp,
           });
-          if (results.length >= 25) break;
         }
+      });
+    });
+
+    // 2. High-speed IndexedDB token-indexed offline messages across entire history
+    for (const m of offlineIndexedMessages) {
+      if (!seenMsgIds.has(String(m.id))) {
+        seenMsgIds.add(String(m.id));
+        const parentChat = chats.find((c) => c.id === m.chatId);
+        matchingMessagesList.push({
+          chatId: m.chatId,
+          chatTitle: parentChat?.title || m.senderName || 'Chat',
+          chatAvatar: parentChat?.avatar || m.senderAvatar || '',
+          msgId: m.id,
+          text: m.text,
+          date: m.timestamp,
+        });
       }
-      if (results.length >= 25) break;
     }
-    return results;
-  }, [isSearching, chats, messages, q]);
+  }
 
-  // Exact DrKLO MessagesController & DialogsAdapter sorting algorithm (memoized)
-  const sortedChats = useMemo(() => {
-    return messagesController.sortDialogs(
-      chats,
-      isSearching ? 'all' : activeFolderId,
-      searchQuery
-    );
-  }, [chats, isSearching, activeFolderId, searchQuery]);
+  // Exact DrKLO MessagesController & DialogsAdapter sorting algorithm
+  const sortedChats = messagesController.sortDialogs(
+    chats,
+    isSearching ? 'all' : activeFolderId,
+    searchQuery
+  );
 
-  const isThreeLines = settings.chatListViewMode === 'three_lines';
-  const chatRowHeight = isThreeLines ? 88 : 72;
+  const chatRowProps = useMemo<ChatRowCustomProps>(() => ({
+    sortedChats,
+    activeChatId,
+  }), [sortedChats, activeChatId]);
+
+  const getChatRowKey = useCallback((index: number, data: ChatRowCustomProps) => {
+    return data.sortedChats[index]?.id || index;
+  }, []);
+
+  const [renderLimit, setRenderLimit] = useState(40);
+
+  useEffect(() => {
+    setRenderLimit(40);
+  }, [activeFolderId, searchQuery]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollTop + target.clientHeight >= target.scrollHeight - 350) {
+      if (renderLimit < sortedChats.length) {
+        setRenderLimit((prev) => Math.min(prev + 40, sortedChats.length));
+      }
+    }
+  };
 
   return (
     <div
@@ -250,14 +453,13 @@ export const Sidebar: React.FC = () => {
         </div>
       )}
 
-      {/* Chat List Scrollable Feed */}
+      {/* Chat List Feed (Virtualized via react-window for peak responsiveness) */}
       <div
         id="conversation-list-container"
         data-conversation-list="true"
+        onScroll={isSearchMode ? handleScroll : undefined}
         {...pullHandlers}
-        className={`flex-1 divide-y divide-white/5 py-1 ${
-          !isSearchMode && sortedChats.length > 25 ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'
-        }`}
+        className={`flex-1 min-h-0 ${isSearchMode ? 'overflow-y-auto divide-y divide-white/5 py-1' : 'overflow-hidden'}`}
       >
         {isSearchMode ? (
           <div className="space-y-3 p-1">
@@ -382,9 +584,110 @@ export const Sidebar: React.FC = () => {
               </div>
             )}
 
+            {/* 5.5 CONTACTS Only Filter (from SQLite WASM FTS4) */}
+            {searchFilter === 'contacts' && (
+              <div className="space-y-1 p-2">
+                <div className="flex items-center justify-between px-2 py-1 text-[11px] font-bold text-sky-400 uppercase tracking-wider">
+                  <div className="flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-sky-400" />
+                    <span>{isArabic ? 'جهات الاتصال المفهرسة' : 'Indexed Contacts'} ({sqliteContactHits.length})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {sqliteSearchLatency > 0 && (
+                      <span className="text-[10px] font-mono text-emerald-400">
+                        ⚡ {sqliteSearchLatency}ms
+                      </span>
+                    )}
+                    <span className="text-[10px] font-mono text-gray-400">
+                      {sqliteEngineName}
+                    </span>
+                  </div>
+                </div>
+
+                {sqliteContactHits.length > 0 ? (
+                  <div className="space-y-1">
+                    {sqliteContactHits.map((contact) => (
+                      <button
+                        key={`contact-tab-${contact.id}`}
+                        onClick={() => {
+                          openPrivateChat(contact.id, contact.name, contact.avatar, contact.username);
+                        }}
+                        className="w-full p-2.5 rounded-xl hover:bg-white/5 text-left rtl:text-right flex items-center justify-between gap-3 transition-colors group cursor-pointer border border-transparent hover:border-white/5"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="relative shrink-0">
+                            {contact.avatar ? (
+                              <img
+                                src={contact.avatar}
+                                alt=""
+                                className="w-10 h-10 rounded-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-sky-600 to-cyan-500 text-white font-bold text-sm flex items-center justify-center shadow-inner">
+                                {contact.name.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            {contact.isOnline && (
+                              <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#17212b] rounded-full" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-white group-hover:text-sky-300 transition-colors truncate">
+                              {renderHighlightedText(contact.name, q)}
+                            </div>
+                            <div className="text-xs text-gray-400 truncate flex items-center gap-2">
+                              {contact.username && (
+                                <span className="text-sky-400 font-mono">
+                                  @{contact.username}
+                                </span>
+                              )}
+                              {contact.phone && <span>{contact.phone}</span>}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 flex items-center gap-1 opacity-80 group-hover:opacity-100">
+                          <span className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-sky-500/20 text-sky-300 flex items-center gap-1.5 group-hover:bg-sky-500 group-hover:text-white transition-all">
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>{isArabic ? 'محادثة' : 'Chat'}</span>
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-xs text-gray-400 flex flex-col items-center gap-2">
+                    <Users className="w-8 h-8 text-gray-500 opacity-50" />
+                    <span>{isArabic ? 'لم يتم العثور على جهات اتصال مطابقة' : 'No matching contacts found'}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 6. ALL Filter (Categorized view with Drafts at the top) */}
             {searchFilter === 'all' && (
               <>
+                {/* SQLite WASM High-Performance Search Performance Badge */}
+                {isSearching && (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-gradient-to-r from-sky-950/40 via-purple-950/30 to-black/20 border-b border-white/5 text-[10px] text-gray-300 mx-1 mb-2 rounded-lg">
+                    <div className="flex items-center gap-1.5">
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      <span className="font-semibold text-white">
+                        {isArabic ? 'محرك البحث الفوري' : 'Instant Search'}
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-300 font-mono font-bold text-[9px]">
+                        {sqliteEngineName}
+                      </span>
+                    </div>
+                    {sqliteSearchLatency > 0 && (
+                      <span className="text-[10px] font-mono text-emerald-400 font-semibold flex items-center gap-1">
+                        ⚡ {sqliteSearchLatency}ms
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Drafts Category in All View */}
                 {matchingDraftChats.length > 0 && (
                   <div className="border-b border-rose-500/20 pb-2 mb-2">
@@ -408,80 +711,63 @@ export const Sidebar: React.FC = () => {
                   </div>
                 )}
 
-                {/* Bots Category */}
-                {matchingBots.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold text-sky-400 uppercase tracking-wider">
-                      <Bot className="w-3.5 h-3.5" />
-                      <span>{isArabic ? 'البوتات (Bots)' : 'Bots'}</span>
+                {/* SQLite WASM Contacts & People */}
+                {sqliteContactHits.length > 0 && (
+                  <div className="border-b border-sky-500/20 pb-2 mb-2">
+                    <div className="flex items-center justify-between px-3 py-1.5 text-[11px] font-bold text-sky-400 uppercase tracking-wider bg-sky-500/10 rounded-lg mx-1 mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-sky-400" />
+                        <span>
+                          {isArabic ? 'جهات الاتصال والأشخاص' : 'Contacts & People'} ({sqliteContactHits.length})
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setSearchFilter('contacts')}
+                        className="text-[10px] text-sky-300 hover:text-sky-200 lowercase font-medium hover:underline cursor-pointer"
+                      >
+                        {isArabic ? 'عرض الكل' : 'View all'}
+                      </button>
                     </div>
-                    {matchingBots.map((chat) => (
-                      <ChatListItem key={chat.id} chat={chat} isActive={activeChatId === chat.id} />
-                    ))}
-                  </div>
-                )}
-
-                {/* Channels & Groups Category */}
-                {matchingChannelsAndGroups.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
-                      <Radio className="w-3.5 h-3.5" />
-                      <span>{isArabic ? 'القنوات والمجموعات' : 'Channels & Groups'}</span>
-                    </div>
-                    {matchingChannelsAndGroups.map((chat) => (
-                      <ChatListItem key={chat.id} chat={chat} isActive={activeChatId === chat.id} />
-                    ))}
-                  </div>
-                )}
-
-                {/* Private & Saved Messages */}
-                {matchingPrivateChats.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold text-amber-400 uppercase tracking-wider">
-                      <Users className="w-3.5 h-3.5" />
-                      <span>{isArabic ? 'المحادثات المباشرة' : 'Chats & Contacts'}</span>
-                    </div>
-                    {matchingPrivateChats.map((chat) => (
-                      <ChatListItem key={chat.id} chat={chat} isActive={activeChatId === chat.id} />
-                    ))}
-                  </div>
-                )}
-
-                {/* Matching Messages */}
-                {matchingMessagesList.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold text-purple-400 uppercase tracking-wider">
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span>{isArabic ? 'الرسائل المطابقة' : 'Matching Messages'} ({matchingMessagesList.length})</span>
-                    </div>
-                    <div className="space-y-1 px-1">
-                      {matchingMessagesList.slice(0, 8).map((m) => (
+                    <div className="space-y-0.5 px-1">
+                      {sqliteContactHits.slice(0, 5).map((contact) => (
                         <button
-                          key={m.msgId}
+                          key={`sqlite-contact-${contact.id}`}
                           onClick={() => {
-                            setActiveChatId(m.chatId);
+                            openPrivateChat(contact.id, contact.name, contact.avatar, contact.username);
                           }}
-                          className="w-full p-2 rounded-xl hover:bg-white/5 text-left rtl:text-right flex items-start gap-2.5 transition-colors"
+                          className="w-full p-2 rounded-xl hover:bg-white/5 text-left rtl:text-right flex items-center justify-between gap-3 transition-colors group cursor-pointer"
                         >
-                          {m.chatAvatar ? (
-                            <img
-                              src={m.chatAvatar}
-                              alt=""
-                              className="w-7 h-7 rounded-full object-cover shrink-0 mt-0.5"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-[#2481cc] text-white font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
-                              {m.chatTitle.charAt(0).toUpperCase()}
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="relative shrink-0">
+                              {contact.avatar ? (
+                                <img
+                                  src={contact.avatar}
+                                  alt=""
+                                  className="w-8 h-8 rounded-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-600 to-cyan-500 text-white font-bold text-xs flex items-center justify-center">
+                                  {contact.name.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              {contact.isOnline && (
+                                <span className="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 border border-[#17212b] rounded-full" />
+                              )}
                             </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-semibold text-sky-400 truncate">{m.chatTitle}</span>
-                              <span className="text-[10px] text-gray-500">{m.date}</span>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-white group-hover:text-sky-300 truncate">
+                                {renderHighlightedText(contact.name, q)}
+                              </div>
+                              <div className="text-[10px] text-gray-400 truncate">
+                                {contact.username ? `@${contact.username}` : (contact.phone || (isArabic ? 'جهة اتصال' : 'Contact'))}
+                              </div>
                             </div>
-                            <p className="text-xs text-gray-300 truncate mt-0.5">{m.text}</p>
                           </div>
+                          <span className="text-[10px] text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 font-medium">
+                            <MessageSquare className="w-3 h-3" />
+                            <span>{isArabic ? 'محادثة' : 'Chat'}</span>
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -538,12 +824,14 @@ export const Sidebar: React.FC = () => {
                 {/* Empty State */}
                 {matchingDraftChats.length === 0 &&
                   matchingChats.length === 0 &&
+                  sqliteContactHits.length === 0 &&
+                  sqliteMsgHits.length === 0 &&
                   matchingMessagesList.length === 0 &&
                   cloudSearchResults.length === 0 &&
                   !isSearchingCloud && (
                     <div className="p-8 text-center text-xs text-gray-400 flex flex-col items-center gap-2">
                       <Globe className="w-8 h-8 text-gray-500 opacity-50" />
-                      <span>{isArabic ? 'لم يتم العثور على أي نتائج مطابقة في سحابة تيليجرام' : 'No matching results found in Telegram cloud'}</span>
+                      <span>{isArabic ? 'لم يتم العثور على أي نتائج مطابقة' : 'No matching results found'}</span>
                     </div>
                   )}
               </>
@@ -553,21 +841,17 @@ export const Sidebar: React.FC = () => {
           <div className="p-8 text-center text-xs text-gray-400">
             {isArabic ? 'لم يتم العثور على محادثات' : 'No chats found'}
           </div>
-        ) : sortedChats.length > 25 ? (
-          <FixedSizeList
-            id="conversation-list-virtual"
-            className="flex-1 w-full h-full overflow-y-auto divide-y divide-white/5"
-            rowCount={sortedChats.length}
-            rowHeight={chatRowHeight}
-            rowComponent={ChatRow as any}
-            rowProps={{ sortedChats, activeChatId }}
-            overscanCount={6}
-            style={{ height: '100%', width: '100%' }}
-          />
         ) : (
-          sortedChats.map((chat) => (
-            <ChatListItem key={chat.id} chat={chat} isActive={activeChatId === chat.id} />
-          ))
+          <List
+            id="tg-sidebar-virtual-list"
+            className="w-full h-full overflow-y-auto overscroll-contain"
+            rowCount={sortedChats.length}
+            rowHeight={settings.chatListViewMode === 'three_lines' ? 84 : 72}
+            rowComponent={ChatRow as any}
+            rowProps={chatRowProps}
+            rowKey={getChatRowKey}
+            overscanCount={6}
+          />
         )}
       </div>
 

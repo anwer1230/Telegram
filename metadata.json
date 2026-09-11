@@ -1,6 +1,6 @@
 {
   "name": "Telegram_Anwer",
-  "description": "تطبيق تيليجرام الرسمي المتقدم (Telegram_Anwer) مع دعم تثبيت التطبيق المباشر كـ APK و PWA، والمزامنة السحابية عبر Firebase، ومحادثات وقنوات ومكالمات ورسائل صوتية، وشريط الأدوات الذكية المكون من 9 وظائف أتمتة وهندسة متقدمة مع الذكاء الاصطناعي.",
+  "description": "تطبيق تيليجرام الرسمي المتقدم (Telegram_Anwer) مع دعم رادار المراقبة والانضمام الفوري للروابط (Link Monitor & Auto-Join Radar)، وتثبيت التطبيق المباشر كـ APK و PWA، والمزامنة السحابية عبر Firebase، ومحادثات وقنوات ومكالمات ورسائل صوتية، وشريط الأدوات الذكية المتقدم.",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

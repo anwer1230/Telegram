@@ -290,7 +290,8 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined,
         transition: swipeOffset ? 'none' : 'transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1)',
       }}
-      className={`group relative flex items-end gap-2 px-3 py-0.5 select-none transition-colors ${
+      dir="ltr"
+      className={`group relative flex items-end gap-2 px-2 sm:px-3 py-0.5 select-none transition-colors w-full ${
         isOutgoing ? 'justify-end' : 'justify-start'
       } ${isSelected ? 'bg-sky-500/15' : ''}`}
     >
@@ -358,7 +359,12 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
       )}
 
       {/* Bubble Container */}
-      <div className="relative max-w-[85%] sm:max-w-[70%] md:max-w-[65%] flex flex-col">
+      <div
+        dir={isArabic ? 'rtl' : 'auto'}
+        className={`relative max-w-[85%] sm:max-w-[75%] md:max-w-[65%] min-w-0 flex flex-col ${
+          isOutgoing ? 'items-end' : 'items-start'
+        }`}
+      >
         {/* Quick Reaction popup on hover */}
         <div
           className={`absolute -top-7 ${
@@ -461,7 +467,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
           </div>
         ) : (
           <div
-            className={`relative px-3.5 py-2 text-sm shadow-sm transition-all ${
+            className={`relative px-3.5 py-2 text-sm shadow-sm transition-all min-w-0 max-w-full overflow-hidden ${
               isOutgoing
                 ? 'tg-bubble-out text-[var(--tg-theme-bubble-out-text)] self-end'
                 : 'tg-bubble-in text-[var(--tg-theme-bubble-in-text)] self-start'
@@ -538,11 +544,27 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
             {/* Reply Quote Header */}
             {message.replyTo && (
               <div
-                className={`mb-1.5 p-1.5 rounded-lg border-l-2 text-xs flex flex-col ${
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (message.replyTo?.messageId) {
+                    window.dispatchEvent(
+                      new CustomEvent('tg-scroll-to-message', {
+                        detail: { messageId: message.replyTo.messageId },
+                      })
+                    );
+                    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                      try {
+                        navigator.vibrate(15);
+                      } catch {}
+                    }
+                  }
+                }}
+                className={`mb-1.5 p-1.5 rounded-lg border-l-2 text-xs flex flex-col cursor-pointer transition-all duration-150 hover:opacity-90 active:scale-[0.99] select-none ${
                   isOutgoing
-                    ? 'bg-black/10 border-white/40'
-                    : 'bg-black/15 border-sky-400'
+                    ? 'bg-black/10 hover:bg-black/15 border-white/40'
+                    : 'bg-black/15 hover:bg-black/20 border-sky-400'
                 } rtl:border-l-0 rtl:border-r-2`}
+                title={isArabic ? 'انقر للانتقال للرسالة الأصلية' : 'Click to jump to original message'}
               >
                 <span className="font-bold text-[11px] text-sky-400 truncate">
                   {message.replyTo.senderName}
@@ -668,7 +690,10 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
 
             {/* Message Text with interactive links, mentions, and custom animated emojis */}
             {message.text && (
-              <div className="whitespace-pre-wrap break-words leading-relaxed">
+              <div
+                dir="auto"
+                className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed text-start select-text"
+              >
                 {renderInteractiveMessageText(message.text, handleLinkClick)}
               </div>
             )}
@@ -689,22 +714,22 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
                     display: linkPreview.displayUrl,
                   });
                 }}
-                className="mt-2 p-2.5 rounded-xl border border-sky-400/30 bg-sky-500/10 hover:bg-sky-500/15 transition-colors cursor-pointer border-l-2 rtl:border-l-0 rtl:border-r-2 border-l-sky-400 rtl:border-r-sky-400 space-y-1 select-none"
+                className="mt-2 p-2.5 rounded-xl border border-sky-400/30 bg-sky-500/10 hover:bg-sky-500/15 transition-colors cursor-pointer border-l-2 rtl:border-l-0 rtl:border-r-2 border-l-sky-400 rtl:border-r-sky-400 space-y-1 select-none min-w-0 max-w-full overflow-hidden"
               >
                 <div className="flex items-center justify-between text-[11px] font-bold text-sky-400">
-                  <div className="flex items-center gap-1 truncate">
+                  <div className="flex items-center gap-1 truncate min-w-0">
                     {linkPreview.type === 'telegram_channel' && (
                       <Megaphone className="w-3 h-3 text-sky-400 shrink-0" />
                     )}
-                    <span>{linkPreview.siteName || 'Link'}</span>
+                    <span className="truncate">{linkPreview.siteName || 'Link'}</span>
                   </div>
                   <ExternalLink className="w-3 h-3 text-sky-400/70 shrink-0 ml-1 rtl:ml-0 rtl:mr-1" />
                 </div>
-                <div className="text-xs font-bold text-white line-clamp-1 leading-snug">
+                <div className="text-xs font-bold text-white line-clamp-1 leading-snug break-words [overflow-wrap:anywhere]">
                   {linkPreview.title}
                 </div>
                 {linkPreview.description && (
-                  <div className="text-[11px] text-gray-300 line-clamp-2 leading-relaxed">
+                  <div className="text-[11px] text-gray-300 line-clamp-2 leading-relaxed break-words [overflow-wrap:anywhere]">
                     {linkPreview.description}
                   </div>
                 )}
@@ -723,9 +748,8 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
 
             {/* Metadata footer: Secret Badge + (edited) + Pinned + Time + Read status */}
             <div
-              className={`flex items-center gap-1 text-[10px] mt-1 select-none ${
-                isOutgoing ? 'justify-end' : 'justify-end'
-              } opacity-70`}
+              dir="ltr"
+              className="flex items-center gap-1 text-[10px] mt-1 select-none justify-end opacity-70"
             >
               {message.isSecret && (
                 <span className="inline-flex items-center gap-0.5 text-emerald-400 text-[9px] font-bold">

@@ -18,6 +18,7 @@
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
+    "@types/ioredis": "^5.0.0",
     "@types/simple-peer": "^9.11.9",
     "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^5.0.4",
@@ -29,6 +30,7 @@
     "idb": "^8.0.3",
     "idb-keyval": "^6.3.0",
     "input": "^1.0.1",
+    "ioredis": "^6.0.0",
     "libphonenumber-js": "^1.13.12",
     "lottie-react": "^3.1.0",
     "lucide-react": "^0.546.0",
@@ -45,7 +47,8 @@
     "sql.js": "^1.14.2",
     "telegram": "^2.26.22",
     "vite": "^6.2.3",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@types/canvas-confetti": "^1.9.0",

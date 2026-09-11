@@ -15,6 +15,8 @@ import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import { Message } from '../types';
 import { getTelegramEpoch } from '../utils/dateUtils';
 
+export type IndexedMediaType = 'photo' | 'video' | 'document' | 'voice' | 'audio' | 'link' | 'none';
+
 export interface CachedMessageRecord {
   /** Composite key: `${chatId}_${id}` */
   compoundKey: string;
@@ -51,6 +53,15 @@ export interface CachedMessageRecord {
   peerId?: string;
   cachedAt: number;
   rawPayload?: any;
+
+  // --- IndexedDB Strategy Accelerated Query Fields ---
+  mediaType: IndexedMediaType;
+  hasMedia: number; // 1 or 0 for clean B-tree compound range indexing
+  hasLink: number; // 1 or 0
+  isPinnedNum: number; // 1 or 0
+  isOutgoingNum: number; // 1 or 0
+  hasReactions: number; // 1 or 0
+  searchTokens: string[]; // Normalized full-text search tokens for multiEntry index
 }
 
 export interface ChatMetadataRecord {
@@ -76,6 +87,38 @@ export interface CachedPayloadRecord {
   cachedAt: number;
 }
 
+export interface MessageFilterOptions {
+  chatId?: string;
+  mediaType?: IndexedMediaType | 'any_media';
+  senderId?: string;
+  isPinned?: boolean;
+  status?: Message['status'];
+  query?: string;
+  fromDate?: number;
+  toDate?: number;
+  offsetId?: string;
+  beforeNumericDate?: number;
+  limit?: number;
+  direction?: 'prev' | 'next';
+}
+
+export interface IndexingStats {
+  totalMessages: number;
+  chatCount: number;
+  mediaCounts: {
+    photos: number;
+    videos: number;
+    files: number;
+    voice: number;
+    audio: number;
+    links: number;
+  };
+  pinnedCount: number;
+  pendingOutgoingCount: number;
+  storageEstimateBytes?: number;
+  storageQuotaBytes?: number;
+}
+
 export interface TelegramMessageDBSchema extends DBSchema {
   messages: {
     key: string; // compoundKey `${chatId}_${id}`
@@ -85,6 +128,15 @@ export interface TelegramMessageDBSchema extends DBSchema {
       by_chat_date: [string, number];
       by_numericDate: number;
       by_cachedAt: number;
+      by_chat_media_type: [string, string, number];
+      by_media_type: [string, number];
+      by_chat_pinned: [string, number, number];
+      by_chat_sender_date: [string, string, number];
+      by_status_date: [string, number];
+      by_chat_status: [string, string];
+      by_search_tokens: string;
+      by_chat_has_media: [string, number, number];
+      by_chat_has_link: [string, number, number];
     };
   };
   chat_metadata: {
@@ -102,7 +154,59 @@ export interface TelegramMessageDBSchema extends DBSchema {
 }
 
 const DB_NAME = 'telegram_client_message_cache_v2';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Upgraded for high-speed indexing & filtering strategy
+
+/**
+ * Text tokenizer with Arabic diacritics stripping, Unicode letter extraction,
+ * and search token normalization for the multiEntry search index.
+ */
+export function tokenizeMessageText(
+  text: string,
+  senderName?: string,
+  mediaFilename?: string
+): string[] {
+  const combined = `${text || ''} ${senderName || ''} ${mediaFilename || ''}`.trim();
+  if (!combined) return [];
+
+  // 1. Normalize Arabic letters and strip tashkeel (diacritics)
+  const normalized = combined
+    .replace(/[\u064B-\u065F\u0670]/g, '') // remove tashkeel
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .toLowerCase();
+
+  // 2. Extract words matching alphanumeric or unicode letters
+  const rawTokens = normalized.match(/[\p{L}\p{N}]+/gu) || [];
+  const tokenSet = new Set<string>();
+
+  for (const tok of rawTokens) {
+    if (tok.length >= 2 && tok.length <= 32) {
+      tokenSet.add(tok);
+      if (tokenSet.size >= 64) break; // bounded size for performance
+    }
+  }
+
+  return Array.from(tokenSet);
+}
+
+/**
+ * Derives normalized media category from message payload
+ */
+export function deriveIndexedMediaType(msg: Message): IndexedMediaType {
+  if (msg.media) {
+    const t = msg.media.type;
+    if (t === 'photo') return 'photo';
+    if (t === 'video') return 'video';
+    if (t === 'voice') return 'voice';
+    if (t === 'audio') return 'audio';
+    if (t === 'document') return 'document';
+  }
+  if (msg.linkPreview || (msg.text && /(https?:\/\/[^\s]+|t\.me\/[^\s]+)/i.test(msg.text))) {
+    return 'link';
+  }
+  return 'none';
+}
 
 export class IndexedDBMessageCache {
   private static instance: IndexedDBMessageCache | null = null;
@@ -139,12 +243,63 @@ export class IndexedDBMessageCache {
         console.log(`[IndexedDBMessageCache] Upgrading database from v${oldVersion} to v${DB_VERSION}`);
 
         // 1. Messages Store
+        let messageStore: any;
         if (!db.objectStoreNames.contains('messages')) {
-          const messageStore = db.createObjectStore('messages', { keyPath: 'compoundKey' });
+          messageStore = db.createObjectStore('messages', { keyPath: 'compoundKey' });
+        } else {
+          messageStore = transaction.objectStore('messages');
+        }
+
+        // Base & Chronological Indexes
+        if (!messageStore.indexNames.contains('by_chatId')) {
           messageStore.createIndex('by_chatId', 'chatId', { unique: false });
+        }
+        if (!messageStore.indexNames.contains('by_chat_date')) {
           messageStore.createIndex('by_chat_date', ['chatId', 'numericDate'], { unique: false });
+        }
+        if (!messageStore.indexNames.contains('by_numericDate')) {
           messageStore.createIndex('by_numericDate', 'numericDate', { unique: false });
+        }
+        if (!messageStore.indexNames.contains('by_cachedAt')) {
           messageStore.createIndex('by_cachedAt', 'cachedAt', { unique: false });
+        }
+
+        // --- High-Performance Strategy Indexes for Offline-First Filtering ---
+        // 1. Media Type per Chat: Instant Shared Media tabs (photos, files, voice, music, links)
+        if (!messageStore.indexNames.contains('by_chat_media_type')) {
+          messageStore.createIndex('by_chat_media_type', ['chatId', 'mediaType', 'numericDate'], { unique: false });
+        }
+        // 2. Global Media Type: Cross-chat offline gallery
+        if (!messageStore.indexNames.contains('by_media_type')) {
+          messageStore.createIndex('by_media_type', ['mediaType', 'numericDate'], { unique: false });
+        }
+        // 3. Pinned Messages per Chat: Direct retrieval of pinned messages
+        if (!messageStore.indexNames.contains('by_chat_pinned')) {
+          messageStore.createIndex('by_chat_pinned', ['chatId', 'isPinnedNum', 'numericDate'], { unique: false });
+        }
+        // 4. Sender Filter per Chat: Messages from specific user in group/channel
+        if (!messageStore.indexNames.contains('by_chat_sender_date')) {
+          messageStore.createIndex('by_chat_sender_date', ['chatId', 'senderId', 'numericDate'], { unique: false });
+        }
+        // 5. Outgoing Offline Queue: Pending and error messages needing dispatch retry
+        if (!messageStore.indexNames.contains('by_status_date')) {
+          messageStore.createIndex('by_status_date', ['status', 'numericDate'], { unique: false });
+        }
+        // 6. Chat status compound index
+        if (!messageStore.indexNames.contains('by_chat_status')) {
+          messageStore.createIndex('by_chat_status', ['chatId', 'status'], { unique: false });
+        }
+        // 7. Full-Text Search Multi-Entry Index: Normalized word tokens
+        if (!messageStore.indexNames.contains('by_search_tokens')) {
+          messageStore.createIndex('by_search_tokens', 'searchTokens', { unique: false, multiEntry: true });
+        }
+        // 8. Messages with any media attachment
+        if (!messageStore.indexNames.contains('by_chat_has_media')) {
+          messageStore.createIndex('by_chat_has_media', ['chatId', 'hasMedia', 'numericDate'], { unique: false });
+        }
+        // 9. Messages with links or preview
+        if (!messageStore.indexNames.contains('by_chat_has_link')) {
+          messageStore.createIndex('by_chat_has_link', ['chatId', 'hasLink', 'numericDate'], { unique: false });
         }
 
         // 2. Chat Metadata Store
@@ -178,6 +333,15 @@ export class IndexedDBMessageCache {
     const rawId = String(msg.id || Date.now());
     const compoundKey = `${chatId}_${rawId}`;
     const numericDate = msg.epoch || msg.rawDate || getTelegramEpoch(msg);
+
+    const mediaType = deriveIndexedMediaType(msg);
+    const hasMedia = mediaType !== 'none' && mediaType !== 'link' ? 1 : 0;
+    const hasLink = mediaType === 'link' || /(https?:\/\/[^\s]+|t\.me\/[^\s]+)/i.test(msg.text || '') ? 1 : 0;
+    const isPinnedNum = msg.isPinned ? 1 : 0;
+    const isOutgoingNum = Boolean(msg.isOutgoing || msg.out) ? 1 : 0;
+    const hasReactions = msg.reactions && msg.reactions.length > 0 ? 1 : 0;
+    const mediaTitle = msg.media?.fileName || msg.linkPreview?.title;
+    const searchTokens = tokenizeMessageText(msg.text || '', msg.senderName, mediaTitle);
 
     return {
       compoundKey,
@@ -214,6 +378,13 @@ export class IndexedDBMessageCache {
       peerId: msg.peerId,
       cachedAt: Date.now(),
       rawPayload,
+      mediaType,
+      hasMedia,
+      hasLink,
+      isPinnedNum,
+      isOutgoingNum,
+      hasReactions,
+      searchTokens,
     };
   }
 
@@ -638,9 +809,469 @@ export class IndexedDBMessageCache {
     }
   }
 
+  // =========================================================================
+  // INDEXEDDB STRATEGY: ACCELERATED RETRIEVAL & FILTERING ENGINE
+  // =========================================================================
+
   /**
-   * Clears all cached messages and metadata for a specific chat.
+   * High-performance filtered query planner using the optimal IndexedDB index.
+   * Directly queries the B-tree indexes rather than in-memory scanning.
    */
+  public async filterMessages(options: MessageFilterOptions): Promise<Message[]> {
+    const db = await this.getDB();
+    if (!db) return [];
+
+    const limit = Math.max(1, Math.min(options.limit || 50, 200));
+    const direction: IDBCursorDirection = options.direction === 'next' ? 'next' : 'prev';
+
+    try {
+      const tx = db.transaction('messages', 'readonly');
+      const store = tx.objectStore('messages');
+      const results: CachedMessageRecord[] = [];
+
+      // Query Planner Selection:
+      if (options.chatId && options.mediaType && options.mediaType !== 'any_media') {
+        // Query Plan 1: by_chat_media_type [chatId, mediaType, numericDate]
+        const minDate = options.fromDate || 0;
+        const maxDate = options.beforeNumericDate || options.toDate || Infinity;
+        const range = IDBKeyRange.bound(
+          [options.chatId, options.mediaType, minDate],
+          [options.chatId, options.mediaType, maxDate]
+        );
+        const index = store.index('by_chat_media_type');
+        let cursor = await index.openCursor(range, direction);
+
+        while (cursor && results.length < limit) {
+          const rec = cursor.value;
+          if (this.matchesRemainingFilter(rec, options, ['chatId', 'mediaType'])) {
+            results.push(rec);
+          }
+          cursor = await cursor.continue();
+        }
+      } else if (options.chatId && options.mediaType === 'any_media') {
+        // Query Plan 2: by_chat_has_media [chatId, 1, numericDate]
+        const minDate = options.fromDate || 0;
+        const maxDate = options.beforeNumericDate || options.toDate || Infinity;
+        const range = IDBKeyRange.bound(
+          [options.chatId, 1, minDate],
+          [options.chatId, 1, maxDate]
+        );
+        const index = store.index('by_chat_has_media');
+        let cursor = await index.openCursor(range, direction);
+
+        while (cursor && results.length < limit) {
+          const rec = cursor.value;
+          if (this.matchesRemainingFilter(rec, options, ['chatId', 'mediaType'])) {
+            results.push(rec);
+          }
+          cursor = await cursor.continue();
+        }
+      } else if (options.chatId && options.isPinned === true) {
+        // Query Plan 3: by_chat_pinned [chatId, 1, numericDate]
+        const range = IDBKeyRange.bound(
+          [options.chatId, 1, options.fromDate || 0],
+          [options.chatId, 1, options.toDate || Infinity]
+        );
+        const index = store.index('by_chat_pinned');
+        let cursor = await index.openCursor(range, direction);
+
+        while (cursor && results.length < limit) {
+          const rec = cursor.value;
+          if (this.matchesRemainingFilter(rec, options, ['chatId', 'isPinned'])) {
+            results.push(rec);
+          }
+          cursor = await cursor.continue();
+        }
+      } else if (options.chatId && options.senderId) {
+        // Query Plan 4: by_chat_sender_date [chatId, senderId, numericDate]
+        const minDate = options.fromDate || 0;
+        const maxDate = options.beforeNumericDate || options.toDate || Infinity;
+        const range = IDBKeyRange.bound(
+          [options.chatId, options.senderId, minDate],
+          [options.chatId, options.senderId, maxDate]
+        );
+        const index = store.index('by_chat_sender_date');
+        let cursor = await index.openCursor(range, direction);
+
+        while (cursor && results.length < limit) {
+          const rec = cursor.value;
+          if (this.matchesRemainingFilter(rec, options, ['chatId', 'senderId'])) {
+            results.push(rec);
+          }
+          cursor = await cursor.continue();
+        }
+      } else if (options.status) {
+        // Query Plan 5: by_status_date [status, numericDate] (for offline queue & error states)
+        const range = IDBKeyRange.bound(
+          [options.status, options.fromDate || 0],
+          [options.status, options.toDate || Infinity]
+        );
+        const index = store.index('by_status_date');
+        let cursor = await index.openCursor(range, direction);
+
+        while (cursor && results.length < limit) {
+          const rec = cursor.value;
+          if (this.matchesRemainingFilter(rec, options, ['status'])) {
+            results.push(rec);
+          }
+          cursor = await cursor.continue();
+        }
+      } else if (options.query && options.query.trim().length >= 2) {
+        // Query Plan 6: Full-text search via Multi-Entry token index
+        return this.searchMessagesOffline(options.query, {
+          chatId: options.chatId,
+          limit,
+        });
+      } else if (options.chatId) {
+        // Query Plan 7: by_chat_date [chatId, numericDate]
+        const minDate = options.fromDate || 0;
+        const maxDate = options.beforeNumericDate || options.toDate || Infinity;
+        const range = IDBKeyRange.bound(
+          [options.chatId, minDate],
+          [options.chatId, maxDate]
+        );
+        const index = store.index('by_chat_date');
+        let cursor = await index.openCursor(range, direction);
+
+        while (cursor && results.length < limit) {
+          const rec = cursor.value;
+          if (this.matchesRemainingFilter(rec, options, ['chatId'])) {
+            results.push(rec);
+          }
+          cursor = await cursor.continue();
+        }
+      } else {
+        // Global chronological fallback
+        const index = store.index('by_numericDate');
+        let cursor = await index.openCursor(null, direction);
+        while (cursor && results.length < limit) {
+          const rec = cursor.value;
+          if (this.matchesRemainingFilter(rec, options, [])) {
+            results.push(rec);
+          }
+          cursor = await cursor.continue();
+        }
+      }
+
+      await tx.done;
+      return results.map((r) => this.toMessage(r));
+    } catch (err) {
+      console.warn('[IndexedDBMessageCache] filterMessages failed:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Helper filter validator for secondary non-indexed fields
+   */
+  private matchesRemainingFilter(
+    rec: CachedMessageRecord,
+    options: MessageFilterOptions,
+    appliedIndexKeys: string[]
+  ): boolean {
+    if (!appliedIndexKeys.includes('chatId') && options.chatId && rec.chatId !== options.chatId) {
+      return false;
+    }
+    if (!appliedIndexKeys.includes('senderId') && options.senderId && rec.senderId !== options.senderId) {
+      return false;
+    }
+    if (!appliedIndexKeys.includes('status') && options.status && rec.status !== options.status) {
+      return false;
+    }
+    if (!appliedIndexKeys.includes('isPinned') && options.isPinned !== undefined) {
+      if (Boolean(rec.isPinned) !== options.isPinned) return false;
+    }
+    if (!appliedIndexKeys.includes('mediaType') && options.mediaType) {
+      if (options.mediaType === 'any_media' && !rec.hasMedia) return false;
+      if (options.mediaType !== 'any_media' && rec.mediaType !== options.mediaType) return false;
+    }
+    if (options.query) {
+      const q = options.query.toLowerCase();
+      if (!rec.text?.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Sub-millisecond full-text search across cached messages using the multiEntry token B-tree.
+   * Scores and ranks multi-word search queries.
+   */
+  public async searchMessagesOffline(
+    query: string,
+    options?: { chatId?: string; limit?: number }
+  ): Promise<Message[]> {
+    const db = await this.getDB();
+    if (!db || !query || query.trim().length < 2) return [];
+
+    const tokens = tokenizeMessageText(query);
+    if (tokens.length === 0) return [];
+
+    const limit = Math.min(options?.limit || 40, 100);
+
+    try {
+      const tx = db.transaction('messages', 'readonly');
+      const store = tx.objectStore('messages');
+      const tokenIndex = store.index('by_search_tokens');
+
+      // Map to track matched records and relevance score
+      const matchMap = new Map<string, { record: CachedMessageRecord; score: number }>();
+
+      // Query multiEntry index for each token
+      for (const token of tokens) {
+        const records = await tokenIndex.getAll(token);
+        for (const rec of records) {
+          if (options?.chatId && rec.chatId !== options.chatId) continue;
+
+          const existing = matchMap.get(rec.compoundKey);
+          if (existing) {
+            existing.score += 10; // multiple token matches boost rank
+          } else {
+            // Initial score based on exact match bonus
+            let score = 5;
+            if (rec.text && rec.text.toLowerCase().includes(query.toLowerCase().trim())) {
+              score += 20; // exact phrase match gets highest bonus
+            }
+            matchMap.set(rec.compoundKey, { record: rec, score });
+          }
+        }
+      }
+
+      await tx.done;
+
+      // Sort by score descending, then by numericDate descending
+      const sorted = Array.from(matchMap.values())
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          return (b.record.numericDate || 0) - (a.record.numericDate || 0);
+        })
+        .slice(0, limit)
+        .map((item) => this.toMessage(item.record));
+
+      return sorted;
+    } catch (e) {
+      console.warn('[IndexedDBMessageCache] searchMessagesOffline failed:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Retrieves shared media for a chat filtered by category directly from IndexedDB.
+   */
+  public async getSharedMedia(
+    chatId: string,
+    mediaType: IndexedMediaType,
+    options?: { limit?: number; beforeNumericDate?: number }
+  ): Promise<Message[]> {
+    return this.filterMessages({
+      chatId,
+      mediaType,
+      beforeNumericDate: options?.beforeNumericDate,
+      limit: options?.limit || 50,
+      direction: 'prev',
+    });
+  }
+
+  /**
+   * Fast count of all media types and pinned messages for a chat without loading records into memory.
+   */
+  public async getMediaCounts(chatId: string): Promise<{
+    photos: number;
+    videos: number;
+    files: number;
+    voice: number;
+    audio: number;
+    links: number;
+    pinned: number;
+  }> {
+    const db = await this.getDB();
+    const fallback = { photos: 0, videos: 0, files: 0, voice: 0, audio: 0, links: 0, pinned: 0 };
+    if (!db) return fallback;
+
+    try {
+      const tx = db.transaction('messages', 'readonly');
+      const store = tx.objectStore('messages');
+      const mediaIdx = store.index('by_chat_media_type');
+      const linkIdx = store.index('by_chat_has_link');
+      const pinnedIdx = store.index('by_chat_pinned');
+
+      const [photos, videos, files, voice, audio, links, pinned] = await Promise.all([
+        mediaIdx.count(IDBKeyRange.bound([chatId, 'photo', 0], [chatId, 'photo', Infinity])),
+        mediaIdx.count(IDBKeyRange.bound([chatId, 'video', 0], [chatId, 'video', Infinity])),
+        mediaIdx.count(IDBKeyRange.bound([chatId, 'document', 0], [chatId, 'document', Infinity])),
+        mediaIdx.count(IDBKeyRange.bound([chatId, 'voice', 0], [chatId, 'voice', Infinity])),
+        mediaIdx.count(IDBKeyRange.bound([chatId, 'audio', 0], [chatId, 'audio', Infinity])),
+        linkIdx.count(IDBKeyRange.bound([chatId, 1, 0], [chatId, 1, Infinity])),
+        pinnedIdx.count(IDBKeyRange.bound([chatId, 1, 0], [chatId, 1, Infinity])),
+      ]);
+
+      await tx.done;
+
+      return { photos, videos, files, voice, audio, links, pinned };
+    } catch (e) {
+      console.warn(`[IndexedDBMessageCache] getMediaCounts failed for ${chatId}:`, e);
+      return fallback;
+    }
+  }
+
+  /**
+   * Direct index retrieval of pinned messages in a chat.
+   */
+  public async getPinnedMessages(chatId: string, limit: number = 20): Promise<Message[]> {
+    return this.filterMessages({
+      chatId,
+      isPinned: true,
+      limit,
+      direction: 'prev',
+    });
+  }
+
+  /**
+   * Outgoing offline queue: Retrieves all pending messages awaiting network dispatch.
+   */
+  public async getOfflinePendingQueue(): Promise<Message[]> {
+    const db = await this.getDB();
+    if (!db) return [];
+
+    try {
+      const tx = db.transaction('messages', 'readonly');
+      const store = tx.objectStore('messages');
+      const statusIdx = store.index('by_status_date');
+
+      // Fetch 'sending' and 'error' status items
+      const sendingRange = IDBKeyRange.bound(['sending', 0], ['sending', Infinity]);
+      const errorRange = IDBKeyRange.bound(['error', 0], ['error', Infinity]);
+
+      const [sendingRecords, errorRecords] = await Promise.all([
+        statusIdx.getAll(sendingRange),
+        statusIdx.getAll(errorRange),
+      ]);
+
+      await tx.done;
+      const combined = [...sendingRecords, ...errorRecords].sort(
+        (a, b) => (a.numericDate || 0) - (b.numericDate || 0)
+      );
+
+      return combined.map((r) => this.toMessage(r));
+    } catch (e) {
+      console.warn('[IndexedDBMessageCache] getOfflinePendingQueue failed:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Returns operational telemetry and storage statistics for offline diagnosis.
+   */
+  public async getIndexingStats(): Promise<IndexingStats> {
+    const db = await this.getDB();
+    const emptyStats: IndexingStats = {
+      totalMessages: 0,
+      chatCount: 0,
+      mediaCounts: { photos: 0, videos: 0, files: 0, voice: 0, audio: 0, links: 0 },
+      pinnedCount: 0,
+      pendingOutgoingCount: 0,
+    };
+    if (!db) return emptyStats;
+
+    try {
+      const tx = db.transaction(['messages', 'chat_metadata'], 'readonly');
+      const msgStore = tx.objectStore('messages');
+      const metaStore = tx.objectStore('chat_metadata');
+
+      const totalMessages = await msgStore.count();
+      const chatCount = await metaStore.count();
+
+      const mediaIdx = msgStore.index('by_media_type');
+      const statusIdx = msgStore.index('by_status_date');
+
+      const [photos, videos, files, voice, audio, pending] = await Promise.all([
+        mediaIdx.count(IDBKeyRange.bound(['photo', 0], ['photo', Infinity])),
+        mediaIdx.count(IDBKeyRange.bound(['video', 0], ['video', Infinity])),
+        mediaIdx.count(IDBKeyRange.bound(['document', 0], ['document', Infinity])),
+        mediaIdx.count(IDBKeyRange.bound(['voice', 0], ['voice', Infinity])),
+        mediaIdx.count(IDBKeyRange.bound(['audio', 0], ['audio', Infinity])),
+        statusIdx.count(IDBKeyRange.bound(['sending', 0], ['sending', Infinity])),
+      ]);
+
+      await tx.done;
+
+      let storageEstimateBytes: number | undefined;
+      let storageQuotaBytes: number | undefined;
+
+      if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.estimate) {
+        try {
+          const estimate = await navigator.storage.estimate();
+          storageEstimateBytes = estimate.usage;
+          storageQuotaBytes = estimate.quota;
+        } catch {
+          // ignore
+        }
+      }
+
+      return {
+        totalMessages,
+        chatCount,
+        mediaCounts: { photos, videos, files, voice, audio, links: 0 },
+        pinnedCount: 0,
+        pendingOutgoingCount: pending,
+        storageEstimateBytes,
+        storageQuotaBytes,
+      };
+    } catch (e) {
+      console.warn('[IndexedDBMessageCache] getIndexingStats failed:', e);
+      return emptyStats;
+    }
+  }
+
+  /**
+   * Lazily re-indexes any existing records in the database that were saved prior to schema v2
+   */
+  public async reindexExistingMessages(): Promise<number> {
+    const db = await this.getDB();
+    if (!db) return 0;
+
+    let updatedCount = 0;
+    try {
+      const tx = db.transaction('messages', 'readwrite');
+      const store = tx.objectStore('messages');
+      let cursor = await store.openCursor();
+
+      while (cursor) {
+        const val = cursor.value;
+        if (!val.mediaType || !Array.isArray(val.searchTokens)) {
+          const mediaType = deriveIndexedMediaType(val as any);
+          const hasMedia = mediaType !== 'none' && mediaType !== 'link' ? 1 : 0;
+          const hasLink = mediaType === 'link' || /(https?:\/\/[^\s]+|t\.me\/[^\s]+)/i.test(val.text || '') ? 1 : 0;
+          const isPinnedNum = val.isPinned ? 1 : 0;
+          const isOutgoingNum = Boolean(val.isOutgoing || val.out) ? 1 : 0;
+          const hasReactions = val.reactions && val.reactions.length > 0 ? 1 : 0;
+          const searchTokens = tokenizeMessageText(val.text || '', val.senderName, val.media?.fileName);
+
+          const updated: CachedMessageRecord = {
+            ...val,
+            mediaType,
+            hasMedia,
+            hasLink,
+            isPinnedNum,
+            isOutgoingNum,
+            hasReactions,
+            searchTokens,
+          };
+
+          await cursor.update(updated);
+          updatedCount++;
+        }
+        cursor = await cursor.continue();
+      }
+
+      await tx.done;
+      if (updatedCount > 0) {
+        console.log(`[IndexedDBMessageCache] Re-indexed ${updatedCount} legacy messages with v2 indexes.`);
+      }
+    } catch (e) {
+      console.warn('[IndexedDBMessageCache] reindexExistingMessages failed:', e);
+    }
+    return updatedCount;
+  }
   public async clearChat(chatId: string): Promise<void> {
     const db = await this.getDB();
     if (!db) return;

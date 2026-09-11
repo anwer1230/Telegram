@@ -7,6 +7,7 @@
 
 import { TLRPC } from './TLRPC';
 import { telegramDB } from '../utils/sqliteStorage';
+import { SecureSessionStorage } from '../utils/SecureSessionStorage';
 
 export type ConnectionState =
   | 'CONNECTION_STATE_CONNECTED'
@@ -29,6 +30,8 @@ export interface MtprotoSession {
   serverSalt: string;
   seqNo: number;
   lastMsgId: bigint;
+  sessionString?: string;
+  phone?: string;
 }
 
 export class ConnectionsManager {
@@ -42,6 +45,19 @@ export class ConnectionsManager {
   private isPaused = false;
   private listeners = new Set<(state: ConnectionState) => void>();
   private updateListeners = new Set<(update: any) => void>();
+
+  // Request Batching Engine (Minimizes round-trips to Telegram API during initial app load)
+  private batchQueue: Array<{
+    id: string;
+    request: { _: string; [key: string]: any };
+    resolve: (res: any) => void;
+    reject: (err: any) => void;
+    notifySuccess: (res: any) => void;
+    notifyError: (err: TLRPC.TL_error) => void;
+  }> = [];
+  private batchTimer: any = null;
+  private isBatchingExplicit = false;
+  private readonly BATCH_WINDOW_MS = 25; // 25ms micro-batch window
 
   // Real MTProto Session State
   private session: MtprotoSession = {
@@ -256,6 +272,149 @@ export class ConnectionsManager {
   }
 
   /**
+   * Checks if an RPC request type is suitable for batching during load/sync
+   */
+  public isBatchable(reqType: string): boolean {
+    return (
+      reqType === 'account.getPassword' ||
+      reqType === 'TL_account_getPassword' ||
+      reqType === 'account.getPrivacy' ||
+      reqType === 'TL_account_getPrivacy' ||
+      reqType === 'account.getAuthorizations' ||
+      reqType === 'TL_account_getAuthorizations' ||
+      reqType === 'updates.getState' ||
+      reqType === 'TL_updates_getState' ||
+      reqType === 'status' ||
+      reqType === 'sync-light'
+    );
+  }
+
+  /**
+   * Starts an explicit batch collection window
+   */
+  public startBatch(): void {
+    this.isBatchingExplicit = true;
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+  }
+
+  /**
+   * Ends explicit batching and immediately flushes the collected batch queue
+   */
+  public async endBatch(): Promise<void> {
+    this.isBatchingExplicit = false;
+    await this.flushBatch();
+  }
+
+  /**
+   * Dispatches batched requests in a single round-trip payload to /api/telegram/batch
+   */
+  public async flushBatch(): Promise<void> {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+
+    if (this.batchQueue.length === 0) return;
+
+    const itemsToFlush = this.batchQueue.splice(0);
+    const activeSession = typeof window !== 'undefined' ? (localStorage.getItem('tg_session_string') || '') : '';
+
+    try {
+      const resp = await fetch('/api/telegram/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionString: activeSession,
+          requests: itemsToFlush.map((item) => ({
+            id: item.id,
+            type: item.request._,
+            params: item.request,
+          })),
+        }),
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      const results: Record<string, any> = (data && data.results) || {};
+
+      for (const item of itemsToFlush) {
+        const itemResult = results[item.id];
+        if (itemResult && itemResult.success) {
+          item.notifySuccess(itemResult.data);
+          item.resolve(itemResult.data);
+        } else {
+          const err: TLRPC.TL_error = {
+            code: itemResult?.status || resp.status || 400,
+            text: itemResult?.error || data.error || 'BATCH_ITEM_FAILED',
+          };
+          item.notifyError(err);
+          item.reject(err);
+        }
+      }
+    } catch (networkErr: any) {
+      const err: TLRPC.TL_error = {
+        code: 500,
+        text: networkErr?.message || 'NETWORK_BATCH_ERROR',
+      };
+      for (const item of itemsToFlush) {
+        item.notifyError(err);
+        item.reject(err);
+      }
+    }
+  }
+
+  /**
+   * Enqueues a request into the batch queue for coalescing into a single network call
+   */
+  public async sendBatchedRequest<T = any>(
+    request: { _: string; [key: string]: any },
+    callback?: RpcCallback<T>
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const reqId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+      const notifySuccess = (res: any) => {
+        if (!callback) return;
+        if (typeof callback === 'function') {
+          callback(res, null);
+        } else if (callback.onSuccess) {
+          callback.onSuccess(res);
+        }
+      };
+
+      const notifyError = (err: TLRPC.TL_error) => {
+        this.handleRpcError(err);
+        if (!callback) return;
+        if (typeof callback === 'function') {
+          callback(null, err);
+        } else if (callback.onError) {
+          callback.onError(err);
+        }
+      };
+
+      this.batchQueue.push({
+        id: reqId,
+        request,
+        resolve,
+        reject,
+        notifySuccess,
+        notifyError,
+      });
+
+      // If not in explicit manual batch, debounce flush automatically
+      if (!this.isBatchingExplicit) {
+        if (!this.batchTimer) {
+          this.batchTimer = setTimeout(() => {
+            this.flushBatch();
+          }, this.BATCH_WINDOW_MS);
+        }
+      }
+    });
+  }
+
+  /**
    * Dispatches and processes an actual MTProto RPC Request with database synchronisation
    */
   public async sendRequest<T = any>(
@@ -288,23 +447,174 @@ export class ConnectionsManager {
       try {
         const reqType = request._;
 
-        // 1. Process Channel Join Request
+        // Auto-coalesce batchable requests during initial app load and routine queries
+        if (this.isBatchingExplicit || (request.allowBatch !== false && this.isBatchable(reqType))) {
+          this.sendBatchedRequest<T>(request, callback).then(resolve).catch(reject);
+          return;
+        }
+
+        // 1. Process Channel Join Request (Real MTProto channels.joinChannel via backend)
         if (reqType === 'TL_channels_joinChannel' || reqType === 'channels.joinChannel') {
-          if (request.channel === 'invalid_channel') {
-            const err: TLRPC.TL_error = { code: 400, text: 'CHANNEL_PRIVATE' };
+          // استخراج بيانات القناة من الطلب
+          const channelId = request.channel?.channel_id || request.channel?.id || request.channel || 0;
+          const accessHash = request.channel?.access_hash || request.channel?.accessHash || '0';
+          
+          // جلب sessionString ورقم الهاتف الفعلي من التخزين الآمن
+          const sessionString = this.session.sessionString 
+            || SecureSessionStorage.getItem<string>('tg_session_string')
+            || SecureSessionStorage.getItem<string>(`tg_session_string_${this.accountNum}`)
+            || (typeof window !== 'undefined' ? (localStorage.getItem('telegram_session_string') || localStorage.getItem('tg_session_string') || '') : '');
+          const phone = this.session.phone 
+            || SecureSessionStorage.getItem<string>('tg_phone')
+            || (typeof window !== 'undefined' ? (localStorage.getItem('telegram_phone') || localStorage.getItem('tg_phone') || '') : '');
+          
+          if (!sessionString || !phone) {
+            const err: TLRPC.TL_error = { code: 401, text: 'AUTH_KEY_UNREGISTERED' };
             notifyError(err);
             reject(err);
             return;
           }
-          const success: any = {
-            _: 'TL_updates',
-            updates: [{ _: 'TL_updateChannel', channel_id: request.channel?.channel_id || request.channel || 0 }],
-            date: Math.floor(Date.now() / 1000),
-            seq: this.session.seqNo,
-          };
-          notifySuccess(success);
-          this.updateListeners.forEach((l) => l(success));
-          resolve(success as T);
+          
+          // إرسال طلب MTProto الحقيقي إلى نقطة النهاية وانتظار رد تيليجرام الرسمي
+          fetch('/api/telegram/links/join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              channelId,
+              accessHash,
+              sessionString,
+              phone,
+              type: 'public'
+            })
+          })
+          .then(async (res) => {
+            if (!res.ok) {
+              const errorData = await res.json().catch(() => ({}));
+              throw new Error(errorData.error || errorData.message || (res.status === 401 ? 'AUTH_KEY_UNREGISTERED' : 'JOIN_FAILED'));
+            }
+            return res.json();
+          })
+          .then((data) => {
+            if (data && data.success && data.joinedChat) {
+              // معالجة الاستجابة الحقيقية الواردة من خوادم تيليجرام
+              const success: any = {
+                _: 'TL_updates',
+                updates: [
+                  { 
+                    _: 'TL_updateChannel', 
+                    channel_id: data.joinedChat.id || channelId, 
+                    chat: data.joinedChat 
+                  }
+                ],
+                chats: [data.joinedChat],
+                date: Math.floor(Date.now() / 1000),
+                seq: this.session.seqNo,
+              };
+              notifySuccess(success);
+              this.updateListeners.forEach((l) => l(success));
+
+              // استدعاء المزامنة السحابية ومعالجة التحديثات فورياً (processUpdates & getDifference)
+              import('./MessagesController').then(({ MessagesController }) => {
+                const controller = MessagesController.getInstance(this.accountNum);
+                controller.processUpdates(success, false);
+                controller.getDifference();
+              }).catch(() => {});
+
+              // إرسال حدث الانضمام للتزامن مع واجهات المستخدم
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('tg-joined-chat', { detail: data.joinedChat }));
+              }
+
+              resolve(success as T);
+            } else {
+              throw new Error(data?.error || data?.message || 'JOIN_FAILED');
+            }
+          })
+          .catch((err) => {
+            const errText = err.message || 'CHANNEL_PRIVATE';
+            const code = errText.includes('AUTH_KEY') ? 401 : (errText.includes('FLOOD') ? 429 : 400);
+            const errorObj: TLRPC.TL_error = { code, text: errText };
+            notifyError(errorObj);
+            reject(errorObj);
+          });
+          return;
+        }
+
+        if (reqType === 'TL_messages_importChatInvite' || reqType === 'messages.importChatInvite') {
+          const hash = request.hash;
+          const sessionString = this.session.sessionString 
+            || SecureSessionStorage.getItem<string>('tg_session_string')
+            || SecureSessionStorage.getItem<string>(`tg_session_string_${this.accountNum}`)
+            || (typeof window !== 'undefined' ? (localStorage.getItem('telegram_session_string') || localStorage.getItem('tg_session_string') || '') : '');
+          const phone = this.session.phone 
+            || SecureSessionStorage.getItem<string>('tg_phone')
+            || (typeof window !== 'undefined' ? (localStorage.getItem('telegram_phone') || localStorage.getItem('tg_phone') || '') : '');
+          
+          if (!sessionString || !phone) {
+            const err: TLRPC.TL_error = { code: 401, text: 'AUTH_KEY_UNREGISTERED' };
+            notifyError(err);
+            reject(err);
+            return;
+          }
+          
+          fetch('/api/telegram/chat-invite/join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              hash,
+              sessionString,
+              phone,
+              type: 'private'
+            })
+          })
+          .then(async (res) => {
+            if (!res.ok) {
+              const errorData = await res.json().catch(() => ({}));
+              throw new Error(errorData.error || errorData.message || (res.status === 401 ? 'AUTH_KEY_UNREGISTERED' : 'INVITE_FAILED'));
+            }
+            return res.json();
+          })
+          .then((data) => {
+            if (data && data.success && data.joinedChat) {
+              const success: any = {
+                _: 'TL_updates',
+                updates: [
+                  { 
+                    _: 'TL_updateChat', 
+                    chat_id: data.joinedChat.id || 0, 
+                    chat: data.joinedChat 
+                  }
+                ],
+                chats: [data.joinedChat],
+                date: Math.floor(Date.now() / 1000),
+                seq: this.session.seqNo,
+              };
+              notifySuccess(success);
+              this.updateListeners.forEach((l) => l(success));
+
+              // استدعاء المزامنة السحابية ومعالجة التحديثات فورياً (processUpdates & getDifference)
+              import('./MessagesController').then(({ MessagesController }) => {
+                const controller = MessagesController.getInstance(this.accountNum);
+                controller.processUpdates(success, false);
+                controller.getDifference();
+              }).catch(() => {});
+
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('tg-joined-chat', { detail: data.joinedChat }));
+              }
+
+              resolve(success as T);
+            } else {
+              throw new Error(data?.error || data?.message || 'INVITE_FAILED');
+            }
+          })
+          .catch((err) => {
+            const errText = err.message || 'INVITE_HASH_EXPIRED';
+            const code = errText.includes('AUTH_KEY') ? 401 : (errText.includes('FLOOD') ? 429 : 400);
+            const errorObj: TLRPC.TL_error = { code, text: errText };
+            notifyError(errorObj);
+            reject(errorObj);
+          });
           return;
         }
 

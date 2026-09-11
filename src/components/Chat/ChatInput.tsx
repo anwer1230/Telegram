@@ -28,23 +28,33 @@ import {
 import { useTelegram } from '../../context/TelegramContext';
 import { AudioRecorder } from '../../utils/audioRecorder';
 import { MessageMedia, LinkPreviewData } from '../../types';
-import { POPULAR_REACTIONS, TELEGRAM_STICKERS } from '../../data/mockTelegramData';
-import {
-  ANIMATED_TELEGRAM_STICKERS,
-  TELEGRAM_CUSTOM_EMOJI_SETS,
-  LottieStickerItem,
-} from '../../data/lottieStickerData';
-import { LottieSticker } from './LottieSticker';
-import { CustomAnimatedEmoji } from './CustomAnimatedEmoji';
+import type { LottieStickerItem } from '../../data/lottieStickerData';
+import { EmojiQuickPicker } from './EmojiQuickPicker';
 import { extractLinkPreview } from '../../utils/linkParser';
 import { messagesController } from '../../core/MessagesController';
 import { ChatObject } from '../../core/ChatObject';
 import { UserObject } from '../../core/UserObject';
 import { NotificationCenter } from '../../core/NotificationCenter';
 import { draftSyncService } from '../../services/DraftSyncService';
+import { useSoundEffects } from '../../hooks/useSoundEffects';
 import confetti from 'canvas-confetti';
+import { ConnectionsManager } from '../../core/ConnectionsManager';
+import { TLRPC } from '../../core/TLRPC';
+import { SecureSessionStorage } from '../../utils/SecureSessionStorage';
+
+// Performance optimization: Avoid loading heavy emoji catalog & animated Lottie stickers until user interacts
+const LazyFullEmojiPicker = React.lazy(() => import('./FullEmojiPicker'));
+
+let fullEmojiPickerPreloaded = false;
+const preloadFullEmojiPicker = () => {
+  if (!fullEmojiPickerPreloaded) {
+    fullEmojiPickerPreloaded = true;
+    import('./FullEmojiPicker');
+  }
+};
 
 export const ChatInput: React.FC = () => {
+  const { playSendSound } = useSoundEffects();
   const {
     activeChat,
     activeChatId,
@@ -66,6 +76,8 @@ export const ChatInput: React.FC = () => {
     setChatDraft,
     toggleMuteChat,
     showToast,
+    currentUser,
+    syncInitializationRoutine,
   } = useTelegram();
 
   const [text, setText] = useState(() => {
@@ -80,7 +92,6 @@ export const ChatInput: React.FC = () => {
   const [recordDuration, setRecordDuration] = useState(0);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
-  const [pickerTab, setPickerTab] = useState<'emoji' | 'custom_emoji' | 'stickers'>('stickers');
   const [isSolvingCaptcha, setIsSolvingCaptcha] = useState(false);
   const [dismissedPreviewUrl, setDismissedPreviewUrl] = useState<string | null>(null);
 
@@ -248,12 +259,31 @@ export const ChatInput: React.FC = () => {
 
   const handleSend = () => {
     if (editingMessage) {
+      if (text.length > 4096) {
+        showToast(
+          isArabic
+            ? `الرسالة طويلة جداً (${text.length}/4096 حرف). يرجى تقصيرها`
+            : `Message is too long (${text.length}/4096 characters). Please shorten it`,
+          '⚠️'
+        );
+        return;
+      }
       editMessageText(editingMessage.id, text);
       setText('');
       return;
     }
 
     if (!text.trim()) return;
+
+    if (text.length > 4096) {
+      showToast(
+        isArabic
+          ? `الرسالة طويلة جداً (${text.length}/4096 حرف). الحد الأقصى هو 4096 حرفاً`
+          : `Message is too long (${text.length}/4096 characters). Max limit is 4096`,
+        '⚠️'
+      );
+      return;
+    }
 
     if (!permissionCheck.canSend) {
       showToast(permissionCheck.reason || 'لا يمكنك الكتابة في هذه المحادثة', '⚠️');
@@ -265,6 +295,7 @@ export const ChatInput: React.FC = () => {
       setChatDraft(activeChatId, '');
       messagesController.recordMessageSent(activeChatId);
     }
+    playSendSound();
     sendMessage(text);
     setText('');
     setDismissedPreviewUrl(null);
@@ -283,32 +314,82 @@ export const ChatInput: React.FC = () => {
     setIsSolvingCaptcha(false);
   };
 
-  const handleChannelJoin = () => {
+  const handleChannelJoin = async () => {
     if (!activeChat) return;
+
+    // استخراج الجلسة ورقم الهاتف الحقيقي من التخزين الآمن
+    const sessionString = SecureSessionStorage.getItem<string>('tg_session_string')
+      || localStorage.getItem('tg_session_string')
+      || localStorage.getItem('telegram_session_string')
+      || '';
+    const phone = SecureSessionStorage.getItem<string>('tg_phone')
+      || localStorage.getItem('tg_phone')
+      || localStorage.getItem('telegram_phone')
+      || currentUser?.phone
+      || '';
+
+    if (!sessionString || !phone) {
+      showToast(isArabic ? 'يرجى تسجيل الدخول أولاً' : 'Please log in first', '❌');
+      return;
+    }
+
+    // تجهيز معطيات القناة
+    const channelId = activeChat.id;
+    const accessHash = (activeChat as any).accessHash || '0';
+
     try {
-      confetti({
-        particleCount: 45,
-        spread: 70,
-        origin: { y: 0.8 },
-        colors: ['#2481cc', '#4caf50', '#ffb300', '#9c27b0'],
+      // إرسال استدعاء TL_channels_joinChannel حقيقي عبر MTProto
+      const joinReq = new TLRPC.TL_channels_joinChannel();
+      joinReq.channel = {
+        _: 'inputChannel',
+        channel_id: channelId,
+        access_hash: accessHash,
+      } as any;
+
+      await new Promise((resolve, reject) => {
+        ConnectionsManager.getInstance().sendRequest(joinReq, (response: any, error: any) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve(response);
+          }
+        });
       });
-    } catch {}
 
-    const customEvent = new CustomEvent('tg-joined-chat', {
-      detail: {
-        ...activeChat,
-        isMember: true,
-        memberCount: (activeChat.memberCount || 1000) + 1,
-      },
-    });
-    window.dispatchEvent(customEvent);
+      // استدعاء المزامنة السحابية لجلب الحوارات المحدثة من خوادم تيليجرام (messages.getDialogs)
+      try {
+        if (syncInitializationRoutine) {
+          await syncInitializationRoutine(phone, sessionString);
+        }
+      } catch (syncErr) {
+        console.warn('[ChatInput] Cloud sync post-join warning:', syncErr);
+      }
 
-    showToast(
-      isArabic
-        ? `تم الانضمام إلى قناة "${activeChat.title}" بنجاح!`
-        : `Joined "${activeChat.title}" successfully!`,
-      '✨'
-    );
+      // إطلاق تأثيرات النجاح
+      try {
+        confetti({ particleCount: 45, spread: 70, origin: { y: 0.8 } });
+      } catch {}
+
+      showToast(
+        isArabic
+          ? `تم الانضمام إلى "${activeChat.title}" بنجاح!`
+          : `Joined "${activeChat.title}" successfully!`,
+        '✅'
+      );
+    } catch (error: any) {
+      const errText = error?.text || error?.message || '';
+      let message = isArabic ? 'حدث خطأ أثناء الانضمام' : 'Error during join';
+      if (errText.includes('AUTH_KEY_UNREGISTERED') || error?.code === 401) {
+        message = isArabic ? 'يرجى تسجيل الدخول أولاً' : 'Please log in first';
+      } else if (errText.includes('FLOOD_WAIT') || error?.code === 429) {
+        message = isArabic ? 'تم تجاوز حد الطلبات، يرجى الانتظار قليلاً' : 'Too many requests, please wait';
+      } else if (errText.includes('USER_ALREADY_PARTICIPANT')) {
+        message = isArabic ? 'أنت عضو بالفعل في هذه المحادثة' : 'You are already a member';
+      } else if (errText) {
+        message = errText;
+      }
+      showToast(message, '❌');
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -677,156 +758,30 @@ export const ChatInput: React.FC = () => {
         </div>
       )}
 
-      {/* Emoji & Sticker Picker Popover */}
+      {/* Lazy-Loaded Full Emoji & Sticker Library */}
       {showEmojiPicker && (
-        <div
-          id="tg-emoji-sticker-picker"
-          className="absolute bottom-16 left-4 sm:left-12 rtl:left-auto rtl:right-4 sm:rtl:right-12 z-30 w-72 sm:w-80 h-72 rounded-2xl shadow-2xl border backdrop-blur-xl animate-in zoom-in-95 duration-150 flex flex-col overflow-hidden"
-          style={{
-            backgroundColor: 'var(--tg-theme-surface)',
-            borderColor: 'var(--tg-theme-border)',
-            color: 'var(--tg-theme-bubble-in-text)',
-          }}
+        <React.Suspense
+          fallback={
+            <div
+              id="tg-emoji-picker-skeleton"
+              className="absolute bottom-16 left-4 sm:left-12 rtl:left-auto rtl:right-4 sm:rtl:right-12 z-30 w-72 sm:w-80 h-72 rounded-2xl shadow-2xl border backdrop-blur-xl bg-[#1e232a]/95 border-white/10 flex flex-col items-center justify-center gap-3 animate-pulse"
+            >
+              <div className="w-8 h-8 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
+              <span className="text-xs text-gray-400 font-medium">
+                {isArabic ? 'جارٍ تحميل الرموز والملصقات...' : 'Loading emojis & stickers...'}
+              </span>
+            </div>
+          }
         >
-          {/* Tabs */}
-          <div className="flex border-b border-white/10 text-xs font-bold bg-black/10">
-            <button
-              onClick={() => setPickerTab('stickers')}
-              className={`flex-1 py-2 text-center transition-colors flex items-center justify-center gap-1 ${
-                pickerTab === 'stickers'
-                  ? 'border-b-2 border-[#2481cc] text-[#2481cc]'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{isArabic ? 'ملصقات Lottie' : 'Animated Stickers'}</span>
-            </button>
-            <button
-              onClick={() => setPickerTab('custom_emoji')}
-              className={`flex-1 py-2 text-center transition-colors flex items-center justify-center gap-1 ${
-                pickerTab === 'custom_emoji'
-                  ? 'border-b-2 border-[#2481cc] text-[#2481cc]'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <span>💎</span>
-              <span>{isArabic ? 'إيموجي مخصص' : 'Custom Emoji'}</span>
-            </button>
-            <button
-              onClick={() => setPickerTab('emoji')}
-              className={`flex-1 py-2 text-center transition-colors flex items-center justify-center gap-1 ${
-                pickerTab === 'emoji'
-                  ? 'border-b-2 border-[#2481cc] text-[#2481cc]'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <span>😀</span>
-              <span>{isArabic ? 'عادي' : 'Emojis'}</span>
-            </button>
-          </div>
-
-          {/* Grid Content */}
-          <div className="flex-1 overflow-y-auto p-3 no-scrollbar">
-            {pickerTab === 'stickers' ? (
-              <div className="space-y-3">
-                {/* Lottie Animated Stickers */}
-                <div>
-                  <div className="text-[11px] font-bold text-sky-400 mb-2 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3" />
-                    <span>{isArabic ? 'ملصقات Lottie تيليجرام المتحركة (60 FPS)' : 'Telegram Animated Stickers (Lottie)'}</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {ANIMATED_TELEGRAM_STICKERS.map((sticker) => (
-                      <button
-                        key={sticker.id}
-                        onClick={() => sendLottieSticker(sticker)}
-                        className="p-2 rounded-xl hover:bg-white/10 transition-all hover:scale-105 flex flex-col items-center gap-1 border border-white/5 bg-black/10 group/stk"
-                        title={`${sticker.name} (${sticker.packName})`}
-                      >
-                        <LottieSticker
-                          lottieData={sticker.lottieData}
-                          stickerId={sticker.id}
-                          size={64}
-                          autoplay={true}
-                          loop={true}
-                          showBadge={false}
-                        />
-                        <span className="text-[10px] text-gray-300 font-medium truncate w-full text-center group-hover/stk:text-sky-400">
-                          {isArabic ? sticker.nameAr : sticker.name}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Classic Stickers */}
-                <div className="pt-2 border-t border-white/10">
-                  <div className="text-[11px] font-bold text-gray-400 mb-2">
-                    {isArabic ? 'ملصقات كلاسيكية' : 'Classic Stickers'}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {TELEGRAM_STICKERS.map((sticker) => (
-                      <button
-                        key={sticker.id}
-                        onClick={() => sendSticker(sticker.url)}
-                        className="p-2 rounded-xl hover:bg-white/10 transition-transform hover:scale-105 flex flex-col items-center gap-1"
-                      >
-                        <img
-                          src={sticker.url}
-                          alt={sticker.name}
-                          className="w-12 h-12 object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                        <span className="text-[10px] text-gray-400">{sticker.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : pickerTab === 'custom_emoji' ? (
-              /* Custom Emoji Sets */
-              <div className="space-y-4">
-                {TELEGRAM_CUSTOM_EMOJI_SETS.map((set) => (
-                  <div key={set.packId} className="space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-sky-400 px-1">
-                      <span>{isArabic ? set.packNameAr : set.packName}</span>
-                      <span className="text-[9px] text-gray-400 bg-sky-500/10 px-1.5 py-0.5 rounded-full font-normal">
-                        Telegram Pack
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-5 gap-2 bg-black/10 p-2 rounded-xl border border-white/5">
-                      {set.emojis.map((cEmoji) => (
-                        <button
-                          key={cEmoji.code}
-                          onClick={() => insertCustomEmoji(cEmoji.code)}
-                          className="p-1.5 rounded-xl hover:bg-white/15 transition-all hover:scale-125 flex items-center justify-center"
-                          title={`${cEmoji.name} - ${cEmoji.code}`}
-                        >
-                          <CustomAnimatedEmoji code={cEmoji.code} size={26} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              /* Standard Unicode Emojis */
-              <div className="grid grid-cols-6 gap-2 text-xl">
-                {POPULAR_REACTIONS.concat([
-                  '😎', '🤩', '🥳', '🤔', '🤝', '☕', '🌟', '💻', '📱', '🎮', '💡', '🏆', '🎯', '💯', '🔥', '❤️', '💎', '🎉', '🚀', '👍', '🦆', '✨'
-                ]).map((emoji, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => insertEmoji(emoji)}
-                    className="p-1 hover:scale-125 transition-transform flex items-center justify-center rounded-lg hover:bg-white/5"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+          <LazyFullEmojiPicker
+            onSelectEmoji={insertEmoji}
+            onSelectCustomEmoji={insertCustomEmoji}
+            onSelectSticker={sendSticker}
+            onSelectLottieSticker={sendLottieSticker}
+            onClose={() => setShowEmojiPicker(false)}
+            isArabic={isArabic}
+          />
+        </React.Suspense>
       )}
 
       {/* BotFather Quick Command Chips */}
@@ -1027,15 +982,43 @@ export const ChatInput: React.FC = () => {
                     color: 'var(--tg-theme-bubble-in-text)',
                   }}
                 />
-                <button
-                  onClick={() => {
+
+                {/* Non-intrusive Character Counter for Long Drafts */}
+                {text.length >= 100 && (
+                  <div
+                    id="chat-input-char-counter"
+                    className={`text-[10.5px] font-mono tabular-nums select-none px-1.5 py-0.5 rounded transition-all shrink-0 self-center flex items-center gap-0.5 animate-in fade-in zoom-in-95 duration-150 ${
+                      text.length > 4096
+                        ? 'text-rose-400 bg-rose-500/15 font-bold animate-pulse'
+                        : text.length > 3800
+                        ? 'text-amber-400 bg-amber-500/10 font-medium'
+                        : 'text-gray-400/75 hover:text-gray-300'
+                    }`}
+                    title={
+                      isArabic
+                        ? `عدد الأحرف: ${text.length} / 4096 (المتبقي: ${Math.max(0, 4096 - text.length)})`
+                        : `Character count: ${text.length} / 4096 (${Math.max(0, 4096 - text.length)} remaining)`
+                    }
+                  >
+                    <span>{text.length}</span>
+                    {text.length > 3800 && (
+                      <span className="text-[9px] opacity-75">/4096</span>
+                    )}
+                  </div>
+                )}
+
+                {/* Lightweight Performance-Optimized Emoji Quick-Picker */}
+                <EmojiQuickPicker
+                  onSelectEmoji={insertEmoji}
+                  onOpenFullPicker={() => {
                     setShowEmojiPicker((prev) => !prev);
                     setShowAttachMenu(false);
                   }}
-                  className="p-2 text-gray-400 hover:text-amber-400 transition-colors shrink-0"
-                >
-                  <Smile className="w-5 h-5" />
-                </button>
+                  onPreloadFullPicker={preloadFullEmojiPicker}
+                  isArabic={isArabic}
+                  isFullPickerOpen={showEmojiPicker}
+                  disabled={!permissionCheck.canSend}
+                />
               </>
             )}
           </div>

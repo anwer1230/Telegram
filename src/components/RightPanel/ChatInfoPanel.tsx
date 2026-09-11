@@ -26,6 +26,8 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
+import { messageCache, deriveIndexedMediaType } from '../../services/IndexedDBMessageCache';
+import { Message } from '../../types';
 
 export const ChatInfoPanel: React.FC = () => {
   const {
@@ -159,12 +161,67 @@ export const ChatInfoPanel: React.FC = () => {
     }
   }, [activeMediaTab, activeChat?.id, isArabic]);
 
+  // IndexedDB Shared Media state (fast compound index queries)
+  const [cachedPhotos, setCachedPhotos] = useState<Message[]>([]);
+  const [cachedFiles, setCachedFiles] = useState<Message[]>([]);
+  const [cachedVoice, setCachedVoice] = useState<Message[]>([]);
+  const [cachedLinks, setCachedLinks] = useState<Message[]>([]);
+  const [mediaCounts, setMediaCounts] = useState({
+    photos: 0,
+    videos: 0,
+    files: 0,
+    voice: 0,
+    audio: 0,
+    links: 0,
+    pinned: 0,
+  });
+
+  useEffect(() => {
+    if (!activeChatId) return;
+    let isMounted = true;
+
+    // Fast count from IndexedDB B-tree indexes
+    messageCache.getMediaCounts(activeChatId).then((counts) => {
+      if (isMounted) setMediaCounts(counts);
+    });
+
+    // Fetch categorized media from IndexedDB compound index
+    Promise.all([
+      messageCache.getSharedMedia(activeChatId, 'photo', { limit: 60 }),
+      messageCache.getSharedMedia(activeChatId, 'document', { limit: 60 }),
+      messageCache.getSharedMedia(activeChatId, 'voice', { limit: 60 }),
+      messageCache.filterMessages({ chatId: activeChatId, mediaType: 'link', limit: 60 }),
+    ]).then(([photos, files, voice, links]) => {
+      if (isMounted) {
+        setCachedPhotos(photos);
+        setCachedFiles(files);
+        setCachedVoice(voice);
+        setCachedLinks(links);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeChatId]);
+
   if (!isRightPanelOpen || !activeChat) return null;
 
   const currentMessages = (activeChatId && messages[activeChatId]) || [];
-  const photoMessages = currentMessages.filter((m) => m.media?.type === 'photo' && m.media?.url);
-  const fileMessages = currentMessages.filter((m) => m.media?.type === 'document');
-  const voiceMessages = currentMessages.filter((m) => m.media?.type === 'voice');
+
+  const mergeMedia = (cached: Message[], memFilter: (m: Message) => boolean) => {
+    const map = new Map<string, Message>();
+    cached.forEach((m) => map.set(String(m.id), m));
+    currentMessages.filter(memFilter).forEach((m) => map.set(String(m.id), m));
+    return Array.from(map.values()).sort(
+      (a, b) => (b.epoch || b.rawDate || 0) - (a.epoch || a.rawDate || 0)
+    );
+  };
+
+  const photoMessages = mergeMedia(cachedPhotos, (m) => m.media?.type === 'photo' && !!m.media?.url);
+  const fileMessages = mergeMedia(cachedFiles, (m) => m.media?.type === 'document');
+  const voiceMessages = mergeMedia(cachedVoice, (m) => m.media?.type === 'voice');
+  const linkMessages = mergeMedia(cachedLinks, (m) => deriveIndexedMediaType(m) === 'link');
 
   const isSavedMessages = activeChat.type === 'saved';
 
@@ -429,6 +486,16 @@ export const ChatInfoPanel: React.FC = () => {
         >
           {isArabic ? `صوتيات (${voiceMessages.length})` : `Audio (${voiceMessages.length})`}
         </button>
+        <button
+          onClick={() => setActiveMediaTab('links')}
+          className={`flex-1 py-2 px-2 text-center whitespace-nowrap transition-colors ${
+            activeMediaTab === 'links'
+              ? 'border-b-2 border-[#2481cc] text-[#2481cc]'
+              : 'text-gray-400 hover:text-white'
+          }`}
+        >
+          {isArabic ? `الروابط (${linkMessages.length})` : `Links (${linkMessages.length})`}
+        </button>
         {activeChat.type === 'group' && (
           <button
             onClick={() => setActiveMediaTab('members')}
@@ -533,6 +600,42 @@ export const ChatInfoPanel: React.FC = () => {
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {activeMediaTab === 'links' && (
+          <div className="space-y-2">
+            {linkMessages.length === 0 ? (
+              <div className="text-center text-xs text-gray-500 py-6">
+                {isArabic ? 'لا توجد روابط مشاركة' : 'No shared links'}
+              </div>
+            ) : (
+              linkMessages.map((m) => {
+                const urlMatch = m.linkPreview?.url || m.text?.match(/https?:\/\/[^\s]+|t\.me\/[^\s]+/i)?.[0] || '';
+                const linkTitle = m.linkPreview?.title || urlMatch || (isArabic ? 'رابط' : 'Link');
+                const linkDesc = m.linkPreview?.description || m.text;
+                return (
+                  <a
+                    key={m.id}
+                    href={urlMatch.startsWith('http') ? urlMatch : `https://${urlMatch}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-3 p-2 rounded-lg bg-black/15 hover:bg-black/25 text-xs transition-colors block"
+                  >
+                    <div className="p-2 rounded-lg bg-sky-500/10 text-sky-400 shrink-0 mt-0.5">
+                      <Link className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-[#2481cc] truncate">{linkTitle}</div>
+                      {linkDesc && linkDesc !== linkTitle && (
+                        <div className="text-[11px] text-gray-400 line-clamp-2 mt-0.5">{linkDesc}</div>
+                      )}
+                      <div className="text-[10px] text-gray-500 mt-1">{m.timestamp}</div>
+                    </div>
+                  </a>
+                );
+              })
             )}
           </div>
         )}

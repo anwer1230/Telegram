@@ -1,19 +1,21 @@
 import fs from 'fs';
 import path from 'path';
-import { createRequire } from 'node:module';
+import { createRequire } from 'module';
 
-// Safe require helper that works across tsx (ESM) and bundled CJS (dist/server.cjs)
-const getSafeRequire = (): NodeRequire => {
-  if (typeof require === 'function') {
-    return require;
+// Safe dynamic require helper for Node.js v20+ ESM using import.meta.url to prevent ERR_INVALID_ARG_VALUE
+const getRequireTarget = (): string | URL => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return import.meta.url;
+    }
+  } catch (_) {}
+  if (typeof __filename !== 'undefined' && __filename && __filename !== '[eval]') {
+    return path.resolve(__filename);
   }
-  const metaUrl = (typeof import.meta !== 'undefined' && (import.meta as any)?.url)
-    ? (import.meta as any).url
-    : `file://${path.resolve(process.cwd(), 'server.ts')}`;
-  return createRequire(metaUrl);
+  return path.resolve(process.cwd(), 'package.json');
 };
 
-const safeRequire = getSafeRequire();
+const nodeRequire = createRequire(getRequireTarget());
 
 export interface StoredAutomationRule {
   id: string;
@@ -52,6 +54,21 @@ export interface StoredPrivateAutoReply {
   is_active: boolean;
   created_at?: number;
   updated_at?: number;
+}
+
+export interface LinkRadarLogItem {
+  id: string;
+  url: string;
+  type: 'public_group' | 'private_channel' | 'channel' | 'unknown';
+  action: 'joined' | 'skipped_private_channel' | 'skipped_channel' | 'throttled_hour' | 'throttled_cooldown' | 'failed' | 'already_member';
+  chat_title?: string;
+  chat_id?: string;
+  source_chat_id?: string;
+  source_chat_title?: string;
+  sender_name?: string;
+  saved_message_sent?: boolean;
+  details?: string;
+  created_at: number;
 }
 
 /**
@@ -93,9 +110,8 @@ export class SQLiteDatabaseService {
 
     // 1. Try native node:sqlite DatabaseSync (Node 22+)
     try {
-      // Use dynamic safeRequire to avoid bundling issues
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const nodeSqlite = safeRequire('node:sqlite');
+      // Use dynamic nodeRequire for ESM compatibility
+      const nodeSqlite = nodeRequire('node:sqlite');
       if (nodeSqlite && nodeSqlite.DatabaseSync) {
         const nativeDb = new nodeSqlite.DatabaseSync(this.dbFilePath);
         this.db = {
@@ -125,8 +141,7 @@ export class SQLiteDatabaseService {
 
     // 2. Fallback to sql.js (WebAssembly SQLite)
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const initSqlJs = safeRequire('sql.js');
+      const initSqlJs = nodeRequire('sql.js');
       // For synchronous fallback if possible or empty memory until loaded
       let fileBuffer: Buffer | null = null;
       if (fs.existsSync(this.dbFilePath)) {
@@ -242,6 +257,42 @@ export class SQLiteDatabaseService {
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS cached_messages (
+          id TEXT PRIMARY KEY,
+          chat_id TEXT NOT NULL,
+          sender_id TEXT,
+          sender_name TEXT,
+          text TEXT,
+          timestamp TEXT,
+          date TEXT,
+          raw_date INTEGER,
+          is_outgoing INTEGER DEFAULT 0,
+          status TEXT,
+          media_json TEXT,
+          reply_to_json TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS link_radar_logs (
+          id TEXT PRIMARY KEY,
+          url TEXT NOT NULL,
+          type TEXT NOT NULL,
+          action TEXT NOT NULL,
+          chat_title TEXT,
+          chat_id TEXT,
+          source_chat_id TEXT,
+          source_chat_title TEXT,
+          sender_name TEXT,
+          saved_message_sent INTEGER DEFAULT 0,
+          details TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cached_messages_chat_date ON cached_messages(chat_id, date);
+        CREATE INDEX IF NOT EXISTS idx_cached_messages_chat_rawdate ON cached_messages(chat_id, raw_date);
+        CREATE INDEX IF NOT EXISTS idx_link_radar_created_at ON link_radar_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_link_radar_action ON link_radar_logs(action);
       `);
 
       this.migrateInitialData();
@@ -863,6 +914,160 @@ export class SQLiteDatabaseService {
     } catch (e) {
       console.error(`[SQLite] deleteBatch(${id}) error:`, e);
       return false;
+    }
+  }
+
+  public saveCachedMessages(chatId: string, messages: any[]): void {
+    if (!this.db || !chatId || !Array.isArray(messages) || messages.length === 0) return;
+    try {
+      this.db.exec('BEGIN TRANSACTION');
+      const now = Date.now();
+      for (const m of messages) {
+        if (!m || !m.id) continue;
+        this.db.run(
+          `INSERT OR REPLACE INTO cached_messages (
+            id, chat_id, sender_id, sender_name, text, timestamp, date, raw_date, is_outgoing, status, media_json, reply_to_json, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            String(m.id),
+            String(chatId),
+            m.senderId ? String(m.senderId) : null,
+            m.senderName || '',
+            m.text || '',
+            m.timestamp || '',
+            m.date || '',
+            typeof m.rawDate === 'number' ? m.rawDate : 0,
+            m.isOutgoing ? 1 : 0,
+            m.status || 'read',
+            m.media ? JSON.stringify(m.media) : null,
+            m.replyTo ? JSON.stringify(m.replyTo) : null,
+            now,
+          ]
+        );
+      }
+      this.db.exec('COMMIT');
+    } catch (e) {
+      try {
+        this.db?.exec('ROLLBACK');
+      } catch (_) {}
+      console.warn(`[SQLite] saveCachedMessages(${chatId}) warning:`, e);
+    }
+  }
+
+  public getCachedMessages(chatId: string, limit = 50): any[] {
+    if (!this.db || !chatId) return [];
+    try {
+      const rows = this.db.all(
+        `SELECT * FROM cached_messages
+        WHERE chat_id = ?
+        ORDER BY raw_date ASC, created_at ASC
+        LIMIT ?`,
+        [String(chatId), limit]
+      );
+
+      return (rows || []).map((r: any) => ({
+        id: r.id,
+        chatId: r.chat_id,
+        senderId: r.sender_id,
+        senderName: r.sender_name,
+        text: r.text,
+        timestamp: r.timestamp,
+        date: r.date,
+        rawDate: r.raw_date,
+        isOutgoing: Boolean(r.is_outgoing),
+        status: r.status,
+        media: r.media_json ? JSON.parse(r.media_json) : undefined,
+        replyTo: r.reply_to_json ? JSON.parse(r.reply_to_json) : undefined,
+      }));
+    } catch (e) {
+      console.warn(`[SQLite] getCachedMessages(${chatId}) warning:`, e);
+      return [];
+    }
+  }
+
+  // =========================================================================
+  // LINK MONITOR & AUTO-JOIN RADAR (رادار المراقبة والانضمام الفوري)
+  // =========================================================================
+
+  public insertLinkRadarLog(item: LinkRadarLogItem): void {
+    if (!this.db) return;
+    try {
+      this.db.run(
+        `INSERT OR REPLACE INTO link_radar_logs 
+         (id, url, type, action, chat_title, chat_id, source_chat_id, source_chat_title, sender_name, saved_message_sent, details, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          item.id,
+          item.url,
+          item.type,
+          item.action,
+          item.chat_title || null,
+          item.chat_id || null,
+          item.source_chat_id || null,
+          item.source_chat_title || null,
+          item.sender_name || null,
+          item.saved_message_sent ? 1 : 0,
+          item.details || null,
+          item.created_at || Date.now(),
+        ]
+      );
+    } catch (e) {
+      console.warn('[SQLite] insertLinkRadarLog warning:', e);
+    }
+  }
+
+  public getLinkRadarLogs(limit = 100): LinkRadarLogItem[] {
+    if (!this.db) return [];
+    try {
+      const rows = this.db.all<any>(
+        `SELECT * FROM link_radar_logs ORDER BY created_at DESC LIMIT ?`,
+        [limit]
+      );
+      return (rows || []).map((r) => ({
+        id: r.id,
+        url: r.url,
+        type: r.type,
+        action: r.action,
+        chat_title: r.chat_title,
+        chat_id: r.chat_id,
+        source_chat_id: r.source_chat_id,
+        source_chat_title: r.source_chat_title,
+        sender_name: r.sender_name,
+        saved_message_sent: Boolean(r.saved_message_sent),
+        details: r.details,
+        created_at: r.created_at,
+      }));
+    } catch (e) {
+      console.warn('[SQLite] getLinkRadarLogs warning:', e);
+      return [];
+    }
+  }
+
+  public getLinkRadarHourlyJoinsCount(): number {
+    if (!this.db) return 0;
+    try {
+      const oneHourAgo = Date.now() - 3600 * 1000;
+      const row = this.db.get<{ count: number }>(
+        `SELECT COUNT(*) as count FROM link_radar_logs WHERE action = 'joined' AND created_at > ?`,
+        [oneHourAgo]
+      );
+      return row?.count || 0;
+    } catch (e) {
+      console.warn('[SQLite] getLinkRadarHourlyJoinsCount warning:', e);
+      return 0;
+    }
+  }
+
+  public getLastLinkRadarJoinTime(): number {
+    if (!this.db) return 0;
+    try {
+      const row = this.db.get<{ created_at: number }>(
+        `SELECT created_at FROM link_radar_logs WHERE action = 'joined' ORDER BY created_at DESC LIMIT 1`
+      );
+      return row?.created_at || 0;
+    } catch (e) {
+      console.warn('[SQLite] getLastLinkRadarJoinTime warning:', e);
+      return 0;
     }
   }
 

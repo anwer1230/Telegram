@@ -38,7 +38,7 @@ const STICKER_DATA_LOOKUP: Record<string, any> = {
   st_pepe_2: LOTTIE_FIRE_FLAME,
 };
 
-export const LottieSticker: React.FC<LottieStickerProps> = ({
+const LottieStickerComponent: React.FC<LottieStickerProps> = ({
   lottieData,
   stickerId,
   url,
@@ -126,3 +126,5 @@ export const LottieSticker: React.FC<LottieStickerProps> = ({
     </div>
   );
 };
+
+export const LottieSticker = React.memo(LottieStickerComponent);

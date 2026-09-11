@@ -13,12 +13,19 @@ import React, {
 import { ArrowDown, Pin, X, Loader2, Shield, Lock } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { MessageBubble } from './MessageBubble';
+import {
+  MessageSkeletonRow,
+  MessageThreadSkeleton,
+  generateHistoryFetchSkeletons,
+  SKELETON_HEIGHTS,
+  type SkeletonVariant,
+} from './MessageSkeleton';
 import { messagesController } from '../../core/MessagesController';
+import { getTelegramEpoch } from '../../utils/dateUtils';
 import {
   List as VariableSizeList,
   List as FixedSizeList,
   List,
-  useDynamicRowHeight,
   type ListImperativeAPI,
   type RowComponentProps,
 } from 'react-window';
@@ -27,7 +34,7 @@ import {
 export { VariableSizeList, FixedSizeList };
 
 interface GroupedItem {
-  type: 'message' | 'date_divider' | 'unread_divider' | 'origin_badge';
+  type: 'message' | 'date_divider' | 'unread_divider' | 'origin_badge' | 'skeleton';
   id: string;
   message?: any;
   dateText?: string;
@@ -35,6 +42,80 @@ interface GroupedItem {
   isGroupMiddle?: boolean;
   isGroupEnd?: boolean;
   isSingle?: boolean;
+  skeletonVariant?: SkeletonVariant;
+  estimatedHeight?: number;
+}
+
+/**
+ * High-performance deterministic row height calculator for react-window.
+ * Accurately calculates height in O(1) time without triggering ResizeObserver re-renders.
+ */
+function estimateItemHeight(item?: GroupedItem): number {
+  if (!item) return 64;
+  if (item.type === 'date_divider') return 40;
+  if (item.type === 'unread_divider') return 34;
+  if (item.type === 'origin_badge') return 116;
+  if (item.type === 'skeleton') {
+    return item.estimatedHeight || (item.skeletonVariant ? SKELETON_HEIGHTS[item.skeletonVariant] : 72);
+  }
+
+  const msg = item.message;
+  if (!msg) return 60;
+
+  let height = 8; // py-1 padding (4px top + 4px bottom)
+
+  // Sender Name (in groups/channels)
+  if (!msg.isOutgoing && msg.senderName) {
+    height += 20;
+  }
+  // Forwarded Header
+  if (msg.forwardedFrom) {
+    height += 24;
+  }
+  // Reply Quote
+  if (msg.replyTo) {
+    height += 38;
+  }
+
+  // Media attachments
+  if (msg.media) {
+    if (msg.media.type === 'photo' || msg.media.type === 'video') {
+      height += 220;
+    } else if (msg.media.type === 'voice' || msg.media.type === 'audio') {
+      height += 72;
+    } else if (msg.media.type === 'sticker') {
+      height += 140;
+    } else if (msg.media.type === 'document' || msg.media.type === 'file') {
+      height += 68;
+    } else if (msg.media.type === 'poll') {
+      const answersCount = msg.media.pollData?.answers?.length || 3;
+      height += 80 + answersCount * 36;
+    }
+  }
+
+  // Link preview card
+  if (msg.linkPreview) {
+    height += 110;
+  }
+
+  // Text content calculation
+  if (msg.text) {
+    const rawLines = msg.text.split('\n');
+    let totalLines = 0;
+    for (const line of rawLines) {
+      totalLines += Math.max(1, Math.ceil((line.length || 1) / 34));
+    }
+    height += Math.max(34, totalLines * 22 + 16);
+  } else if (!msg.media) {
+    height += 44;
+  }
+
+  // Reactions row
+  if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+    height += 28;
+  }
+
+  return Math.min(Math.max(48, height), 800);
 }
 
 interface MessageRowCustomProps {
@@ -93,17 +174,26 @@ const MessageRow = React.memo(({
       );
     }
 
+    if (item.type === 'skeleton' && item.skeletonVariant) {
+      return (
+        <div style={style}>
+          <MessageSkeletonRow variant={item.skeletonVariant} />
+        </div>
+      );
+    }
+
     if (item.message) {
       const msg = item.message;
       return (
         <div
           style={style}
           data-msg-id={msg.id}
-          className="px-3 sm:px-6 py-1"
+          dir="ltr"
+          className="px-2 sm:px-4 py-0.5 w-full"
         >
           <div
             id={`msg-bubble-container-${msg.id}`}
-            className={`transition-all duration-300 rounded-2xl ${
+            className={`transition-all duration-300 rounded-2xl w-full ${
               highlightedMessageId === msg.id
                 ? 'ring-2 ring-amber-400 bg-amber-500/20 p-1 shadow-lg shadow-amber-500/20 animate-pulse'
                 : ''
@@ -124,13 +214,49 @@ const MessageRow = React.memo(({
     }
 
     return <div style={style} />;
-}) as unknown as React.ComponentType<RowComponentProps<MessageRowCustomProps>>;
+  },
+  (prevProps, nextProps) => {
+    if (prevProps.index !== nextProps.index) return false;
+    const prevStyle: any = prevProps.style;
+    const nextStyle: any = nextProps.style;
+    if (
+      prevStyle?.top !== nextStyle?.top ||
+      prevStyle?.height !== nextStyle?.height ||
+      prevStyle?.transform !== nextStyle?.transform
+    ) {
+      return false;
+    }
+    const prevItem = prevProps.items[prevProps.index];
+    const nextItem = nextProps.items[nextProps.index];
+    if (prevItem !== nextItem) {
+      if (!prevItem || !nextItem) return false;
+      if (prevItem.id !== nextItem.id || prevItem.type !== nextItem.type) return false;
+      if (prevItem.message !== nextItem.message) return false;
+    }
+    const prevMsgId = prevItem?.message?.id;
+    const nextMsgId = nextItem?.message?.id;
+    if (prevMsgId && nextMsgId) {
+      const prevHighlighted = prevProps.highlightedMessageId === prevMsgId;
+      const nextHighlighted = nextProps.highlightedMessageId === nextMsgId;
+      if (prevHighlighted !== nextHighlighted) return false;
+    }
+    return true;
+  }
+) as unknown as React.ComponentType<RowComponentProps<MessageRowCustomProps>>;
 
-export const MessageList: React.FC = () => {
+export interface MessageListProps {
+  messages?: any[];
+  hidePinnedBar?: boolean;
+}
+
+export const MessageList: React.FC<MessageListProps> = ({
+  messages: propMessages,
+  hidePinnedBar = false,
+}) => {
   const {
     activeChatId,
     activeChat,
-    messages,
+    messages: contextMessages,
     pinMessage,
     settings,
     loadMoreChatMessages,
@@ -162,42 +288,134 @@ export const MessageList: React.FC = () => {
   const prevMessagesLengthRef = useRef<number>(0);
   const isUserNearBottomRef = useRef<boolean>(true);
   const activeChatIdRef = useRef<string | null>(activeChatId);
+  const lastVisitedChatIdRef = useRef<string | null>(null);
   const isInitialScrollDoneRef = useRef<boolean>(false);
   const lastVisibleIndexRef = useRef<number>(-1);
+  const lastScrollSaveTimeRef = useRef<number>(0);
 
   const currentMessages = useMemo(() => {
-    return (activeChatId && messages[activeChatId]) || [];
-  }, [activeChatId, messages]);
+    const raw = propMessages || ((activeChatId && contextMessages[activeChatId]) || []);
+    if (!raw.length || !activeChatId) return [];
+
+    // Filter strictly by activeChatId to prevent any cross-chat message overlap
+    const cleanActiveId = activeChatId.replace(/^chat_/, '');
+    const chatFiltered = raw.filter((m) => {
+      if (!m) return false;
+      const mChatId = String(m.chatId || '').replace(/^chat_/, '');
+      const mPeerId = String(m.peerId || '').replace(/^chat_/, '');
+      if (mChatId && mChatId === cleanActiveId) return true;
+      if (mPeerId && mPeerId === cleanActiveId) return true;
+      if (m.chatId === activeChatId) return true;
+      return !mChatId && !mPeerId && propMessages !== undefined;
+    });
+
+    // Deduplicate messages by unique ID to prevent duplicate rendering and overlap
+    const map = new Map<string, any>();
+    for (const m of chatFiltered) {
+      if (!m || m.id === undefined || m.id === null) continue;
+      const key = String(m.id);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, m);
+      } else {
+        map.set(key, { ...existing, ...m });
+      }
+    }
+
+    // Sort strictly ascending by date (oldest first, newest last) using specific message ID
+    return Array.from(map.values()).sort((a, b) => {
+      const epochA = getTelegramEpoch(a);
+      const epochB = getTelegramEpoch(b);
+      if (epochA !== epochB) return epochA - epochB;
+      const numA = Number(String(a.id).replace(/\D/g, '')) || 0;
+      const numB = Number(String(b.id).replace(/\D/g, '')) || 0;
+      if (numA !== numB) return numA - numB;
+      return String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true });
+    });
+  }, [activeChatId, propMessages, contextMessages]);
+
+  const currentMessagesRef = useRef(currentMessages);
+  currentMessagesRef.current = currentMessages;
 
   const pinnedMessages = useMemo(() => {
-    return currentMessages.filter((m) => m.isPinned);
+    const rawPinned = currentMessages.filter((m) => Boolean(m.isPinned));
+    if (!rawPinned.length) return [];
+
+    // Deduplicate pinned messages by specific message ID to prevent duplicate rendering and overlap
+    const map = new Map<string, any>();
+    for (const m of rawPinned) {
+      if (!m || m.id === undefined || m.id === null) continue;
+      const key = String(m.id);
+      if (!map.has(key)) {
+        map.set(key, m);
+      }
+    }
+
+    // Sort strictly ascending by date (oldest first, newest last) using specific message ID
+    return Array.from(map.values()).sort((a, b) => {
+      const epochA = getTelegramEpoch(a);
+      const epochB = getTelegramEpoch(b);
+      if (epochA !== epochB) return epochA - epochB;
+      const numA = Number(String(a.id).replace(/\D/g, '')) || 0;
+      const numB = Number(String(b.id).replace(/\D/g, '')) || 0;
+      if (numA !== numB) return numA - numB;
+      return String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true });
+    });
   }, [currentMessages]);
 
   const isArabic = settings.language === 'ar';
   const isLoadingOlder = activeChatId ? Boolean(isChatLoadingOlder[activeChatId]) : false;
   const hasMoreOnServer = activeChatId ? (chatHasMoreOlder[activeChatId] ?? true) : true;
 
-  // Dynamic row height cache for react-window with per-chat cache key
-  const dynamicRowHeight = useDynamicRowHeight({
-    defaultRowHeight: 64,
-    key: activeChatId || 'default',
-  });
+  // Dynamic skeletons generated on-the-fly during message history fetch
+  const olderSkeletons = useMemo<GroupedItem[]>(() => {
+    if (!isLoadingOlder) return [];
+    return generateHistoryFetchSkeletons('older') as GroupedItem[];
+  }, [isLoadingOlder]);
 
-  // Sort and group messages into renderable rows
+  // Sort and group messages into renderable rows, injecting dynamic skeleton placeholders during older history fetches
   const groupedItems = useMemo<GroupedItem[]>(() => {
-    if (!currentMessages || currentMessages.length === 0) return [];
-    const baseItems = messagesController.sortAndGroupMessages(currentMessages, readInboxMaxId) as GroupedItem[];
-    if (!hasMoreOnServer && baseItems.length > 0) {
-      return [
-        {
-          type: 'origin_badge',
-          id: 'origin_encrypted_badge',
-        },
-        ...baseItems,
-      ];
+    if (!currentMessages || currentMessages.length === 0) {
+      if (isLoadingOlder) {
+        return olderSkeletons;
+      }
+      return [];
     }
-    return baseItems;
-  }, [currentMessages, readInboxMaxId, hasMoreOnServer]);
+
+    const baseItems = messagesController.sortAndGroupMessages(currentMessages, readInboxMaxId) as GroupedItem[];
+    const items: GroupedItem[] = [];
+
+    if (isLoadingOlder && olderSkeletons.length > 0) {
+      items.push(...olderSkeletons);
+    } else if (!hasMoreOnServer && baseItems.length > 0) {
+      items.push({
+        type: 'origin_badge',
+        id: 'origin_encrypted_badge',
+      });
+    }
+
+    items.push(...baseItems);
+
+    // Deduplicate all grouped items by unique specific ID to prevent duplicate rendering and overlap in virtualized rows
+    const seenIds = new Set<string>();
+    const uniqueGrouped: GroupedItem[] = [];
+    for (const it of items) {
+      const uniqueKey = it.id ? String(it.id) : (it.message?.id ? `msg_${it.message.id}` : `idx_${uniqueGrouped.length}`);
+      if (seenIds.has(uniqueKey)) continue;
+      seenIds.add(uniqueKey);
+      uniqueGrouped.push(it);
+    }
+
+    return uniqueGrouped;
+  }, [currentMessages, readInboxMaxId, hasMoreOnServer, isLoadingOlder, olderSkeletons]);
+
+  const groupedItemsRef = useRef(groupedItems);
+  groupedItemsRef.current = groupedItems;
+
+  // Deterministic O(1) row height calculator eliminating ResizeObserver state recalculation storms
+  const getRowHeight = useCallback((index: number) => {
+    return estimateItemHeight(groupedItemsRef.current[index]);
+  }, []);
 
   // Map: Message ID -> Index in groupedItems (mandatory for virtualized lists to locate message positions)
   const messageIdToIndexMap = useMemo(() => {
@@ -210,6 +428,9 @@ export const MessageList: React.FC = () => {
     }
     return map;
   }, [groupedItems]);
+
+  const messageIdToIndexMapRef = useRef(messageIdToIndexMap);
+  messageIdToIndexMapRef.current = messageIdToIndexMap;
 
   // Load more older messages from MTProto API stream
   const handleLoadOlder = useCallback(async () => {
@@ -227,7 +448,7 @@ export const MessageList: React.FC = () => {
     await loadMoreChatMessages(activeChatId);
   }, [activeChatId, isLoadingOlder, hasMoreOnServer, loadMoreChatMessages]);
 
-  // Restore scroll anchor smoothly without jumping when older messages are prepended
+  // Restore scroll anchor smoothly without jumping when older messages or skeletons are prepended
   useLayoutEffect(() => {
     if (scrollAnchorRef.current.shouldRestore) {
       const el = listRef.current?.element;
@@ -239,12 +460,13 @@ export const MessageList: React.FC = () => {
       }
       scrollAnchorRef.current.shouldRestore = false;
     }
-  }, [currentMessages.length]);
+  }, [groupedItems.length]);
 
-  // Scroll to bottom helper
+  // Scroll to bottom helper - stabilized against message state changes
   const scrollToBottom = useCallback((behavior: 'smooth' | 'instant' = 'smooth') => {
-    if (groupedItems.length === 0) return;
-    const lastIndex = groupedItems.length - 1;
+    const items = groupedItemsRef.current;
+    if (items.length === 0) return;
+    const lastIndex = items.length - 1;
 
     listRef.current?.scrollToRow({
       index: lastIndex,
@@ -266,7 +488,8 @@ export const MessageList: React.FC = () => {
     isUserNearBottomRef.current = true;
 
     if (activeChatId && el) {
-      const latestMsgId = currentMessages[currentMessages.length - 1]?.id;
+      const msgs = currentMessagesRef.current;
+      const latestMsgId = msgs[msgs.length - 1]?.id;
       chatStore.saveLastReadPosition(activeChatId, {
         lastReadMessageId: latestMsgId,
         scrollTop: el.scrollHeight,
@@ -274,12 +497,14 @@ export const MessageList: React.FC = () => {
         isNearBottom: true,
       });
     }
-  }, [groupedItems.length, activeChatId, currentMessages]);
+  }, [activeChatId]);
 
   // Performs official Telegram scroll restoration upon opening or receiving messages
   const performInitialScroll = useCallback(() => {
     const el = listRef.current?.element;
-    if (!el || groupedItems.length === 0 || !activeChatId) return;
+    const items = groupedItemsRef.current;
+    const idMap = messageIdToIndexMapRef.current;
+    if (!el || items.length === 0 || !activeChatId) return;
 
     const savedPos = chatStore.getLastReadPosition(activeChatId);
     const savedNumericPos = chatStore.getScrollPosition(activeChatId);
@@ -287,7 +512,7 @@ export const MessageList: React.FC = () => {
     // Rule 1: If never opened before (neither in lastReadPositions nor ScrollPositions), immediately scroll to bottom
     if (!savedPos && savedNumericPos === undefined) {
       listRef.current?.scrollToRow({
-        index: groupedItems.length - 1,
+        index: items.length - 1,
         align: 'end',
         behavior: 'instant',
       });
@@ -301,7 +526,7 @@ export const MessageList: React.FC = () => {
     // Rule 2: If user was previously at bottom, scroll directly to bottom
     if (savedPos?.isNearBottom) {
       listRef.current?.scrollToRow({
-        index: groupedItems.length - 1,
+        index: items.length - 1,
         align: 'end',
         behavior: 'instant',
       });
@@ -315,10 +540,10 @@ export const MessageList: React.FC = () => {
     // Rule 3: Use Message ID -> Index map to scroll to exact message
     const targetMsgId = savedPos?.lastReadMessageId || (savedNumericPos ? String(savedNumericPos) : undefined);
     if (targetMsgId) {
-      let targetIndex = messageIdToIndexMap.get(targetMsgId);
+      let targetIndex = idMap.get(targetMsgId);
       if (targetIndex === undefined) {
         // Fallback linear search
-        targetIndex = groupedItems.findIndex((item) => String(item.message?.id) === targetMsgId);
+        targetIndex = items.findIndex((item) => String(item.message?.id) === targetMsgId);
       }
 
       if (targetIndex !== undefined && targetIndex !== -1) {
@@ -347,7 +572,7 @@ export const MessageList: React.FC = () => {
     } else {
       // STRICT RULE: NEVER jump to top or scrollTop = 0! Default to bottom
       listRef.current?.scrollToRow({
-        index: groupedItems.length - 1,
+        index: items.length - 1,
         align: 'end',
         behavior: 'instant',
       });
@@ -357,59 +582,58 @@ export const MessageList: React.FC = () => {
     }
 
     isInitialScrollDoneRef.current = true;
-  }, [activeChatId, groupedItems, messageIdToIndexMap]);
+  }, [activeChatId]);
 
-  // Handle activeChatId switching & scroll restoration
+  // Handle activeChatId switching & scroll restoration without re-triggering loops
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
     if (!activeChatId) return;
 
-    isInitialScrollDoneRef.current = false;
-    setShowScrollBottom(false);
-    setUnreadStreamCount(0);
-    setReadInboxMaxId(undefined);
-    prevMessagesLengthRef.current = currentMessages.length;
+    // Reset view flags and mark read ONLY when activeChatId changes to a new chat
+    if (lastVisitedChatIdRef.current !== activeChatId) {
+      lastVisitedChatIdRef.current = activeChatId;
+      isInitialScrollDoneRef.current = false;
+      setShowScrollBottom(false);
+      setUnreadStreamCount(0);
+      setReadInboxMaxId(undefined);
+      prevMessagesLengthRef.current = currentMessagesRef.current.length;
 
-    chatStore.markChatVisitedInCurrentSession(activeChatId);
-    markChatAsRead(activeChatId);
+      chatStore.markChatVisitedInCurrentSession(activeChatId);
+      markChatAsRead(activeChatId);
+    }
 
-    if (groupedItems.length > 0) {
-      requestAnimationFrame(performInitialScroll);
-      const t1 = setTimeout(performInitialScroll, 40);
-      const t2 = setTimeout(performInitialScroll, 120);
+    // When items become available, perform the initial scroll cleanly
+    if (groupedItems.length > 0 && !isInitialScrollDoneRef.current) {
+      const raf = requestAnimationFrame(() => {
+        performInitialScroll();
+      });
+      const t = setTimeout(() => {
+        performInitialScroll();
+      }, 50);
       return () => {
-        clearTimeout(t1);
-        clearTimeout(t2);
+        cancelAnimationFrame(raf);
+        clearTimeout(t);
       };
     }
-  }, [activeChatId, markChatAsRead, performInitialScroll, groupedItems.length, currentMessages.length]);
+  }, [activeChatId, groupedItems.length, performInitialScroll, markChatAsRead]);
 
-  // Trigger initial scroll as soon as messages are hydrated from IndexedDB / SQLite
-  useLayoutEffect(() => {
-    if (!activeChatId || groupedItems.length === 0) return;
-    if (!isInitialScrollDoneRef.current) {
-      performInitialScroll();
-      requestAnimationFrame(performInitialScroll);
-      const timer = setTimeout(performInitialScroll, 50);
-      return () => clearTimeout(timer);
-    }
-  }, [activeChatId, groupedItems.length, performInitialScroll]);
-
-  // Save read position when unmounting or switching chats
+  // Save read position when unmounting or switching chats (NOT on every message receive!)
   useEffect(() => {
     return () => {
       const el = listRef.current?.element;
       const currentChatId = activeChatIdRef.current;
+      const items = groupedItemsRef.current;
+      const msgs = currentMessagesRef.current;
       if (el && currentChatId) {
         const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
         const isNear = distance <= 140;
         let lastMsgId: string | undefined = undefined;
-        if (isNear && currentMessages.length > 0) {
-          lastMsgId = currentMessages[currentMessages.length - 1]?.id;
-        } else if (lastVisibleIndexRef.current >= 0 && lastVisibleIndexRef.current < groupedItems.length) {
+        if (isNear && msgs.length > 0) {
+          lastMsgId = msgs[msgs.length - 1]?.id;
+        } else if (lastVisibleIndexRef.current >= 0 && lastVisibleIndexRef.current < items.length) {
           for (let i = lastVisibleIndexRef.current; i >= 0; i--) {
-            if (groupedItems[i]?.message?.id) {
-              lastMsgId = groupedItems[i].message.id;
+            if (items[i]?.message?.id) {
+              lastMsgId = items[i].message.id;
               break;
             }
           }
@@ -422,7 +646,7 @@ export const MessageList: React.FC = () => {
         });
       }
     };
-  }, [groupedItems, currentMessages]);
+  }, [activeChatId]);
 
   // Handle incoming stream updates & outgoing messages with smart auto-scroll
   useEffect(() => {
@@ -468,28 +692,34 @@ export const MessageList: React.FC = () => {
     }
 
     if (activeChatId) {
-      let lastReadMsgId: string | undefined = undefined;
-      if (isNearBottom && currentMessages.length > 0) {
-        lastReadMsgId = currentMessages[currentMessages.length - 1]?.id;
-      } else if (lastVisibleIndexRef.current >= 0 && lastVisibleIndexRef.current < groupedItems.length) {
-        for (let i = lastVisibleIndexRef.current; i >= 0; i--) {
-          if (groupedItems[i]?.message?.id) {
-            lastReadMsgId = groupedItems[i].message.id;
-            break;
+      const now = Date.now();
+      // Throttle chatStore updates to at most once every 120ms during rapid scrolling
+      if (now - lastScrollSaveTimeRef.current > 120 || isNearBottom) {
+        lastScrollSaveTimeRef.current = now;
+
+        let lastReadMsgId: string | undefined = undefined;
+        if (isNearBottom && currentMessages.length > 0) {
+          lastReadMsgId = currentMessages[currentMessages.length - 1]?.id;
+        } else if (lastVisibleIndexRef.current >= 0 && lastVisibleIndexRef.current < groupedItems.length) {
+          for (let i = lastVisibleIndexRef.current; i >= 0; i--) {
+            if (groupedItems[i]?.message?.id) {
+              lastReadMsgId = groupedItems[i].message.id;
+              break;
+            }
           }
         }
-      }
 
-      chatStore.saveLastReadPosition(activeChatId, {
-        lastReadMessageId: lastReadMsgId,
-        scrollTop,
-        scrollHeight,
-        isNearBottom,
-      });
+        chatStore.saveLastReadPosition(activeChatId, {
+          lastReadMessageId: lastReadMsgId,
+          scrollTop,
+          scrollHeight,
+          isNearBottom,
+        });
 
-      if (lastReadMsgId) {
-        const numId = Number(lastReadMsgId);
-        chatStore.setScrollPosition(activeChatId, !isNaN(numId) ? numId : scrollTop);
+        if (lastReadMsgId) {
+          const numId = Number(lastReadMsgId);
+          chatStore.setScrollPosition(activeChatId, !isNaN(numId) ? numId : scrollTop);
+        }
       }
     }
 
@@ -569,13 +799,18 @@ export const MessageList: React.FC = () => {
   }), [groupedItems, highlightedMessageId]);
 
   const getRowKey = useCallback((index: number, data: MessageRowCustomProps) => {
-    return data.items[index]?.id || index;
+    const item = data.items[index];
+    if (!item) return index;
+    if (item.type === 'message' && item.message?.id !== undefined && item.message?.id !== null) {
+      return `msg_${item.message.id}`;
+    }
+    return item.id ? String(item.id) : index;
   }, []);
 
   return (
-    <div id="tg-message-list-root" className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div id="tg-message-list-root" key={activeChatId || 'empty'} className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Pinned Messages Bar */}
-      {pinnedMessages.length > 0 && (
+      {!hidePinnedBar && pinnedMessages.length > 0 && (
         <div
           id="tg-pinned-bar"
           className="z-10 px-4 py-2 flex items-center justify-between border-b backdrop-blur-md shadow-xs select-none shrink-0"
@@ -617,37 +852,49 @@ export const MessageList: React.FC = () => {
         </div>
       )}
 
-      {/* Empty State */}
+      {/* Loading or Empty State */}
       {groupedItems.length === 0 ? (
-        <div
-          id="tg-messages-empty-area"
-          className="flex-1 w-full h-full flex items-center justify-center text-center p-6 select-none tg-wallpaper-pattern"
-          style={{
-            backgroundColor: 'var(--tg-theme-chat-bg)',
-          }}
-        >
+        activeChatId && (!currentMessages.length || isLoadingOlder) ? (
           <div
-            className="p-6 rounded-3xl max-w-sm backdrop-blur-md border shadow-lg"
+            id="tg-messages-skeleton-area"
+            className="flex-1 w-full h-full overflow-hidden select-none tg-wallpaper-pattern"
             style={{
-              backgroundColor: 'var(--tg-theme-surface)',
-              borderColor: 'var(--tg-theme-border)',
+              backgroundColor: 'var(--tg-theme-chat-bg)',
             }}
           >
-            <div className="w-12 h-12 rounded-full bg-[#2481cc]/20 text-[#2481cc] flex items-center justify-center mx-auto mb-3">
-              <Shield className="w-6 h-6" />
-            </div>
-            <div className="font-bold text-base mb-1" style={{ color: 'var(--tg-theme-bubble-in-text)' }}>
-              {activeChat?.title}
-            </div>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              {isArabic
-                ? 'لا توجد رسائل سابقة في هذه المحادثة. ابدأ بالتراسل الآن مع مزامنة سحابية فورية!'
-                : 'No messages yet in this chat. Start messaging now with instant cloud synchronization!'}
-            </p>
+            <MessageThreadSkeleton count={7} />
           </div>
-        </div>
+        ) : (
+          <div
+            id="tg-messages-empty-area"
+            className="flex-1 w-full h-full flex items-center justify-center text-center p-6 select-none tg-wallpaper-pattern"
+            style={{
+              backgroundColor: 'var(--tg-theme-chat-bg)',
+            }}
+          >
+            <div
+              className="p-6 rounded-3xl max-w-sm backdrop-blur-md border shadow-lg"
+              style={{
+                backgroundColor: 'var(--tg-theme-surface)',
+                borderColor: 'var(--tg-theme-border)',
+              }}
+            >
+              <div className="w-12 h-12 rounded-full bg-[#2481cc]/20 text-[#2481cc] flex items-center justify-center mx-auto mb-3">
+                <Shield className="w-6 h-6" />
+              </div>
+              <div className="font-bold text-base mb-1" style={{ color: 'var(--tg-theme-bubble-in-text)' }}>
+                {activeChat?.title}
+              </div>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                {isArabic
+                  ? 'لا توجد رسائل سابقة في هذه المحادثة. ابدأ بالتراسل الآن مع مزامنة سحابية فورية!'
+                  : 'No messages yet in this chat. Start messaging now with instant cloud synchronization!'}
+              </p>
+            </div>
+          </div>
+        )
       ) : (
-        /* Virtualized Message Feed Container powered by react-window VariableSizeList */
+        /* Virtualized Message Feed Container powered by react-window VariableSizeList with O(1) dynamic row heights */
         <VariableSizeList
           id="tg-messages-scroll-area"
           listRef={listRef}
@@ -658,7 +905,7 @@ export const MessageList: React.FC = () => {
             width: '100%',
           }}
           rowCount={groupedItems.length}
-          rowHeight={dynamicRowHeight}
+          rowHeight={getRowHeight}
           rowComponent={MessageRow as any}
           rowProps={rowProps}
           rowKey={getRowKey}

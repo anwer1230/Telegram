@@ -51,6 +51,9 @@ import {
   Smartphone,
   Trash2,
   Volume2,
+  Volume1,
+  VolumeX,
+  Play,
   Vibrate,
   Eye,
   SlidersHorizontal,
@@ -67,6 +70,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTelegram } from '../../context/TelegramContext';
+import { telegramAudio } from '../../utils/audioNotification';
+import { audioService } from '../../services/audioService';
 import { SettingsSubPage } from '../../types';
 import { TwoStepVerificationView } from './TwoStepVerificationView';
 import { twoStepController } from '../../core/messenger/TwoStepVerificationController';
@@ -299,6 +304,7 @@ export const SettingsModal: React.FC = () => {
                 {settingsSubPage === 'member_requests' && <MemberRequestsView onBack={goBack} />}
                 {settingsSubPage === 'cache_by_chats' && <CacheByChatsView onBack={goBack} />}
                 {settingsSubPage === 'app_update' && <AppUpdateSettingsView onBack={goBack} />}
+                {settingsSubPage === 'settings_screen' && <AccountProfileSettings onBack={goBack} />}
               </motion.div>
             </AnimatePresence>
           </motion.div>
@@ -484,9 +490,33 @@ const MainSettingsView: React.FC<{
         {/* Telegram Main Settings (Colored Circles) */}
         <div className="py-2 bg-[#17212b]">
           <div className="px-4 py-1.5 text-[11px] font-bold text-[#5288c1] uppercase tracking-wider">
-            {isArabic ? 'إعدادات تيليجرام' : 'Telegram Settings'}
+            {isArabic ? 'إعدادات تيليجرام والميزات' : 'Telegram Settings & Features'}
           </div>
 
+          {/* رادار المراقبة والانضمام الفوري (Link Monitor & Auto-Join Radar) */}
+          <SettingsListItem
+            icon={<Radio className="w-5 h-5 text-sky-400 animate-pulse" />}
+            iconBg="bg-sky-500/20"
+            title={isArabic ? 'رادار المراقبة والانضمام الفوري' : 'Link Monitor & Auto-Join Radar'}
+            subtitle={isArabic ? 'مراقبة الروابط دائماً، انضمام فوري للمجموعات العامة، إشعار في المحفوظات، وتجاهل القنوات الخاصة' : 'Always-on radar: auto-joins public groups, ignores private channels, 1-min cooldown, max 10/hr'}
+            onClick={() => {
+              onClose();
+              setActiveModal('link-monitor');
+            }}
+            rightBadge={
+              <span className="px-2 py-0.5 text-[10px] font-bold bg-sky-500/25 text-sky-300 border border-sky-400/40 rounded-full font-mono">
+                {isArabic ? 'شغال دائماً' : 'ALWAYS ON'}
+              </span>
+            }
+          />
+
+          <SettingsListItem
+            icon={<Settings className="w-5 h-5 text-cyan-400" />}
+            iconBg="bg-cyan-500/20"
+            title={isArabic ? 'إعدادات Telegram Web (المظهر، الأصوات، البيانات، النطق)' : 'Telegram Web Settings Screen'}
+            subtitle={isArabic ? 'الوضع الليلي، نغمات الإشعارات، توفير البيانات، قراءة الرسائل TTS' : 'Appearance, Sounds & Ringtones, Data Saver, Speech TTS'}
+            onClick={() => onNavigate('settings_screen')}
+          />
           <SettingsListItem
             icon={<User className="w-5 h-5 text-blue-400" />}
             iconBg="bg-blue-500/20"
@@ -1624,14 +1654,51 @@ const SecurityRow: React.FC<{
 // 7. NOTIFICATIONS & SOUNDS VIEW (Screenshot 11)
 // ==========================================
 const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
-  const { settings, showToast, triggerNotification, fcmDiagnostic, setSettingsSubPage, activeChatId } = useTelegram();
+  const { settings, updateSettings, showToast, triggerNotification, fcmDiagnostic, setSettingsSubPage, activeChatId } = useTelegram();
   const isArabic = settings.language === 'ar';
+
+  const isMuted = settings.muteChatSounds !== undefined ? Boolean(settings.muteChatSounds) : true;
+  const soundVolume = typeof settings.soundVolume === 'number' ? settings.soundVolume : 0;
 
   const [privateChats, setPrivateChats] = useState(true);
   const [groups, setGroups] = useState(true);
   const [channels, setChannels] = useState(true);
-  const [inAppSounds, setInAppSounds] = useState(true);
+  const [inAppSounds, setInAppSounds] = useState(settings.inAppSounds ?? false);
   const [inAppVibrate, setInAppVibrate] = useState(true);
+
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    updateSettings({ muteChatSounds: nextMuted });
+    telegramAudio.setMuted(nextMuted);
+    audioService.setMuted(nextMuted);
+    showToast(
+      nextMuted
+        ? (isArabic ? 'تم كتم أصوات المحادثات 🔕' : 'Chat sounds muted 🔕')
+        : (isArabic ? 'تم تفعيل أصوات المحادثات 🔔' : 'Chat sounds unmuted 🔔'),
+      nextMuted ? '🔕' : '🔔'
+    );
+  };
+
+  const handleVolumeChange = (newVol: number) => {
+    const clamped = Math.max(0, Math.min(100, newVol));
+    updateSettings({ soundVolume: clamped });
+    telegramAudio.setVolume(clamped);
+    audioService.setVolume(clamped);
+    if (clamped > 0 && isMuted) {
+      updateSettings({ muteChatSounds: false });
+      telegramAudio.setMuted(false);
+      audioService.setMuted(false);
+    }
+  };
+
+  const handlePlayPreview = () => {
+    if (isMuted || soundVolume === 0) {
+      showToast(isArabic ? 'أصوات المحادثات مكتومة حالياً 🔕' : 'Chat sounds are currently muted 🔕', '⚠️');
+      return;
+    }
+    telegramAudio.playMessageChime();
+    showToast(isArabic ? `معاينة الصوت بنسبة ${soundVolume}%` : `Preview chime at ${soundVolume}%`, '🔔');
+  };
 
   const handleToggleNotify = async (peerType: 'users' | 'chats' | 'broadcasts', enable: boolean) => {
     if (peerType === 'users') setPrivateChats(enable);
@@ -1659,11 +1726,191 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
     }
   };
 
+  const soundOptions: Array<{ id: 'classic' | 'beep' | 'chime' | 'bubble' | 'silent'; label: string }> = [
+    { id: 'classic', label: isArabic ? 'كلاسيك تيليجرام' : 'Classic Telegram' },
+    { id: 'chime', label: isArabic ? 'رنين جرس' : 'Crystal Chime' },
+    { id: 'bubble', label: isArabic ? 'فقاعة مائية' : 'Bubble Pop' },
+    { id: 'beep', label: isArabic ? 'نغمة تنبيه' : 'Beep Tone' },
+    { id: 'silent', label: isArabic ? 'صامت' : 'Silent' },
+  ];
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-[#0e1621]">
       <SubPageHeader title={isArabic ? 'الإشعارات والأصوات' : 'Notifications and Sounds'} onBack={onBack} />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Real Chat Mute & Volume Control Section */}
+        <div className="bg-[#17212b] rounded-2xl border border-white/10 overflow-hidden shadow-lg">
+          <div className="p-3.5 pb-2 text-[11px] font-bold text-[#5288c1] uppercase flex items-center justify-between">
+            <span>{isArabic ? 'أصوات المحادثات والتحكم بالصوت' : 'Chat Sounds & Volume'}</span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${isMuted ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+              {isMuted ? (isArabic ? 'مكتوم' : 'Muted') : `${soundVolume}%`}
+            </span>
+          </div>
+
+          {/* Mute Chat Sounds Toggle */}
+          <div className="px-4 py-3 flex items-center justify-between border-t border-white/5 hover:bg-white/[0.02] transition-colors">
+            <div className="flex items-center gap-3">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
+                isMuted ? 'bg-rose-500/20 text-rose-400' : 'bg-[#2481cc]/20 text-[#5288c1]'
+              }`}>
+                {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white flex items-center gap-2">
+                  <span>{isArabic ? 'كتم أصوات المحادثات' : 'Mute Chat Sounds'}</span>
+                  {isMuted && (
+                    <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.2 rounded-md font-semibold">
+                      {isArabic ? 'مكتوم' : 'Muted'}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-gray-400">
+                  {isArabic
+                    ? 'كتم تشغيل النغمات عند إرسال واستقبال الرسائل'
+                    : 'Mute all sounds for incoming & outgoing messages'}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleToggleMute}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                isMuted ? 'bg-rose-500' : 'bg-[#2481cc]'
+              }`}
+              role="switch"
+              aria-checked={isMuted}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  isMuted ? (isArabic ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Volume Control Slider */}
+          <div className="px-4 py-3.5 border-t border-white/5 space-y-2.5 bg-black/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-semibold text-gray-200">
+                <button
+                  type="button"
+                  onClick={handleToggleMute}
+                  title={isMuted ? (isArabic ? 'إلغاء الكتم' : 'Unmute') : (isArabic ? 'كتم الصوت' : 'Mute')}
+                  className="p-1 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  {isMuted || soundVolume === 0 ? (
+                    <VolumeX className="w-4 h-4 text-rose-400" />
+                  ) : soundVolume < 50 ? (
+                    <Volume1 className="w-4 h-4 text-amber-400" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 text-[#5288c1]" />
+                  )}
+                </button>
+                <span>{isArabic ? 'مستوى حجم الصوت' : 'Sound Volume'}</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-bold text-[#5288c1] bg-[#2481cc]/15 px-2 py-0.5 rounded-md">
+                  {soundVolume}%
+                </span>
+                <button
+                  type="button"
+                  onClick={handlePlayPreview}
+                  title={isArabic ? 'معاينة الصوت' : 'Preview sound'}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-[#2481cc]/20 hover:bg-[#2481cc]/30 text-[#5288c1] hover:text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Play className="w-3 h-3 fill-current" />
+                  <span>{isArabic ? 'معاينة' : 'Test'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 font-mono">0%</span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={isMuted ? 0 : soundVolume}
+                onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                className="flex-1 h-2 bg-gray-700/60 rounded-lg appearance-none cursor-pointer accent-[#2481cc]"
+              />
+              <span className="text-[11px] text-gray-500 font-mono">100%</span>
+            </div>
+          </div>
+
+          {/* Sound Type Selection */}
+          <div className="p-3.5 border-t border-white/5 space-y-2">
+            <div className="text-[11px] font-bold text-gray-400 uppercase">
+              {isArabic ? 'نغمة الإشعار الافتراضية' : 'Notification Ringtone'}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {soundOptions.map((opt) => {
+                const isSelected = (settings.notificationSound || 'silent') === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      updateSettings({ notificationSound: opt.id });
+                      audioService.setSoundType(opt.id);
+                      if (!isMuted && opt.id !== 'silent') {
+                        audioService.playNotification(opt.id);
+                      }
+                    }}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium transition-all ${
+                      isSelected
+                        ? 'border-[#2481cc] bg-[#2481cc]/15 text-white font-bold shadow-sm'
+                        : 'border-white/5 hover:bg-white/5 text-gray-300'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {isSelected && <span className="w-2 h-2 rounded-full bg-[#2481cc]" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Send and Click Sound Toggles */}
+          <div className="border-t border-white/5 divide-y divide-white/5">
+            <ToggleRow
+              title={isArabic ? 'صوت إرسال الرسائل' : 'Send Message Sound'}
+              checked={Boolean(settings.enableSendSound ?? true)}
+              onChange={(v) => {
+                updateSettings({ enableSendSound: v });
+                if (v && !isMuted) audioService.playBubblePop();
+              }}
+            />
+            <ToggleRow
+              title={isArabic ? 'صوت نقر الأزرار والتفاعل' : 'Button Click Sound'}
+              checked={Boolean(settings.enableClickSound ?? true)}
+              onChange={(v) => {
+                updateSettings({ enableClickSound: v });
+                if (v && !isMuted) audioService.playClick();
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Chat Notifications */}
+        <div className="bg-[#17212b] rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden">
+          <div className="p-3 text-[11px] font-bold text-[#5288c1] uppercase">{isArabic ? 'إشعارات المحادثات' : 'Chat Notifications'}</div>
+          <ToggleRow title={isArabic ? 'المحادثات الخاصة' : 'Private Chats'} checked={privateChats} onChange={(v) => handleToggleNotify('users', v)} />
+          <ToggleRow title={isArabic ? 'المجموعات' : 'Groups'} checked={groups} onChange={(v) => handleToggleNotify('chats', v)} />
+          <ToggleRow title={isArabic ? 'القنوات' : 'Channels'} checked={channels} onChange={(v) => handleToggleNotify('broadcasts', v)} />
+        </div>
+
+        {/* In-App Notifications */}
+        <div className="bg-[#17212b] rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden">
+          <div className="p-3 text-[11px] font-bold text-[#5288c1] uppercase">{isArabic ? 'إشعارات داخل التطبيق' : 'In-App Notifications'}</div>
+          <ToggleRow title={isArabic ? 'أصوات داخل التطبيق' : 'In-App Sounds'} checked={inAppSounds} onChange={setInAppSounds} />
+          <ToggleRow title={isArabic ? 'اهتزازات داخل التطبيق' : 'In-App Vibrate'} checked={inAppVibrate} onChange={setInAppVibrate} />
+        </div>
+
         {/* FCM Push Notification Diagnostic Hub Card */}
         <div className="bg-[#17212b] rounded-2xl border border-[#5288c1]/30 p-4 space-y-3 shadow-lg">
           <div className="flex items-center justify-between">
@@ -1707,36 +1954,22 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
           </button>
         </div>
 
-        {/* Chat Notifications */}
-        <div className="bg-[#17212b] rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden">
-          <div className="p-3 text-[11px] font-bold text-[#5288c1] uppercase">{isArabic ? 'إشعارات المحادثات' : 'Chat Notifications'}</div>
-          <ToggleRow title={isArabic ? 'المحادثات الخاصة' : 'Private Chats'} checked={privateChats} onChange={(v) => handleToggleNotify('users', v)} />
-          <ToggleRow title={isArabic ? 'المجموعات' : 'Groups'} checked={groups} onChange={(v) => handleToggleNotify('chats', v)} />
-          <ToggleRow title={isArabic ? 'القنوات' : 'Channels'} checked={channels} onChange={(v) => handleToggleNotify('broadcasts', v)} />
-        </div>
-
-        {/* In-App Notifications */}
-        <div className="bg-[#17212b] rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden">
-          <div className="p-3 text-[11px] font-bold text-[#5288c1] uppercase">{isArabic ? 'إشعارات داخل التطبيق' : 'In-App Notifications'}</div>
-          <ToggleRow title={isArabic ? 'أصوات داخل التطبيق' : 'In-App Sounds'} checked={inAppSounds} onChange={setInAppSounds} />
-          <ToggleRow title={isArabic ? 'اهتزازات داخل التطبيق' : 'In-App Vibrate'} checked={inAppVibrate} onChange={setInAppVibrate} />
-        </div>
-
         {/* Test Notification Trigger */}
         <button
           onClick={() => {
             triggerNotification({
               category: 'message',
-              title: isArabic ? 'منار. العنزي' : 'Manar Al-Anzi',
-              body: isArabic ? 'تم تحديث كافة الأيقونات والترتيب بنجاح 🚀' : 'All icons and order updated flawlessly 🚀',
-              senderName: 'System',
+              title: isArabic ? 'منار العنزي' : 'Manar Al-Anzi',
+              body: isArabic ? 'مرحباً! يمكنك الآن تمرير الإشعار يميناً أو يساراً لاختفائه، أو النقر على ×.' : 'Hello! You can now swipe this notification left or right, or click × to dismiss.',
+              senderName: 'Manar',
               avatar: '',
             });
-            showToast(isArabic ? 'تم إرسال إشعار تجريبي' : 'Test notification fired', '🔔');
+            showToast(isArabic ? 'تم إرسال إشعار تجريبي (اسحبه يميناً أو يساراً لاختفائه)' : 'Test notification sent (swipe left or right to dismiss)', '🔔');
           }}
-          className="w-full py-3 bg-[#2481cc]/80 hover:bg-[#2481cc] rounded-xl text-xs font-bold text-white transition-colors"
+          className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] active:bg-[#195a88] rounded-xl text-xs font-bold text-white transition-colors shadow-lg flex items-center justify-center gap-2"
         >
-          {isArabic ? 'تجربة إشعار داخلي (In-App Preview)' : 'Test In-App Notification'}
+          <Bell className="w-4 h-4" />
+          <span>{isArabic ? 'تجربة إشعار داخلي (اختبر التمرير وزر ×)' : 'Test In-App Notification (Test Swipe & ×)'}</span>
         </button>
       </div>
     </div>

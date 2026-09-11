@@ -12,9 +12,8 @@
  */
 
 import React from 'react';
-import { Chat, Message, MessageMedia, ReplyInfo } from '../types';
+import { Chat, Message } from '../types';
 import { telegramDB } from '../utils/sqliteStorage';
-import { SecureSessionStorage } from '../utils/SecureSessionStorage';
 
 export interface ChatReadPosition {
   chatId: string;
@@ -29,29 +28,6 @@ export interface InSessionScrollState extends ChatReadPosition {}
 
 export type ConversationSyncStatus = 'synced' | 'partial' | 'syncing';
 
-export interface QueuedOutgoingMessage {
-  id: string;
-  chatId: string;
-  text: string;
-  media?: MessageMedia;
-  replyTo?: ReplyInfo;
-  replyToMsgId?: string;
-  timestamp: string;
-  date: string;
-  epoch: number;
-  rawDate?: number;
-  senderId: string;
-  senderName?: string;
-  senderAvatar?: string;
-  status: 'pending' | 'sending' | 'failed';
-  attempts: number;
-  queuedAt: number;
-  lastAttemptAt?: number;
-  error?: string;
-  phone?: string;
-  sessionString?: string;
-}
-
 export class ChatStore {
   private static instance: ChatStore;
 
@@ -64,10 +40,6 @@ export class ChatStore {
   // Tracks whether a conversation is fully synced with the server ('synced' | 'partial' | 'syncing')
   public syncStatus: Record<string, ConversationSyncStatus> = {};
 
-  // Persistent queue for pending outgoing messages captured when offline / connection is lost
-  public pendingOutgoingQueue: QueuedOutgoingMessage[] = [];
-  private isSyncingPending = false;
-
   // Tracks message IDs that have been verified by the cloud per chat
   private verifiedMessageIds: Map<string, Set<string>> = new Map();
 
@@ -76,6 +48,7 @@ export class ChatStore {
 
   // Tracks chats visited during the current session
   private visitedChatsInCurrentSession: Set<string> = new Set();
+  private persistDebounceTimer: any = null;
 
   // Listeners for store subscriptions
   private listeners: Set<() => void> = new Set();
@@ -91,7 +64,6 @@ export class ChatStore {
   private readonly MESSAGES_INDEX_KEY = 'tg_offline_cached_chat_ids_v1';
   private readonly SYNC_STATUS_KEY = 'tg_conversation_sync_status_v1';
   private readonly VERIFIED_MSGS_KEY = 'tg_verified_messages_v1';
-  private readonly OUTGOING_QUEUE_KEY = 'tg_offline_outgoing_queue_v1';
 
   // Synchronous in-memory caches to guarantee ZERO white screens on startup
   private cachedChats: Chat[] = [];
@@ -233,49 +205,42 @@ export class ChatStore {
           console.warn('[chatStore] Error parsing verified messages:', e);
         }
       }
-
-      // 7. Load offline pending outgoing message queue
-      const storedQueue = localStorage.getItem(this.OUTGOING_QUEUE_KEY);
-      if (storedQueue) {
-        try {
-          const parsedQueue = JSON.parse(storedQueue);
-          if (Array.isArray(parsedQueue)) {
-            this.pendingOutgoingQueue = parsedQueue.map((item) => ({
-              ...item,
-              status: item.status === 'sending' ? 'pending' : item.status,
-            }));
-          }
-        } catch (e) {
-          console.warn('[chatStore] Error parsing pending outgoing queue:', e);
-        }
-      }
     } catch (err) {
       console.warn('[chatStore] Error reading positions from localStorage:', err);
     }
   }
 
   /**
-   * Persist pending outgoing message queue safely to localStorage
-   */
-  public persistPendingOutgoingQueue(): void {
-    if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem(this.OUTGOING_QUEUE_KEY, JSON.stringify(this.pendingOutgoingQueue));
-    } catch (err) {
-      console.warn('[chatStore] Error saving pending outgoing queue to localStorage:', err);
-    }
-  }
-
-  /**
-   * Persist both ScrollPositions and lastReadPositions safely to localStorage
+   * Persist both ScrollPositions and lastReadPositions safely to localStorage (Debounced to prevent UI lag on scroll)
    */
   private persistToStorage(): void {
     if (typeof window === 'undefined') return;
+    if (this.persistDebounceTimer) return;
+    this.persistDebounceTimer = setTimeout(() => {
+      this.persistDebounceTimer = null;
+      try {
+        localStorage.setItem(this.SCROLL_POSITIONS_KEY, JSON.stringify(this.ScrollPositions));
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.lastReadPositions));
+      } catch (err) {
+        console.warn('[chatStore] Error saving positions to localStorage:', err);
+      }
+    }, 250);
+  }
+
+  /**
+   * Immediately flushes debounced scroll positions to localStorage
+   */
+  public flushStorage(): void {
+    if (typeof window === 'undefined') return;
+    if (this.persistDebounceTimer) {
+      clearTimeout(this.persistDebounceTimer);
+      this.persistDebounceTimer = null;
+    }
     try {
       localStorage.setItem(this.SCROLL_POSITIONS_KEY, JSON.stringify(this.ScrollPositions));
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.lastReadPositions));
     } catch (err) {
-      console.warn('[chatStore] Error saving positions to localStorage:', err);
+      console.warn('[chatStore] Error flushing positions to localStorage:', err);
     }
   }
 
@@ -597,293 +562,105 @@ export class ChatStore {
     return result;
   }
 
-  // ==========================================
-  // OFFLINE MESSAGE QUEUING & SYNCHRONIZATION
-  // ==========================================
-
   /**
-   * Captures a pending outgoing message when offline or connection is lost.
-   * Persists to storage and notifies subscribers.
+   * Delta Update Mechanism:
+   * Retrieves the latest known message ID for a given chat from local cache.
    */
-  public enqueueOutgoingMessage(
-    msg: Partial<QueuedOutgoingMessage> & { id: string; chatId: string; text: string }
-  ): QueuedOutgoingMessage {
-    const existingIndex = this.pendingOutgoingQueue.findIndex((item) => item.id === msg.id);
-    const existing = existingIndex >= 0 ? this.pendingOutgoingQueue[existingIndex] : undefined;
+  public getLastKnownMessageId(chatId: string): string | undefined {
+    if (!chatId) return undefined;
+    const msgs = this.getCachedMessages(chatId);
+    if (!msgs || msgs.length === 0) return undefined;
 
-    const queuedItem: QueuedOutgoingMessage = {
-      id: msg.id,
-      chatId: msg.chatId,
-      text: msg.text,
-      media: msg.media ?? existing?.media,
-      replyTo: msg.replyTo ?? existing?.replyTo,
-      replyToMsgId: msg.replyToMsgId ?? msg.replyTo?.messageId ?? existing?.replyToMsgId,
-      timestamp: msg.timestamp || existing?.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      date: msg.date || existing?.date || new Date().toISOString().split('T')[0],
-      epoch: msg.epoch || existing?.epoch || Date.now(),
-      rawDate: msg.rawDate || existing?.rawDate || Math.floor(Date.now() / 1000),
-      senderId: msg.senderId || existing?.senderId || 'user_self',
-      senderName: msg.senderName || existing?.senderName || 'You',
-      senderAvatar: msg.senderAvatar || existing?.senderAvatar,
-      status: 'pending',
-      attempts: existing ? existing.attempts : 0,
-      queuedAt: existing ? existing.queuedAt : Date.now(),
-      phone: msg.phone || existing?.phone,
-      sessionString: msg.sessionString || existing?.sessionString,
-    };
+    let maxIdNum = 0;
+    let maxIdStr: string | undefined = undefined;
 
-    if (existingIndex >= 0) {
-      this.pendingOutgoingQueue[existingIndex] = queuedItem;
-    } else {
-      this.pendingOutgoingQueue.push(queuedItem);
-    }
-
-    // Persist queue to localStorage
-    this.persistPendingOutgoingQueue();
-
-    // Also ensure the message exists in the local cache with 'sending' status for immediate UI feedback
-    const messageModel: Message = {
-      id: queuedItem.id,
-      chatId: queuedItem.chatId,
-      senderId: queuedItem.senderId,
-      senderName: queuedItem.senderName,
-      senderAvatar: queuedItem.senderAvatar,
-      text: queuedItem.text,
-      timestamp: queuedItem.timestamp,
-      date: queuedItem.date,
-      epoch: queuedItem.epoch,
-      rawDate: queuedItem.rawDate,
-      isOutgoing: true,
-      status: 'sending',
-      media: queuedItem.media,
-      replyTo: queuedItem.replyTo,
-    };
-    this.saveMessage(queuedItem.chatId, messageModel, { isCloudVerified: false });
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('tg-outgoing-message-enqueued', {
-          detail: { message: queuedItem },
-        })
-      );
-    }
-
-    this.notifyListeners();
-    return queuedItem;
-  }
-
-  /**
-   * Retrieves pending outgoing messages, optionally filtered by chatId.
-   */
-  public getPendingOutgoingMessages(chatId?: string): QueuedOutgoingMessage[] {
-    if (chatId) {
-      return this.pendingOutgoingQueue.filter((item) => item.chatId === chatId);
-    }
-    return [...this.pendingOutgoingQueue];
-  }
-
-  /**
-   * Returns count of queued messages.
-   */
-  public getPendingOutgoingCount(chatId?: string): number {
-    return this.getPendingOutgoingMessages(chatId).length;
-  }
-
-  /**
-   * Checks if a message ID is in the offline pending queue.
-   */
-  public isMessageQueued(id: string): boolean {
-    return this.pendingOutgoingQueue.some((item) => item.id === id);
-  }
-
-  /**
-   * Removes a message from the pending queue (e.g. after successful sync or user cancellation).
-   */
-  public removePendingOutgoingMessage(id: string): void {
-    const initialLen = this.pendingOutgoingQueue.length;
-    this.pendingOutgoingQueue = this.pendingOutgoingQueue.filter((item) => item.id !== id);
-    if (this.pendingOutgoingQueue.length !== initialLen) {
-      this.persistPendingOutgoingQueue();
-      this.notifyListeners();
-    }
-  }
-
-  /**
-   * Clears pending queue for a specific chat or all chats.
-   */
-  public clearPendingOutgoingMessages(chatId?: string): void {
-    if (chatId) {
-      this.pendingOutgoingQueue = this.pendingOutgoingQueue.filter((item) => item.chatId !== chatId);
-    } else {
-      this.pendingOutgoingQueue = [];
-    }
-    this.persistPendingOutgoingQueue();
-    this.notifyListeners();
-  }
-
-  /**
-   * Updates status of a queued message.
-   */
-  public updatePendingOutgoingMessageStatus(
-    id: string,
-    status: 'pending' | 'sending' | 'failed',
-    error?: string
-  ): void {
-    const item = this.pendingOutgoingQueue.find((m) => m.id === id);
-    if (item) {
-      item.status = status;
-      if (error) item.error = error;
-      this.persistPendingOutgoingQueue();
-      this.notifyListeners();
-    }
-  }
-
-  /**
-   * Automatically synchronizes all pending outgoing messages with the server.
-   * Idempotent and thread-safe: skips if already syncing or if browser is offline.
-   */
-  public async syncPendingOutgoingMessages(options?: {
-    customSender?: (item: QueuedOutgoingMessage) => Promise<{ success: boolean; realMsgId?: string; error?: string }>;
-  }): Promise<{ total: number; sent: number; failed: number }> {
-    if (this.isSyncingPending) {
-      return { total: this.pendingOutgoingQueue.length, sent: 0, failed: 0 };
-    }
-
-    if (this.pendingOutgoingQueue.length === 0) {
-      return { total: 0, sent: 0, failed: 0 };
-    }
-
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      console.warn('[chatStore] syncPendingOutgoingMessages skipped: device is currently offline');
-      return { total: this.pendingOutgoingQueue.length, sent: 0, failed: 0 };
-    }
-
-    this.isSyncingPending = true;
-    this.notifyListeners();
-
-    const queueSnapshot = [...this.pendingOutgoingQueue];
-    let sentCount = 0;
-    let failedCount = 0;
-
-    console.log(`[chatStore] Starting offline message sync. Queued items count: ${queueSnapshot.length}`);
-
-    for (const item of queueSnapshot) {
-      // If we went offline during the loop, stop cleanly
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        console.warn('[chatStore] Offline state detected during sync loop. Halting queue processing.');
-        break;
+    for (const m of msgs) {
+      if (!m || !m.id) continue;
+      const num = Number(String(m.id).replace(/\D/g, ''));
+      if (!isNaN(num) && num > maxIdNum) {
+        maxIdNum = num;
+        maxIdStr = String(m.id);
       }
+    }
 
-      item.status = 'sending';
-      item.attempts = (item.attempts || 0) + 1;
-      item.lastAttemptAt = Date.now();
-      this.persistPendingOutgoingQueue();
-      this.notifyListeners();
+    return maxIdStr || (msgs[msgs.length - 1]?.id ? String(msgs[msgs.length - 1].id) : undefined);
+  }
 
-      let isSent = false;
-      let returnedId: string | undefined;
-      let errorReason: string | undefined;
-
-      try {
-        if (options?.customSender) {
-          const res = await options.customSender(item);
-          isSent = res.success;
-          returnedId = res.realMsgId;
-          errorReason = res.error;
-        } else {
-          // Standard Telegram endpoint dispatch
-          const session =
-            item.sessionString ||
-            SecureSessionStorage.getItem<string>('tg_session_string') ||
-            (typeof window !== 'undefined' ? localStorage.getItem('tg_session_string') : null) ||
-            '';
-          const phone =
-            item.phone ||
-            SecureSessionStorage.getItem<string>('tg_phone') ||
-            (typeof window !== 'undefined' ? localStorage.getItem('tg_phone') : null) ||
-            '';
-
-          const res = await fetch('/api/telegram/messages/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chatId: item.chatId,
-              text: item.text,
-              media: item.media,
-              replyToMsgId: item.replyToMsgId || item.replyTo?.messageId,
-              phone,
-              sessionString: session,
-            }),
-          });
-
-          const data = await res.json().catch(() => ({}));
-          if (res.ok && (data.success || data.result)) {
-            isSent = true;
-            returnedId = data.result?.id ? String(data.result.id) : undefined;
-          } else {
-            errorReason = data.error || data.message || `HTTP ${res.status}`;
-          }
-        }
-      } catch (err: any) {
-        errorReason = err?.message || 'Network request failed';
+  /**
+   * Delta Update Mechanism:
+   * Collects a map of chatId -> lastKnownMessageId across all cached conversations
+   * to send in delta-update requests.
+   */
+  public getLastKnownMessageIds(): Record<string, string> {
+    const map: Record<string, string> = {};
+    for (const chatId of this.cachedChatIds) {
+      const lastId = this.getLastKnownMessageId(chatId);
+      if (lastId) {
+        map[chatId] = lastId;
       }
-
-      if (isSent) {
-        sentCount++;
-        // Remove from pending queue
-        this.removePendingOutgoingMessage(item.id);
-
-        // Update cached message in memory and SQLite
-        const cached = this.getCachedMessages(item.chatId);
-        const existingMsg = cached.find((m) => m.id === item.id);
-        if (existingMsg) {
-          const updatedMsg: Message = {
-            ...existingMsg,
-            id: returnedId || existingMsg.id,
-            status: 'sent',
-          };
-          this.saveMessage(item.chatId, updatedMsg, { isCloudVerified: true });
+    }
+    for (const chatId of this.cachedMessages.keys()) {
+      if (!map[chatId]) {
+        const lastId = this.getLastKnownMessageId(chatId);
+        if (lastId) {
+          map[chatId] = lastId;
         }
+      }
+    }
+    return map;
+  }
 
-        // Dispatch sync event for active React contexts
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('tg-offline-message-synced', {
-              detail: {
-                tempId: item.id,
-                realId: returnedId,
-                chatId: item.chatId,
-              },
-            })
-          );
-        }
+  /**
+   * Delta Update Mechanism:
+   * Merges a newly received delta chunk into existing messages without reloading full history.
+   * Updates modified messages in-place, inserts novel messages, preserves scroll positions and caches.
+   */
+  public mergeDeltaChunk(
+    chatId: string,
+    deltaMessages: Message[],
+    options?: { isCloudVerified?: boolean }
+  ): Message[] {
+    if (!chatId) return [];
+    if (!Array.isArray(deltaMessages) || deltaMessages.length === 0) {
+      return this.getCachedMessages(chatId);
+    }
+
+    const existing = this.getCachedMessages(chatId);
+    if (!existing || existing.length === 0) {
+      this.saveMessages(chatId, deltaMessages, options);
+      return deltaMessages;
+    }
+
+    const msgMap = new Map<string, Message>();
+    for (const m of existing) {
+      if (m && m.id) {
+        msgMap.set(String(m.id), m);
+      }
+    }
+
+    for (const deltaMsg of deltaMessages) {
+      if (!deltaMsg || !deltaMsg.id) continue;
+      const key = String(deltaMsg.id);
+      const prev = msgMap.get(key);
+      if (prev) {
+        msgMap.set(key, { ...prev, ...deltaMsg });
       } else {
-        failedCount++;
-        // If max attempts reached, mark failed; otherwise keep pending for next reconnect
-        if (item.attempts >= 5) {
-          item.status = 'failed';
-          item.error = errorReason;
-        } else {
-          item.status = 'pending';
-          item.error = errorReason;
-        }
-        this.persistPendingOutgoingQueue();
+        msgMap.set(key, deltaMsg);
       }
     }
 
-    this.isSyncingPending = false;
-    this.persistPendingOutgoingQueue();
-    this.notifyListeners();
+    const merged = Array.from(msgMap.values());
+    merged.sort((a, b) => {
+      const timeA = a.epoch || (a.date ? new Date(a.date).getTime() : 0);
+      const timeB = b.epoch || (b.date ? new Date(b.date).getTime() : 0);
+      if (timeA !== timeB) return timeA - timeB;
+      const numA = Number(String(a.id).replace(/\D/g, '')) || 0;
+      const numB = Number(String(b.id).replace(/\D/g, '')) || 0;
+      return numA - numB;
+    });
 
-    console.log(
-      `[chatStore] Offline message sync complete. Total: ${queueSnapshot.length}, Sent: ${sentCount}, Failed: ${failedCount}, Remaining: ${this.pendingOutgoingQueue.length}`
-    );
-
-    return {
-      total: queueSnapshot.length,
-      sent: sentCount,
-      failed: failedCount,
-    };
+    this.saveMessages(chatId, merged, options);
+    return merged;
   }
 
   /**

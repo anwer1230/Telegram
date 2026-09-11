@@ -125,24 +125,17 @@ export const SalamActivityChart: React.FC<SalamActivityChartProps> = ({ activiti
           activityRate: rate,
         });
       } else {
-        // Historical baseline pattern for empty days
-        const baseSeed = (i * 3 + targetDate.getDate()) % 5;
-        const mockInteractions = Math.max(1, baseSeed * 2 + 3);
-        const mockEdited = Math.max(1, baseSeed + 1);
-        const mockDeleted = baseSeed > 2 ? 1 : 0;
-        const mockTotal = mockEdited + mockDeleted + 1;
-        const rate = Math.round((mockEdited / (mockEdited + mockDeleted)) * 100);
-
+        // Zero baseline for days with no recorded activity
         result.push({
           dateKey: key,
           dayLabel: dayName,
           displayDate,
-          total: mockTotal,
-          interactions: mockInteractions,
-          edited: mockEdited,
-          deleted: mockDeleted,
+          total: 0,
+          interactions: 0,
+          edited: 0,
+          deleted: 0,
           waiting: 0,
-          activityRate: rate,
+          activityRate: 0,
         });
       }
     }

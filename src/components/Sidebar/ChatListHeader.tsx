@@ -19,8 +19,10 @@ import {
   Layers,
   MessageSquare,
   UserPlus,
+  Lock,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
+import { sessionSecurityManager } from '../../core/SessionSecurityManager';
 
 export const ChatListHeader: React.FC = () => {
   const {
@@ -195,23 +197,6 @@ export const ChatListHeader: React.FC = () => {
                 <Search className="w-5 h-5" />
               </button>
 
-              {/* Radar Live Monitor Button */}
-              <button
-                id="tg-link-radar-header-btn"
-                onClick={() => setActiveModal('link-monitor')}
-                className={`p-2 rounded-full transition-colors relative ${
-                  autoJoinLinksEnabled
-                    ? 'text-emerald-400 bg-emerald-500/15 hover:bg-emerald-500/25'
-                    : 'text-gray-300 hover:bg-white/10'
-                }`}
-                title={isArabic ? 'رادار الروابط والانضمام الفوري' : 'Auto-Join & Links Radar'}
-              >
-                <Radio className={`w-5 h-5 ${autoJoinLinksEnabled ? 'animate-pulse' : ''}`} />
-                {capturedLinks.length > 0 && (
-                  <span className="absolute top-1 right-1 rtl:right-auto rtl:left-1 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                )}
-              </button>
-
               {/* Android Notification Shade Preview Button */}
               <button
                 id="tg-android-shade-btn"
@@ -242,6 +227,18 @@ export const ChatListHeader: React.FC = () => {
               >
                 <Edit3 className="w-5 h-5" />
               </button>
+
+              {/* Quick Session Lock Button (when Passcode is set) */}
+              {sessionSecurityManager.isPasscodeSet() && (
+                <button
+                  id="tg-header-lock-btn"
+                  onClick={() => sessionSecurityManager.lock()}
+                  className="p-2 rounded-full hover:bg-amber-500/20 text-amber-400 active:scale-95 transition-all"
+                  title={isArabic ? 'قفل تيليجرام فورياً (Passcode / Biometrics)' : 'Lock Telegram now'}
+                >
+                  <Lock className="w-4 h-4" />
+                </button>
+              )}
 
               {/* More Menu (Dropdown) */}
               <div className="relative">

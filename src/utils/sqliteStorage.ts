@@ -778,6 +778,222 @@ class TelegramSQLiteDatabase {
     }
     return null;
   }
+
+  // --- Development-Only Database Browser & Sync Troubleshooting Inspection APIs ---
+
+  public async getTableColumns(tableName: string): Promise<Array<{ name: string; type: string; pk: boolean }>> {
+    await this.init();
+    if (!this.db) return [];
+    try {
+      const safe = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+      const res = this.db.exec(`PRAGMA table_info("${safe}");`);
+      if (res.length > 0 && res[0].values) {
+        return res[0].values.map((row: any[]) => ({
+          name: String(row[1]),
+          type: String(row[2] || 'ANY'),
+          pk: Boolean(row[5]),
+        }));
+      }
+    } catch (e) {
+      console.warn(`[SQLite Inspector] Failed to get table info for ${tableName}:`, e);
+    }
+    return [];
+  }
+
+  public async getTableList(): Promise<Array<{
+    name: string;
+    count: number;
+    columns: Array<{ name: string; type: string; pk: boolean }>;
+    description: string;
+  }>> {
+    await this.init();
+    if (!this.db) return [];
+
+    const descriptions: Record<string, string> = {
+      channel_pts: 'Channel PTS sequence counter & sync state',
+      diff_params: 'MTProto account sync state (pts, seq, date, qts)',
+      chats: 'Dialogs, channels, secret chats & folder metadata',
+      messages: 'Sync messages cache, status, timestamps & delivery payload',
+      users: 'Contacts, bot profiles, and peer account cache',
+      stories: 'Peer stories, expiration & view counters',
+      secret_sessions: 'End-to-end encrypted chat keys and fingerprints',
+      privacy_rules: 'Privacy settings & peer visibility permissions',
+      chat_scroll: 'View position offsets & unread scroll markers',
+    };
+
+    try {
+      const res = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name ASC;");
+      if (res.length === 0 || !res[0].values) return [];
+
+      const tables = [];
+      for (const row of res[0].values) {
+        const name = String(row[0]);
+        let count = 0;
+        try {
+          const countRes = this.db.exec(`SELECT COUNT(*) FROM "${name}";`);
+          if (countRes.length > 0 && countRes[0].values && countRes[0].values[0]) {
+            count = Number(countRes[0].values[0][0]) || 0;
+          }
+        } catch (_) {}
+
+        const columns = await this.getTableColumns(name);
+        tables.push({
+          name,
+          count,
+          columns,
+          description: descriptions[name] || 'Local IndexedDB SQLite table',
+        });
+      }
+      return tables;
+    } catch (e) {
+      console.warn('[SQLite Inspector] Failed to list tables:', e);
+      return [];
+    }
+  }
+
+  public async executeSelectQuery(query: string): Promise<{
+    columns: string[];
+    rows: Record<string, any>[];
+    rowCount: number;
+    executionTimeMs: number;
+    queryExecuted: string;
+    error?: string;
+  }> {
+    const startTime = performance.now();
+    await this.init();
+
+    if (!this.db) {
+      return {
+        columns: [],
+        rows: [],
+        rowCount: 0,
+        executionTimeMs: 0,
+        queryExecuted: query,
+        error: 'Database is not initialized or unavailable',
+      };
+    }
+
+    const sanitized = query.trim();
+    if (!sanitized.match(/^(SELECT|PRAGMA|EXPLAIN)\b/i)) {
+      return {
+        columns: [],
+        rows: [],
+        rowCount: 0,
+        executionTimeMs: 0,
+        queryExecuted: sanitized,
+        error: 'Only read-only SELECT, PRAGMA, or EXPLAIN statements are permitted in Database Browser',
+      };
+    }
+
+    try {
+      const res = this.db.exec(sanitized);
+      const executionTimeMs = Math.round((performance.now() - startTime) * 100) / 100;
+
+      if (res.length === 0) {
+        return {
+          columns: [],
+          rows: [],
+          rowCount: 0,
+          executionTimeMs,
+          queryExecuted: sanitized,
+        };
+      }
+
+      const { columns, values } = res[0];
+      const rows = values.map((rowArr: any[]) => {
+        const rowObj: Record<string, any> = {};
+        columns.forEach((colName, idx) => {
+          rowObj[colName] = rowArr[idx];
+        });
+        return rowObj;
+      });
+
+      return {
+        columns,
+        rows,
+        rowCount: rows.length,
+        executionTimeMs,
+        queryExecuted: sanitized,
+      };
+    } catch (err: any) {
+      const executionTimeMs = Math.round((performance.now() - startTime) * 100) / 100;
+      return {
+        columns: [],
+        rows: [],
+        rowCount: 0,
+        executionTimeMs,
+        queryExecuted: sanitized,
+        error: err?.message || String(err),
+      };
+    }
+  }
+
+  public async getTableRows(
+    tableName: string,
+    limit = 50,
+    offset = 0,
+    search?: string
+  ): Promise<{
+    columns: string[];
+    rows: Record<string, any>[];
+    rowCount: number;
+    executionTimeMs: number;
+    queryExecuted: string;
+    error?: string;
+  }> {
+    const safeTable = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+    if (!safeTable) {
+      return {
+        columns: [],
+        rows: [],
+        rowCount: 0,
+        executionTimeMs: 0,
+        queryExecuted: '',
+        error: 'Invalid table name',
+      };
+    }
+
+    let query = `SELECT * FROM "${safeTable}"`;
+    if (search && search.trim()) {
+      const cleanSearch = search.trim().replace(/'/g, "''");
+      const columns = await this.getTableColumns(safeTable);
+      const searchCols = columns
+        .filter((c) => c.type.includes('TEXT') || c.type.includes('CHAR') || c.type === 'ANY' || c.type === '')
+        .map((c) => `"${c.name}" LIKE '%${cleanSearch}%'`);
+
+      if (searchCols.length > 0) {
+        query += ` WHERE ${searchCols.join(' OR ')}`;
+      }
+    }
+
+    query += ` LIMIT ${limit} OFFSET ${offset};`;
+    return this.executeSelectQuery(query);
+  }
+
+  public async getDatabaseMetadata() {
+    await this.init();
+    let binarySizeBytes = 0;
+    try {
+      const savedBinary = await get<Uint8Array>(SQLITE_STORAGE_KEY);
+      if (savedBinary) {
+        binarySizeBytes = savedBinary.byteLength;
+      }
+    } catch (_) {}
+
+    const tables = await this.getTableList();
+    const totalRows = tables.reduce((acc, t) => acc + t.count, 0);
+
+    return {
+      storageKey: SQLITE_STORAGE_KEY,
+      engine: 'SQLite 3.x (sql.js) + IndexedDB MMAP',
+      indexedDBName: 'keyval-store',
+      isInitialized: this.isInitialized,
+      binarySizeBytes,
+      tableCount: tables.length,
+      totalRows,
+      tables,
+    };
+  }
 }
 
 export const telegramDB = new TelegramSQLiteDatabase();

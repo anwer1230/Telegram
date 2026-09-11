@@ -1,6 +1,6 @@
 import { TelegramClient, Api } from 'telegram';
-import { StringSession } from 'telegram/sessions';
-import { NewMessage } from 'telegram/events';
+import { StringSession } from 'telegram/sessions/index.js';
+import { NewMessage } from 'telegram/events/index.js';
 
 // Default MTProto App configuration (Telegram_Anwer)
 const DEFAULT_API_ID = 22043994;

@@ -38,6 +38,8 @@ export const ChatHeader: React.FC = () => {
     setIsRightPanelOpen,
     setActiveModal,
     typingChatId,
+    typingStatus,
+    onlineCounts,
     settings,
     leaveGroup,
     deleteGroupMessages,
@@ -62,7 +64,9 @@ export const ChatHeader: React.FC = () => {
   const isSavedMessages = activeChat.type === 'saved';
   const isArabic = settings.language === 'ar';
 
-  const subtitleInfo = ChatInfoManager.getInstance().getSubtitle(activeChat, settings.language || 'ar');
+  const chatOnline = (activeChat?.id && onlineCounts?.[activeChat.id]) ?? activeChat?.onlineCount ?? 0;
+  const activeTyping = activeChat?.id ? typingStatus?.[activeChat.id] : null;
+  const isTyping = Boolean((activeChat && typingChatId === activeChat.id) || activeTyping);
 
   const getSubtitle = () => {
     if (isSavedMessages) {
@@ -74,7 +78,27 @@ export const ChatHeader: React.FC = () => {
     if (activeChat.type === 'private') {
       return isArabic ? 'متصل الآن' : 'online';
     }
-    return subtitleInfo.subtitleText;
+
+    const count = activeChat.memberCount || (activeChat as any).participants_count || 1;
+    const formattedMembers = ChatInfoManager.formatNumber(count);
+    const formattedOnline = ChatInfoManager.formatNumber(chatOnline);
+
+    if (activeChat.type === 'channel') {
+      if (chatOnline > 0) {
+        return isArabic
+          ? `${formattedMembers} مشترك، ${formattedOnline} متصل`
+          : `${formattedMembers} subscribers, ${formattedOnline} online`;
+      }
+      return isArabic ? `${formattedMembers} مشترك` : `${formattedMembers} subscribers`;
+    }
+
+    // Group / Supergroup
+    if (chatOnline > 0) {
+      return isArabic
+        ? `${formattedMembers} عضو، ${formattedOnline} متصل`
+        : `${formattedMembers} members, ${formattedOnline} online`;
+    }
+    return isArabic ? `${formattedMembers} عضو` : `${formattedMembers} members`;
   };
 
   const handleShareChat = () => {
@@ -178,11 +202,25 @@ export const ChatHeader: React.FC = () => {
             {activeChat.isVerified && (
               <BadgeCheck className="w-4 h-4 text-[#2481cc] shrink-0 fill-[#2481cc]/20" />
             )}
+            {(activeChat.type === 'group' || activeChat.type === 'supergroup') && chatOnline > 0 && (
+              <span className="text-xs font-normal text-emerald-400/90 ml-1 rtl:mr-1 shrink-0">
+                ({chatOnline} {isArabic ? 'متصل' : 'online'})
+              </span>
+            )}
           </div>
           <div className="text-xs text-sky-400/90 truncate font-medium">
-            {typingChatId === activeChat.id ? (
+            {isTyping ? (
               <span className="text-[#2481cc] font-medium flex items-center gap-1.5 animate-pulse">
-                <span>{isArabic ? 'يكتب الآن...' : 'typing...'}</span>
+                <span className="inline-flex gap-0.5 items-center">
+                  <span className="w-1.5 h-1.5 bg-[#2481cc] rounded-full animate-bounce [animation-delay:-0.3s]" />
+                  <span className="w-1.5 h-1.5 bg-[#2481cc] rounded-full animate-bounce [animation-delay:-0.15s]" />
+                  <span className="w-1.5 h-1.5 bg-[#2481cc] rounded-full animate-bounce" />
+                </span>
+                <span>
+                  {activeTyping?.action === 'record_audio'
+                    ? (isArabic ? 'يسجل رسالة صوتية...' : 'recording voice message...')
+                    : (isArabic ? 'جاري الكتابة...' : 'typing...')}
+                </span>
               </span>
             ) : activeChat.isSecret ? (
               <span className="text-emerald-300 font-mono text-[11px]">

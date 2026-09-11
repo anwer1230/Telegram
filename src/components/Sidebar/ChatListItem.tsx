@@ -201,19 +201,20 @@ const ChatListItemComponent: React.FC<ChatListItemProps> = ({ chat, isActive }) 
             </div>
           ) : (
             <>
-              <span>{chat.title ? chat.title.charAt(0).toUpperCase() : '?'}</span>
-              {chat.avatar && (
+              <span className="select-none">{chat.title.charAt(0).toUpperCase()}</span>
+              {chat.avatar ? (
                 <img
                   src={chat.avatar}
                   alt={chat.title}
-                  className="w-full h-full object-cover absolute inset-0"
                   loading="lazy"
+                  decoding="async"
+                  className="absolute inset-0 w-full h-full object-cover"
                   referrerPolicy="no-referrer"
                   onError={(e) => {
                     (e.currentTarget as HTMLElement).style.display = 'none';
                   }}
                 />
-              )}
+              ) : null}
             </>
           )}
 

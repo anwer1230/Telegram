@@ -1,4 +1,4 @@
-export type ChatType = 'private' | 'group' | 'channel' | 'bot' | 'saved';
+export type ChatType = 'private' | 'group' | 'channel' | 'bot' | 'saved' | 'supergroup';
 
 export interface User {
   id: string;
@@ -143,7 +143,7 @@ export interface Chat {
   syncStatus?: "synced" | "partial" | "syncing";
   title: string;
   username?: string;
-  avatar: string;
+  avatar?: string;
   bio?: string;
   isOnline?: boolean;
   isVerified?: boolean;
@@ -274,6 +274,7 @@ export type SettingsSubPage =
   | 'member_requests'
   | 'cache_by_chats'
   | 'app_update'
+  | 'settings_screen'
   | 'premium';
 
 export interface AppSettings {
@@ -309,6 +310,16 @@ export interface AppSettings {
   plusThemeEnabled?: boolean;
   useSQLiteMMAP?: boolean;
   biometricLock?: boolean;
+  // Telegram Web Settings Extensions
+  notificationSound?: 'classic' | 'beep' | 'chime' | 'bubble' | 'silent';
+  enableSendSound?: boolean;
+  enableClickSound?: boolean;
+  muteChatSounds?: boolean;
+  soundVolume?: number; // 0 .. 100
+  dataSaver?: boolean;
+  preloadThumbnails?: boolean;
+  enableTTS?: boolean;
+  ttsLanguage?: string;
 }
 
 export interface ActiveCall {
@@ -374,6 +385,10 @@ export interface InAppNotification {
   replyAction?: boolean;
   keyword?: string;
   messageText?: string;
+  occurrenceCount?: number;
+  lastUpdatedTime?: number;
+  messageUrl?: string;
+  senderChatUrl?: string;
 }
 
 export interface UserAccount {
@@ -472,18 +487,79 @@ export interface MonitorConfig {
   startedAt?: string;
 }
 
+// 1. نتيجة فحص المجموعة وبوتات الحماية
+export interface GroupAuditResult {
+  id: string;
+  title: string;
+  username?: string;
+  link: string;
+  isGroup: boolean;
+  isChannel: boolean;
+  is_protected: boolean;
+  protection_type: 'open' | 'bot_protection' | 'no_links' | 'no_media' | 'slowmode' | 'admin_only' | 'all_forbidden';
+  protection_tags: string[];
+  protection_reasons: string[];
+  can_send_text: boolean;
+  can_send_links: boolean;
+  can_send_media: boolean;
+  slowmode_seconds: number;
+}
+
+// 2. إحصائيات الفحص الشامل
+export interface DialogAuditStats {
+  total: number;
+  open_count: number;
+  protected_count: number;
+  bot_protected_count: number;
+  no_links_count: number;
+  no_media_count: number;
+  admin_only_count: number;
+  slowmode_count: number;
+}
+
+// 3. عنصر سجل الإرسال التشخيصي التفصيلي لكل مجموعة
+export interface BroadcastDiagnosticEntry {
+  chatId: string;
+  title: string;
+  status: 'sent' | 'failed' | 'skipped' | 'protected';
+  reason?: string;
+  messageId?: string;
+  error?: string;
+  timestamp: string;
+}
+
+// 4. كائن حالة التقدم اللحظي
+export interface BroadcastProgressState {
+  isActive: boolean;
+  currentGroup: string;
+  currentIndex: number;
+  totalGroups: number;
+  percent: number;
+  sentCount: number;
+  failedCount: number;
+  skippedCount: number;
+}
+
 export interface MonitorAlert {
   id: string;
   keyword: string;
   sourceChatId: string;
   sourceChatTitle: string;
+  sourceChatUsername?: string;
+  senderId?: string;
   senderName: string;
+  senderUsername?: string;
   messageText: string;
   timestamp: string;
   groupUrl?: string;
   senderUrl?: string;
   messageId?: string;
   peerId?: string;
+  // إضافات التجميع والروابط العميقة:
+  occurrenceCount?: number;      // عداد التكرار للعميل نفسه
+  lastUpdatedTime?: number;      // وقت آخر رسالة مكررة
+  messageUrl?: string;           // رابط الرسالة المباشر للانتقال
+  senderChatUrl?: string;        // رابط المراسلة الخاصة الفوري
 }
 
 // 3. My Messages (Batch Log)

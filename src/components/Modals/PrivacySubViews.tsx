@@ -25,6 +25,7 @@ import {
   Smartphone,
   Globe,
   AlertTriangle,
+  Fingerprint,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import {
@@ -210,15 +211,15 @@ export const PasscodeLockView: React.FC<SubViewProps> = ({ onBack }) => {
   const BackIcon = isArabic ? ArrowRight : ArrowLeft;
 
   const [state, setState] = useState(privacyController.getState());
-  const [isEnabled, setIsEnabled] = useState(state.passcodeEnabled);
-  const [passcodeType, setPasscodeType] = useState<'pin' | 'password'>(state.passcodeType);
+  const [isEnabled, setIsEnabled] = useState(state.passcodeEnabled || sessionSecurityManager.isPasscodeSet());
+  const [passcodeType, setPasscodeType] = useState<'pin' | 'password'>(state.passcodeType || sessionSecurityManager.getPasscodeType());
   const [passcode, setPasscode] = useState('');
   const [confirmPasscode, setConfirmPasscode] = useState('');
   const [step, setStep] = useState<'view' | 'enter' | 'confirm'>('view');
-  const [autoLock, setAutoLock] = useState('1_hour');
-  const [unlockBiometrics, setUnlockBiometrics] = useState(true);
+  const [autoLockSeconds, setAutoLockSeconds] = useState<number>(() => sessionSecurityManager.getAutoLockTimeout());
+  const [unlockBiometrics, setUnlockBiometrics] = useState<boolean>(() => sessionSecurityManager.isBiometricsEnabled());
 
-  const handleSavePasscode = () => {
+  const handleSavePasscode = async () => {
     if (passcode !== confirmPasscode) {
       showToast(isArabic ? 'رمز القفل غير متطابق' : 'Passcodes do not match', '❌');
       return;
@@ -227,6 +228,7 @@ export const PasscodeLockView: React.FC<SubViewProps> = ({ onBack }) => {
       showToast(isArabic ? 'يجب أن يكون 4 أرقام على الأقل' : 'Must be at least 4 digits', '⚠️');
       return;
     }
+    await sessionSecurityManager.setPasscode(passcode, passcodeType);
     privacyController.setPasscode(passcode, passcodeType);
     setIsEnabled(true);
     setStep('view');
@@ -234,9 +236,46 @@ export const PasscodeLockView: React.FC<SubViewProps> = ({ onBack }) => {
   };
 
   const handleDisablePasscode = () => {
+    sessionSecurityManager.removePasscode();
     privacyController.setPasscode('', 'pin');
     setIsEnabled(false);
     showToast(isArabic ? 'تم تعطيل رمز القفل' : 'Passcode Lock disabled', '🔓');
+  };
+
+  const handleToggleBiometrics = async () => {
+    if (!unlockBiometrics) {
+      showToast(isArabic ? 'جاري التحقق من بصمة الجهاز...' : 'Verifying device biometrics...', '🔐');
+      const res = await sessionSecurityManager.enrollBiometrics();
+      if (res.success) {
+        setUnlockBiometrics(true);
+        showToast(isArabic ? 'تم تفعيل إلغاء القفل بالبصمة بنجاح' : 'Biometric unlock enabled', '✨');
+      } else if (res.isCancelled) {
+        showToast(isArabic ? 'تم إلغاء تسجيل البصمة' : 'Biometric setup cancelled', 'ℹ️');
+      } else {
+        showToast(res.error || (isArabic ? 'فشل تفعيل البصمة' : 'Failed to enable biometrics'), '⚠️');
+      }
+    } else {
+      sessionSecurityManager.setBiometricsEnabled(false);
+      setUnlockBiometrics(false);
+      showToast(isArabic ? 'تم تعطيل إلغاء القفل بالبصمة' : 'Biometric unlock disabled', '🔓');
+    }
+  };
+
+  const handleCycleAutoLock = () => {
+    const options = [60, 300, 900, 3600, 0];
+    const currentIndex = options.indexOf(autoLockSeconds);
+    const nextTimeout = options[(currentIndex + 1) % options.length];
+    sessionSecurityManager.setAutoLockTimeout(nextTimeout);
+    setAutoLockSeconds(nextTimeout);
+    showToast(isArabic ? 'تم تحديث وقت القفل التلقائي' : 'Auto-lock timer updated', '⏱️');
+  };
+
+  const getAutoLockDisplay = (seconds: number) => {
+    if (seconds === 60) return isArabic ? 'بعد دقيقة واحدة' : 'in 1 minute';
+    if (seconds === 300) return isArabic ? 'بعد 5 دقائق' : 'in 5 minutes';
+    if (seconds === 900) return isArabic ? 'بعد 15 دقيقة' : 'in 15 minutes';
+    if (seconds === 3600) return isArabic ? 'بعد ساعة واحدة' : 'in 1 hour';
+    return isArabic ? 'معطّل' : 'Disabled';
   };
 
   return (
@@ -320,49 +359,46 @@ export const PasscodeLockView: React.FC<SubViewProps> = ({ onBack }) => {
                   </div>
 
                   <div
-                    onClick={() => {
-                      const next =
-                        autoLock === 'in_1_minute'
-                          ? 'in_5_minutes'
-                          : autoLock === 'in_5_minutes'
-                          ? 'in_1_hour'
-                          : 'in_1_minute';
-                      setAutoLock(next);
-                      showToast(isArabic ? 'تم تحديث وقت القفل التلقائي' : 'Auto-lock timer updated', '⏱️');
-                    }}
+                    onClick={handleCycleAutoLock}
                     className="px-4 py-3.5 flex items-center justify-between hover:bg-white/5 cursor-pointer transition-colors"
                   >
                     <span className="text-xs font-medium text-white">
                       {isArabic ? 'القفل التلقائي' : 'Auto-lock'}
                     </span>
                     <span className="text-xs text-[#5288c1] font-mono">
-                      {autoLock === 'in_1_minute'
-                        ? isArabic
-                          ? 'بعد دقيقة واحدة'
-                          : 'in 1 minute'
-                        : autoLock === 'in_5_minutes'
-                        ? isArabic
-                          ? 'بعد 5 دقائق'
-                          : 'in 5 minutes'
-                        : isArabic
-                        ? 'بعد ساعة واحدة'
-                        : 'in 1 hour'}
+                      {getAutoLockDisplay(autoLockSeconds)}
                     </span>
                   </div>
 
                   <div
-                    onClick={() => setUnlockBiometrics(!unlockBiometrics)}
+                    onClick={handleToggleBiometrics}
                     className="px-4 py-3.5 flex items-center justify-between hover:bg-white/5 cursor-pointer transition-colors"
                   >
-                    <span className="text-xs font-medium text-white">
-                      {isArabic ? 'إلغاء القفل ببصمة الإصبع' : 'Unlock with Fingerprint'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <Fingerprint className="w-4 h-4 text-[#5288c1]" />
+                      <span className="text-xs font-medium text-white">
+                        {isArabic ? 'إلغاء القفل ببصمة الإصبع / Face ID' : 'Unlock with Biometrics (WebAuthn)'}
+                      </span>
+                    </div>
                     <input
                       type="checkbox"
                       checked={unlockBiometrics}
                       onChange={() => {}}
-                      className="accent-[#5288c1] w-4 h-4"
+                      className="accent-[#5288c1] w-4 h-4 cursor-pointer pointer-events-none"
                     />
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      sessionSecurityManager.lock();
+                      onBack();
+                    }}
+                    className="px-4 py-3.5 flex items-center justify-between hover:bg-red-500/10 cursor-pointer transition-colors text-red-400 border-t border-white/5"
+                  >
+                    <span className="text-xs font-medium">
+                      {isArabic ? 'قفل التطبيق الآن' : 'Lock App Now'}
+                    </span>
+                    <Lock className="w-4 h-4" />
                   </div>
                 </>
               )}

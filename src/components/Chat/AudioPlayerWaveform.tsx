@@ -12,7 +12,7 @@ interface AudioPlayerWaveformProps {
   isOutgoing?: boolean;
 }
 
-export const AudioPlayerWaveform: React.FC<AudioPlayerWaveformProps> = ({
+const AudioPlayerWaveformComponent: React.FC<AudioPlayerWaveformProps> = ({
   messageId,
   chatId = '',
   senderName = '',
@@ -249,3 +249,5 @@ export const AudioPlayerWaveform: React.FC<AudioPlayerWaveformProps> = ({
     </div>
   );
 };
+
+export const AudioPlayerWaveform = React.memo(AudioPlayerWaveformComponent);

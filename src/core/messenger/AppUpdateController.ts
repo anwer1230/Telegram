@@ -158,43 +158,8 @@ export class AppUpdateController {
       }
       return null;
     } catch (err: any) {
-      console.warn('[AppUpdateController] Check error, falling back to simulated server schema:', err.message);
-      
-      // If server route is connecting, fallback to default schema check
-      const fallbackAvailable = isManual; // In manual test mode, provide sample update if requested
-      if (fallbackAvailable) {
-        const dummyUpdate: TLRPC.TL_help_appUpdate = {
-          _: 'help.appUpdate',
-          id: 110500,
-          version: '11.5.0',
-          text: '✨ إصدار تيليجرام 11.5.0 الجديد:\n• دعم مزادات هدايا النجوم (Star Gift Auctions)\n• صياغة ونبرة الرسائل بالذكاء الاصطناعي\n• تعزيز القنوات وفتح المميزات الخاصة\n• تحسينات استهلاك الذاكرة وسرعة المزامنة',
-          can_not_skip: false,
-          url: '/api/help/appUpdate/download',
-        };
-        this.pendingAppUpdate = dummyUpdate;
-        this.updateInfo = {
-          version: '11.5.0',
-          versionCode: 110500,
-          buildDate: '2026-08-30',
-          sizeBytes: 64288000,
-          sizeFormatted: '61.3 MB',
-          canNotSkip: false,
-          changelogAr: '✨ إصدار تيليجرام 11.5.0 الجديد:\n• دعم مزادات هدايا النجوم (Star Gift Auctions)\n• صياغة ونبرة الرسائل بالذكاء الاصطناعي\n• تعزيز القنوات وفتح المميزات الخاصة\n• تحسينات استهلاك الذاكرة وسرعة المزامنة',
-          changelogEn: '✨ Telegram 11.5.0 Release:\n• Star Gift Auctions support\n• AI Tones & Message Styler\n• Channel Boosts & Story Perks\n• Cache optimization & faster sync',
-          downloadUrl: '/api/help/appUpdate/download',
-          directApkName: 'Telegram_v11.5.0_standalone.apk',
-        };
-        this.totalBytes = this.updateInfo.sizeBytes;
-        this.notifyStateChange('available');
-        NotificationCenter.getGlobalInstance().postNotificationName(
-          NotificationCenter.appUpdateAvailable,
-          dummyUpdate,
-          isManual
-        );
-        return dummyUpdate;
-      }
-
-      this.errorMessage = err.message;
+      console.error('[AppUpdateController] Check error:', err.message);
+      this.errorMessage = err.message || 'فشل الاتصال بخادم التحديثات';
       this.notifyStateChange('error');
       return null;
     } finally {
@@ -285,36 +250,12 @@ export class AppUpdateController {
   }
 
   /**
-   * Triggers a live simulated update for testing UI, dialogs, and linear progress
+   * Triggers a manual update check against the real update server
    */
-  public triggerTestUpdate(version: string = '11.5.0'): void {
-    this.pendingAppUpdate = {
-      _: 'help.appUpdate',
-      id: 110500,
-      version: version,
-      text: `✨ إصدار تيليجرام ${version} الجديد:\n• مزادات هدايا النجوم الحصرية ومزايدات حية\n• منتقي نبرات الرسائل وصياغتها بالذكاء الاصطناعي\n• تعزيز القنوات وفتح مزايا القصص الحصرية\n• تحسينات شاملة وسرعة فائقة في معالجة الوسائط`,
-      can_not_skip: false,
-      url: '/api/help/appUpdate/download',
-    };
-    this.updateInfo = {
-      version: version,
-      versionCode: 110500,
-      buildDate: '2026-08-30',
-      sizeBytes: 64288000,
-      sizeFormatted: '61.3 MB',
-      canNotSkip: false,
-      changelogAr: `✨ إصدار تيليجرام ${version} الجديد:\n• مزادات هدايا النجوم الحصرية ومزايدات حية\n• منتقي نبرات الرسائل وصياغتها بالذكاء الاصطناعي\n• تعزيز القنوات وفتح مزايا القصص الحصرية\n• تحسينات شاملة وسرعة فائقة في معالجة الوسائط`,
-      changelogEn: `✨ Telegram ${version} New Release:\n• Exclusive Star Gift Live Auctions & Bidding\n• AI Message Tones & Custom Styler\n• Channel Boosts & Exclusive Story Perks\n• Overall performance improvements & instant media sync`,
-      downloadUrl: '/api/help/appUpdate/download',
-      directApkName: `Telegram_v${version}_standalone.apk`,
-    };
-    this.totalBytes = this.updateInfo.sizeBytes;
-    this.notifyStateChange('available');
-    NotificationCenter.getGlobalInstance().postNotificationName(
-      NotificationCenter.appUpdateAvailable,
-      this.pendingAppUpdate,
-      true
-    );
+  public triggerTestUpdate(_version?: string): void {
+    this.checkAppUpdate(true).catch((err) => {
+      console.error('[AppUpdateController] Manual check error:', err);
+    });
   }
 }
 

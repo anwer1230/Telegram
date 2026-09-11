@@ -37,6 +37,7 @@ import {
 } from '../../utils/telemetryIndexedDB';
 import { useTelegram } from '../../context/TelegramContext';
 import { AppUpdateController } from '../../core/messenger/AppUpdateController';
+import { DatabaseBrowserView } from './DatabaseBrowserView';
 
 interface TelemetryLogModalProps {
   isOpen: boolean;
@@ -45,6 +46,7 @@ interface TelemetryLogModalProps {
 
 export const TelemetryLogModal: React.FC<TelemetryLogModalProps> = ({ isOpen, onClose }) => {
   const { logout, showToast, setActiveModal } = useTelegram();
+  const [activeTab, setActiveTab] = useState<'telemetry' | 'database'>('telemetry');
   const [logs, setLogs] = useState<TelemetryEvent[]>(() => getTelemetryLogs());
   const [archivedCount, setArchivedCount] = useState<number>(0);
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'network' | 'latency' | 'sync'>('all');
@@ -284,46 +286,58 @@ export const TelemetryLogModal: React.FC<TelemetryLogModalProps> = ({ isOpen, on
     >
       <div
         id="telemetry-log-modal-container"
-        className="w-full max-w-4xl h-[90vh] max-h-[850px] bg-[#0e1621] border border-cyan-500/30 rounded-2xl shadow-2xl flex flex-col text-white select-none overflow-hidden"
+        className="w-full max-w-5xl h-[92vh] max-h-[880px] bg-[#0e1621] border border-cyan-500/30 rounded-2xl shadow-2xl flex flex-col text-white select-none overflow-hidden"
         dir="rtl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-[#17212b] shrink-0">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 bg-[#17212b] shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-sm">
-              <Activity className="w-5 h-5 animate-pulse" />
+              {activeTab === 'database' ? (
+                <Database className="w-5 h-5 text-cyan-400" />
+              ) : (
+                <Activity className="w-5 h-5 animate-pulse" />
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-white m-0 flex items-center gap-1.5">
-                  <span>سجل بيانات القياس وتشخيص المزامنة</span>
+                  <span>
+                    {activeTab === 'database'
+                      ? 'متصفح قواعد بيانات SQLite المحلية (IndexedDB)'
+                      : 'سجل بيانات القياس وتشخيص المزامنة'}
+                  </span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">
-                    Telemetry & Diagnostics
+                    {activeTab === 'database' ? 'Database Browser (DEV)' : 'Telemetry & Diagnostics'}
                   </span>
                 </h3>
               </div>
               <p className="text-xs text-gray-400 m-0 mt-0.5">
-                مراقبة أداء الشبكة، زمن استجابة الخادم (Latency)، وتشخيص أسباب بطء أو توقف المزامنة بدقة زمنية
+                {activeTab === 'database'
+                  ? 'فحص بنية وسجلات جداول SQLite المخزنة محلياً في IndexedDB لتشخيص تعليق التزامن والمزامنة'
+                  : 'مراقبة أداء الشبكة، زمن استجابة الخادم (Latency)، وتشخيص أسباب بطء أو توقف المزامنة بدقة زمنية'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Enable/Disable Toggle */}
-            <button
-              type="button"
-              onClick={handleToggleEnable}
-              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all ${
-                enabled
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                  : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-              }`}
-              title={enabled ? 'التتبع مفعل حالياً' : 'التتبع معطل'}
-            >
-              <span className={`w-2 h-2 rounded-full ${enabled ? 'bg-emerald-400 animate-ping' : 'bg-rose-400'}`} />
-              <span>{enabled ? 'التتبع نشط' : 'معطل'}</span>
-            </button>
+            {/* Enable/Disable Toggle (only for telemetry) */}
+            {activeTab === 'telemetry' && (
+              <button
+                type="button"
+                onClick={handleToggleEnable}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all ${
+                  enabled
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                    : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                }`}
+                title={enabled ? 'التتبع مفعل حالياً' : 'التتبع معطل'}
+              >
+                <span className={`w-2 h-2 rounded-full ${enabled ? 'bg-emerald-400 animate-ping' : 'bg-rose-400'}`} />
+                <span>{enabled ? 'التتبع نشط' : 'معطل'}</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -336,21 +350,65 @@ export const TelemetryLogModal: React.FC<TelemetryLogModalProps> = ({ isOpen, on
           </div>
         </div>
 
-        {/* Security & Persistence Rules Badge */}
-        <div className="px-5 py-2 bg-[#121c27] border-b border-cyan-500/20 flex flex-wrap items-center justify-between text-[11px] text-cyan-200 gap-2">
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>
-              <strong>أمان وخصوصية 100%:</strong> لا يتم تسجيل محتوى الرسائل أو البيانات الحساسة. يتم الحفظ محلياً فقط.
+        {/* Tab Navigation Bar: Telemetry Logs vs. Database Browser */}
+        <div className="flex items-center px-5 bg-[#17212b] border-b border-white/10 gap-2 shrink-0">
+          <button
+            type="button"
+            id="tab-telemetry-logs"
+            onClick={() => setActiveTab('telemetry')}
+            className={`py-2.5 px-3 border-b-2 font-bold text-xs flex items-center gap-1.5 transition-all ${
+              activeTab === 'telemetry'
+                ? 'border-cyan-400 text-cyan-300'
+                : 'border-transparent text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>سجل القياس والأداء ({logs.length})</span>
+          </button>
+
+          <button
+            type="button"
+            id="tab-database-browser"
+            onClick={() => setActiveTab('database')}
+            className={`py-2.5 px-3 border-b-2 font-bold text-xs flex items-center gap-1.5 transition-all ${
+              activeTab === 'database'
+                ? 'border-cyan-400 text-cyan-300'
+                : 'border-transparent text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5 text-cyan-400" />
+            <span>متصفح قاعدة البيانات (Database Browser)</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              DEV ONLY
             </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1 font-mono text-[10px] px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/30 text-cyan-300">
-              <Database className="w-3 h-3 text-cyan-400" />
-              <span>{logs.length > 50 ? `IndexedDB Backup: ${logs.length} أحداث` : `الذاكرة المؤقتة: ${logs.length}/50`}</span>
-            </span>
-          </div>
+          </button>
         </div>
+
+        {/* Tab Content */}
+        {activeTab === 'database' ? (
+          <DatabaseBrowserView onShowToast={showToast} />
+        ) : (
+          <>
+            {/* Security & Persistence Rules Badge */}
+            <div className="px-5 py-2 bg-[#121c27] border-b border-cyan-500/20 flex flex-wrap items-center justify-between text-[11px] text-cyan-200 gap-2">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>
+                  <strong>أمان وخصوصية 100%:</strong> لا يتم تسجيل محتوى الرسائل أو البيانات الحساسة. يتم الحفظ محلياً فقط.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('database')}
+                  className="flex items-center gap-1 font-mono text-[10px] px-2 py-0.5 rounded bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 transition-colors"
+                  title="فتح متصفح قاعدة بيانات SQLite"
+                >
+                  <Database className="w-3 h-3 text-cyan-400" />
+                  <span>{logs.length > 50 ? `IndexedDB Backup: ${logs.length} أحداث` : `الذاكرة المؤقتة: ${logs.length}/50`}</span>
+                </button>
+              </div>
+            </div>
 
         {/* Actionable Error Banner for AUTH_KEY_UNREGISTERED */}
         {authKeyDetected && (
@@ -519,6 +577,18 @@ export const TelemetryLogModal: React.FC<TelemetryLogModalProps> = ({ isOpen, on
             >
               {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               <span>{copied ? 'تم النسخ!' : 'نسخ التقرير'}</span>
+            </button>
+
+            {/* Database Browser Shortcut Button */}
+            <button
+              type="button"
+              id="toolbar-open-database-browser"
+              onClick={() => setActiveTab('database')}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 hover:text-cyan-200 flex items-center gap-1.5 transition-all shadow-sm"
+              title="فتح متصفح قواعد بيانات SQLite (IndexedDB) للمطورين"
+            >
+              <Database className="w-3.5 h-3.5 text-cyan-400" />
+              <span>متصفح SQLite</span>
             </button>
 
             {/* Manual Backup Trigger */}
@@ -728,21 +798,32 @@ export const TelemetryLogModal: React.FC<TelemetryLogModalProps> = ({ isOpen, on
             })
           )}
         </div>
+          </>
+        )}
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-white/10 bg-[#17212b] flex items-center justify-between text-xs text-gray-400 shrink-0">
           <div className="flex items-center gap-2">
-            <span>
-              {logs.length > 50 ? (
-                <span className="text-cyan-300 font-semibold">
-                  يتم حفظ السجل تلقائياً في IndexedDB مع نسخة احتياطية JSON لحفظ أكثر من 50 حدثاً بأمان.
-                </span>
-              ) : (
+            {activeTab === 'database' ? (
+              <span className="text-cyan-300 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
                 <span>
-                  يتم الاحتفاظ بالأحداث محلياً، وعند تجاوز <strong>50 حدثاً</strong> يتم التخزين الاحتياطي التلقائي في IndexedDB.
+                  متصفح قواعد بيانات SQLite (IndexedDB) - مخصص للمطورين والمشرفين لحل مشكلات وتزامن البيانات محلياً.
                 </span>
-              )}
-            </span>
+              </span>
+            ) : (
+              <span>
+                {logs.length > 50 ? (
+                  <span className="text-cyan-300 font-semibold">
+                    يتم حفظ السجل تلقائياً في IndexedDB مع نسخة احتياطية JSON لحفظ أكثر من 50 حدثاً بأمان.
+                  </span>
+                ) : (
+                  <span>
+                    يتم الاحتفاظ بالأحداث محلياً، وعند تجاوز <strong>50 حدثاً</strong> يتم التخزين الاحتياطي التلقائي في IndexedDB.
+                  </span>
+                )}
+              </span>
+            )}
           </div>
           <button
             type="button"

@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
+import QRCode from 'qrcode';
 import {
   Phone,
   QrCode,
@@ -368,23 +369,82 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
     }, 700);
   };
 
-  // 5. QR Code Login Simulation
-  const handleQrCodeConfirm = () => {
-    setIsLoading(true);
-    setStatusMessage(isArabic ? 'تم مسح رمز الاستجابة السريعة! جاري المصادقة...' : 'QR Scanned! Authenticating...');
+  // 5. Official Telegram MTProto QR Code Login Subsystem
+  const [qrSessionId, setQrSessionId] = useState<string>('');
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [qrUrl, setQrUrl] = useState<string>('');
+  const [isQrLoading, setIsQrLoading] = useState<boolean>(false);
+  const [qrError, setQrError] = useState<string | null>(null);
 
-    setTimeout(() => {
-      setIsLoading(false);
-      login({
-        name: 'أنور فؤاد',
-        phone: '+967 772 997 043',
-        username: 'anwer_dev',
-        avatar: '',
-        bio: 'Telegram Desktop / Web Session Authenticated via QR',
+  const loadQrCode = useCallback(async () => {
+    setIsQrLoading(true);
+    setQrError(null);
+    try {
+      const res = await fetch('/api/telegram/auth/qr/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
       });
-      showToast(isArabic ? 'تم تسجيل الدخول عبر رمز QR بنجاح' : 'QR Login Successful!', '🎉');
-    }, 1200);
-  };
+      const data = await res.json();
+      if (data.success && data.qrUrl) {
+        setQrSessionId(data.qrSessionId);
+        setQrUrl(data.qrUrl);
+        const dataUrl = await QRCode.toDataURL(data.qrUrl, {
+          width: 240,
+          margin: 1,
+          color: {
+            dark: '#000000',
+            light: '#ffffff',
+          },
+        });
+        setQrDataUrl(dataUrl);
+      } else {
+        setQrError(data.message || (isArabic ? 'فشل استخراج رمز الاستجابة السريعة' : 'Failed to generate QR code'));
+      }
+    } catch (err: any) {
+      setQrError(err.message || (isArabic ? 'تعذر الاتصال بخادم تيليجرام' : 'Connection error'));
+    } finally {
+      setIsQrLoading(false);
+    }
+  }, [isArabic]);
+
+  useEffect(() => {
+    if (authMode === 'qr') {
+      loadQrCode();
+    }
+  }, [authMode, loadQrCode]);
+
+  useEffect(() => {
+    if (authMode !== 'qr' || !qrSessionId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/telegram/auth/qr/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ qrSessionId }),
+        });
+        const data = await res.json();
+        if (data.success && data.authenticated && data.user) {
+          clearInterval(interval);
+          login({
+            name: `${data.user.firstName || ''} ${data.user.lastName || ''}`.trim() || 'مستخدم تيليجرام',
+            phone: data.user.phone || '',
+            username: data.user.username,
+            avatar: '',
+            bio: 'Telegram MTProto Layer 184 Authenticated Session',
+            sessionString: data.sessionString,
+          });
+          showToast(isArabic ? 'تم توثيق الحساب وتسجيل الدخول عبر رمز QR بنجاح!' : 'QR Login Successful!', '🎉');
+        } else if (data.requires2FA) {
+          clearInterval(interval);
+          setAuthStep(3);
+          setAuthMode('phone');
+          showToast(isArabic ? 'هذا الحساب محمي بكلمة مرور التحقق بخطوتين (2FA)' : '2FA Password Required', '🔐');
+        }
+      } catch (_) {}
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [authMode, qrSessionId, isArabic, login, showToast]);
 
   return (
     <div
@@ -840,83 +900,91 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
         )}
 
         {/* ======================================================== */}
-        {/* TAB 2: QR CODE SCANNER FLOW */}
+        {/* TAB 2: QR CODE SCANNER FLOW (REAL MTPROTO 2.0 LAYER 184) */}
         {/* ======================================================== */}
         {authMode === 'qr' && (
           <div className="w-full flex flex-col items-center space-y-4">
-            {/* QR Visual Container with Scanning Laser */}
+            {/* QR Visual Container */}
             <div
-              onClick={handleQrCodeConfirm}
-              className="relative w-56 h-56 bg-white p-3.5 rounded-3xl shadow-xl flex items-center justify-center cursor-pointer group overflow-hidden border-4 border-[#2481cc]/30 hover:border-[#2481cc] transition-all"
-              title={isArabic ? 'انقر للمحاكاة الفورية لمسح رمز QR' : 'Click to simulate instant QR scan'}
+              className="relative w-60 h-60 bg-white p-3 rounded-3xl shadow-xl flex items-center justify-center overflow-hidden border-4 border-[#2481cc]/30"
             >
-              {/* QR Pattern Representation */}
-              <div className="w-full h-full bg-slate-900 rounded-2xl p-2 flex flex-col justify-between relative overflow-hidden">
-                {/* SVG QR Elements */}
-                <div className="flex justify-between">
-                  <div className="w-10 h-10 border-4 border-white rounded-lg p-1">
-                    <div className="w-full h-full bg-white rounded-sm" />
-                  </div>
-                  <div className="w-10 h-10 border-4 border-white rounded-lg p-1">
-                    <div className="w-full h-full bg-white rounded-sm" />
-                  </div>
+              {isQrLoading ? (
+                <div className="flex flex-col items-center justify-center space-y-2 text-slate-800">
+                  <RefreshCw className="w-8 h-8 animate-spin text-[#2481cc]" />
+                  <span className="text-xs font-semibold text-gray-600">
+                    {isArabic ? 'جارٍ توليد الرمز الآمن من تيليجرام...' : 'Connecting to MTProto...'}
+                  </span>
                 </div>
-
-                <div className="flex items-center justify-center">
-                  <div className="w-10 h-10 rounded-full bg-[#2481cc] flex items-center justify-center shadow-lg">
+              ) : qrError ? (
+                <div className="flex flex-col items-center justify-center p-3 text-center space-y-2 text-red-600">
+                  <span className="text-xs font-semibold">{qrError}</span>
+                  <button
+                    type="button"
+                    onClick={loadQrCode}
+                    className="px-3 py-1 bg-[#2481cc] text-white text-xs font-bold rounded-lg hover:bg-[#1f6fa8] transition-colors"
+                  >
+                    {isArabic ? 'إعادة المحاولة' : 'Retry'}
+                  </button>
+                </div>
+              ) : qrDataUrl ? (
+                <div className="relative w-full h-full flex items-center justify-center">
+                  <img
+                    src={qrDataUrl}
+                    alt="Telegram MTProto Login QR"
+                    className="w-full h-full object-contain rounded-xl select-none pointer-events-none"
+                  />
+                  {/* Telegram Paper Airplane Center Badge */}
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-[#2481cc] border-2 border-white flex items-center justify-center shadow-lg pointer-events-none">
                     <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.77-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z" />
                     </svg>
                   </div>
+                  {/* Animated Laser Scanning Line */}
+                  <motion.div
+                    animate={{ y: [-90, 90, -90] }}
+                    transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+                    className="absolute left-1 right-1 h-0.5 bg-gradient-to-r from-transparent via-[#2481cc] to-transparent shadow-[0_0_8px_#2481cc] pointer-events-none"
+                  />
                 </div>
-
-                <div className="flex justify-between items-end">
-                  <div className="w-10 h-10 border-4 border-white rounded-lg p-1">
-                    <div className="w-full h-full bg-white rounded-sm" />
-                  </div>
-                  <div className="flex gap-1">
-                    <div className="w-3 h-3 bg-white rounded-xs" />
-                    <div className="w-3 h-3 bg-white rounded-xs" />
-                  </div>
-                </div>
-
-                {/* Animated Laser Scanning Line */}
-                <motion.div
-                  animate={{ y: [0, 180, 0] }}
-                  transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
-                  className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#2481cc] to-transparent shadow-[0_0_12px_#2481cc]"
-                />
-              </div>
-
-              {/* Hover click prompt */}
-              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-3xl">
-                <span className="text-xs font-bold text-white bg-[#2481cc] px-3 py-1.5 rounded-full shadow-lg">
-                  {isArabic ? 'انقر لتسجيل الدخول الفوري' : 'Click to Log In'}
-                </span>
-              </div>
+              ) : null}
             </div>
 
             {/* Step instructions */}
             <div className="w-full bg-[#0e1621] p-3 rounded-2xl border border-white/5 text-start space-y-1.5">
               <div className="text-xs text-gray-300 font-semibold mb-1">
-                {isArabic ? 'طريقة تسجيل الدخول بالرمز:' : 'How to log in with QR:'}
+                {isArabic ? 'طريقة تسجيل الدخول بالرمز الرسمي:' : 'How to log in with official QR:'}
               </div>
               <ol className="text-[11px] text-gray-400 space-y-1 list-decimal list-inside">
-                <li>{isArabic ? 'افتح تيليجرام على هاتفك الجوال' : 'Open Telegram on your mobile phone'}</li>
+                <li>{isArabic ? 'افتح تطبيق تيليجرام على هاتفك الجوال' : 'Open Telegram on your mobile device'}</li>
                 <li>{isArabic ? 'انتقل إلى الإعدادات > الأجهزة > ربط جهاز بالحاسوب' : 'Go to Settings > Devices > Link Desktop Device'}</li>
-                <li>{isArabic ? 'وجه الكاميرا نحو هذه الشاشة لتسجيل الدخول' : 'Point your phone at this screen to confirm'}</li>
+                <li>{isArabic ? 'وجه الكاميرا نحو هذه الشاشة لتسجيل الدخول فورياً' : 'Scan this code to log in instantly'}</li>
               </ol>
             </div>
 
-            {/* Quick Confirm Button */}
-            <button
-              type="button"
-              onClick={handleQrCodeConfirm}
-              className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] text-white text-xs font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 transition-all flex items-center justify-center gap-2"
-            >
-              <Check size={16} />
-              <span>{isArabic ? 'تأكيد تسجيل الدخول برمز QR' : 'Confirm QR Login'}</span>
-            </button>
+            {/* Quick Actions */}
+            <div className="w-full flex gap-2">
+              <button
+                type="button"
+                onClick={loadQrCode}
+                disabled={isQrLoading}
+                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold rounded-2xl transition-all flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw size={14} className={isQrLoading ? 'animate-spin' : ''} />
+                <span>{isArabic ? 'تحديث الرمز' : 'Refresh QR'}</span>
+              </button>
+
+              {qrUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.location.href = qrUrl;
+                  }}
+                  className="flex-1 py-2.5 bg-[#2481cc] hover:bg-[#1f6fa8] text-white text-xs font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <span>{isArabic ? 'فتح في تطبيق تيليجرام' : 'Open in Telegram'}</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
 

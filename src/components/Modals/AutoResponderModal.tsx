@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { PrivateAutoReplyRule } from '../../types';
+import { backgroundSyncService } from '../../core/BackgroundSyncService';
 
 export const AutoResponderModal: React.FC = () => {
   const { activeModal, setActiveModal, showToast } = useTelegram();
@@ -39,6 +40,7 @@ export const AutoResponderModal: React.FC = () => {
       const data = await res.json();
       if (data.success && Array.isArray(data.rules)) {
         setRules(data.rules);
+        backgroundSyncService.syncFromPrivateAutoReplies(data.rules);
       }
     } catch (err) {
       console.error('Error fetching private auto-replies:', err);
@@ -65,6 +67,15 @@ export const AutoResponderModal: React.FC = () => {
       return;
     }
 
+    // Prevent duplicate keyword
+    const isDuplicate = rules.some(
+      (r) => r.keyword.trim().toLowerCase() === trimmedKeyword.toLowerCase()
+    );
+    if (isDuplicate) {
+      showToast('هذه الكلمة المفتاحية موجودة مسبقاً في القواعد', '⚠️');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch('/api/auto-replies/private/add', {
@@ -79,7 +90,9 @@ export const AutoResponderModal: React.FC = () => {
 
       const data = await res.json();
       if (data.success && data.rule) {
-        setRules((prev) => [...prev, data.rule]);
+        const updatedRules = [...rules, data.rule];
+        setRules(updatedRules);
+        backgroundSyncService.syncFromPrivateAutoReplies(updatedRules);
         setKeyword('');
         setReply('');
         showToast('تمت إضافة قاعدة الرد التلقائي وحفظها بنجاح ✨', '✅');
@@ -96,9 +109,11 @@ export const AutoResponderModal: React.FC = () => {
   // 2. Toggle active state
   const handleToggle = async (id: string) => {
     // Optimistic UI update
-    setRules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, is_active: !r.is_active } : r))
+    const optimisticRules = rules.map((r) =>
+      r.id === id ? { ...r, is_active: !r.is_active } : r
     );
+    setRules(optimisticRules);
+    backgroundSyncService.syncFromPrivateAutoReplies(optimisticRules);
 
     try {
       const res = await fetch('/api/auto-replies/private/toggle', {
@@ -108,9 +123,11 @@ export const AutoResponderModal: React.FC = () => {
       });
       const data = await res.json();
       if (data.success && data.rule) {
-        setRules((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, is_active: Boolean(data.rule.is_active) } : r))
+        const finalRules = rules.map((r) =>
+          r.id === id ? { ...r, is_active: Boolean(data.rule.is_active) } : r
         );
+        setRules(finalRules);
+        backgroundSyncService.syncFromPrivateAutoReplies(finalRules);
       } else {
         loadRules();
       }
@@ -121,6 +138,11 @@ export const AutoResponderModal: React.FC = () => {
 
   // 3. Delete rule
   const handleDelete = async (id: string) => {
+    // Optimistic delete
+    const filteredRules = rules.filter((r) => r.id !== id);
+    setRules(filteredRules);
+    backgroundSyncService.syncFromPrivateAutoReplies(filteredRules);
+
     try {
       const res = await fetch('/api/auto-replies/private/delete', {
         method: 'POST',
@@ -129,13 +151,14 @@ export const AutoResponderModal: React.FC = () => {
       });
       const data = await res.json();
       if (data.success) {
-        setRules((prev) => prev.filter((r) => r.id !== id));
         showToast('تم حذف قاعدة الرد بنجاح', '🗑️');
       } else {
         showToast(data.message || 'تعذر حذف القاعدة', '❌');
+        loadRules();
       }
     } catch (err) {
       showToast('خطأ أثناء حذف القاعدة', '❌');
+      loadRules();
     }
   };
 
@@ -163,6 +186,15 @@ export const AutoResponderModal: React.FC = () => {
       return;
     }
 
+    // Check duplicate if changing keyword
+    const isDuplicate = rules.some(
+      (r) => r.id !== id && r.keyword.trim().toLowerCase() === trimmedKeyword.toLowerCase()
+    );
+    if (isDuplicate) {
+      showToast('هذه الكلمة المفتاحية مستخدمة بالفعل في قاعدة أخرى', '⚠️');
+      return;
+    }
+
     try {
       const res = await fetch('/api/auto-replies/private/edit', {
         method: 'POST',
@@ -175,9 +207,11 @@ export const AutoResponderModal: React.FC = () => {
       });
       const data = await res.json();
       if (data.success && data.rule) {
-        setRules((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, keyword: trimmedKeyword, reply: trimmedReply } : r))
+        const updatedRules = rules.map((r) =>
+          r.id === id ? { ...r, keyword: trimmedKeyword, reply: trimmedReply } : r
         );
+        setRules(updatedRules);
+        backgroundSyncService.syncFromPrivateAutoReplies(updatedRules);
         handleCancelEdit();
         showToast('تم حفظ التعديل بنجاح ✨', '✅');
       } else {

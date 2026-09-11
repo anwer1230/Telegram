@@ -2,7 +2,7 @@ import React from 'react';
 import { Pin, X } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 
-export const PinnedMessageBar: React.FC = () => {
+const PinnedMessageBarComponent: React.FC = () => {
   const { activeChat, activeChatId, messages, pinMessage, settings } = useTelegram();
 
   if (!activeChatId || !activeChat) return null;
@@ -66,3 +66,5 @@ export const PinnedMessageBar: React.FC = () => {
     </div>
   );
 };
+
+export const PinnedMessageBar = React.memo(PinnedMessageBarComponent);

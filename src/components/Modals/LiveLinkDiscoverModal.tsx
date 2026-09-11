@@ -74,7 +74,12 @@ export const LiveLinkDiscoverModal: React.FC = () => {
     if (success) {
       showToast('تم الانضمام للرابط بنجاح 🎉', '✅');
     } else {
-      showToast('تعذر الانضمام (الرابط تالف أو القناة خاصة)', '⚠️');
+      const current = backgroundSyncService.getDiscoveredLinks().find((l) => l.id === linkId);
+      if (current?.failReason === 'PRIVATE_CHANNEL_NOT_ALLOWED') {
+        showToast('ممنوع الانضمام إلى القنوات الخاصة (PRIVATE_CHANNEL_NOT_ALLOWED) ⛔', '🚫');
+      } else {
+        showToast('تعذر الانضمام (الرابط تالف أو القناة خاصة)', '⚠️');
+      }
     }
   };
 
@@ -322,8 +327,13 @@ export const LiveLinkDiscoverModal: React.FC = () => {
                         </span>
                       )}
                       {item.status === 'failed' && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300">
-                          {item.failReason || 'فشل'}
+                        <span
+                          title={item.failReason}
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300"
+                        >
+                          {item.failReason === 'PRIVATE_CHANNEL_NOT_ALLOWED'
+                            ? 'PRIVATE_CHANNEL_NOT_ALLOWED'
+                            : item.failReason || 'فشل'}
                         </span>
                       )}
                     </div>

@@ -2,8 +2,17 @@
  * SessionSecurityManager.ts - MTProto Session Security, Passcode Lock & Device Verification
  */
 
+/**
+ * SessionSecurityManager.ts - MTProto Session Security, Passcode Lock & Device Verification
+ * Integrates WebAuthn Biometrics, AndroidX Biometrics, and Idle-lock session security
+ */
+
+import { biometricAuthService, BiometricCapability, BiometricAuthResult } from '../services/BiometricAuthService';
+
 export class SessionSecurityManager {
   private static instance: SessionSecurityManager;
+  private locked = false;
+  private listeners: Set<(locked: boolean) => void> = new Set();
 
   public static getInstance(): SessionSecurityManager {
     if (!SessionSecurityManager.instance) {
@@ -13,14 +22,117 @@ export class SessionSecurityManager {
   }
 
   public isPasscodeSet(): boolean {
-    return false;
+    return biometricAuthService.isPasscodeSet();
   }
 
-  public checkPasscode(_passcode: string): boolean {
-    return true;
+  public checkPasscode(passcode: string): boolean {
+    return biometricAuthService.verifyPasscode(passcode);
   }
 
-  public setPasscode(_passcode: string): void {}
+  public setPasscode(passcode: string): void {
+    biometricAuthService.setPasscode(passcode);
+  }
+
+  public isBiometricEnabled(): boolean {
+    return biometricAuthService.isBiometricEnabled();
+  }
+
+  public setBiometricEnabled(enabled: boolean): void {
+    biometricAuthService.setBiometricEnabled(enabled);
+  }
+
+  public async checkBiometricCapability(): Promise<BiometricCapability> {
+    return biometricAuthService.checkBiometricCapability();
+  }
+
+  public async registerBiometrics(username?: string): Promise<boolean> {
+    return biometricAuthService.registerBiometrics(username);
+  }
+
+  public async authenticateBiometrics(promptTitle?: string): Promise<BiometricAuthResult> {
+    return biometricAuthService.authenticateBiometrics(promptTitle);
+  }
+
+  public getAutoLockTimeout(): number {
+    return biometricAuthService.getAutoLockTimeout();
+  }
+
+  public setAutoLockTimeout(timeoutMs: number): void {
+    biometricAuthService.setAutoLockTimeout(timeoutMs);
+  }
+
+  public isSessionLocked(): boolean {
+    return this.locked;
+  }
+
+  public isLocked(): boolean {
+    return this.locked;
+  }
+
+  public lock(): void {
+    this.lockSession();
+  }
+
+  public isBiometricsEnabled(): boolean {
+    return this.isBiometricEnabled();
+  }
+
+  public setBiometricsEnabled(enabled: boolean): void {
+    this.setBiometricEnabled(enabled);
+  }
+
+  public async isBiometricsAvailable(): Promise<boolean> {
+    const cap = await this.checkBiometricCapability();
+    return cap.isAvailable;
+  }
+
+  public getPasscodeType(): 'pin' | 'password' {
+    return 'pin';
+  }
+
+  public removePasscode(): void {
+    biometricAuthService.clearPasscode();
+  }
+
+  public async enrollBiometrics(username?: string): Promise<boolean> {
+    return this.registerBiometrics(username);
+  }
+
+  public subscribe(callback: (locked: boolean) => void): () => void {
+    return this.subscribeLockState(callback);
+  }
+
+  public lockSession(): void {
+    this.locked = true;
+    this.notifyListeners();
+  }
+
+  public unlockSession(): void {
+    this.locked = false;
+    biometricAuthService.recordActivity();
+    this.notifyListeners();
+  }
+
+  public subscribeLockState(callback: (locked: boolean) => void): () => void {
+    this.listeners.add(callback);
+    callback(this.locked);
+    return () => this.listeners.delete(callback);
+  }
+
+  private notifyListeners(): void {
+    this.listeners.forEach((cb) => cb(this.locked));
+  }
+
+  public startIdleMonitor(onLock?: () => void): void {
+    biometricAuthService.startIdleMonitor(() => {
+      this.lockSession();
+      if (onLock) onLock();
+    });
+  }
+
+  public stopIdleMonitor(): void {
+    biometricAuthService.stopIdleMonitor();
+  }
 
   public async loadAllSessions(_force?: boolean): Promise<{ currentSession: any; otherSessions: any[]; ttlDays: number }> {
     return {

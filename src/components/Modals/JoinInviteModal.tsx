@@ -12,6 +12,7 @@ import {
 import { useTelegram } from '../../context/TelegramContext';
 import { Chat } from '../../types';
 import { notificationsController } from '../../core/NotificationsController';
+import { SecureSessionStorage } from '../../utils/SecureSessionStorage';
 
 export interface InviteModalData {
   id: string;
@@ -34,6 +35,8 @@ export const JoinInviteModal: React.FC = () => {
     setActiveChatId,
     showToast,
     settings,
+    currentUser,
+    syncInitializationRoutine,
   } = useTelegram();
 
   const [inviteData, setInviteData] = useState<InviteModalData | null>(null);
@@ -58,41 +61,97 @@ export const JoinInviteModal: React.FC = () => {
   const handleJoin = async () => {
     setIsJoining(true);
     try {
+      // استخراج الجلسة ورقم الهاتف الحقيقي من التخزين الآمن
+      const sessionString = SecureSessionStorage.getItem<string>('tg_session_string')
+        || localStorage.getItem('tg_session_string')
+        || localStorage.getItem('telegram_session_string')
+        || '';
+      const phone = SecureSessionStorage.getItem<string>('tg_phone')
+        || localStorage.getItem('tg_phone')
+        || localStorage.getItem('telegram_phone')
+        || currentUser?.phone
+        || '';
+
+      if (!sessionString || !phone) {
+        showToast(isArabic ? 'يرجى تسجيل الدخول أولاً' : 'Please log in first', '❌');
+        setIsJoining(false);
+        return;
+      }
+
       const res = await fetch('/api/telegram/links/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inviteInfo: inviteData }),
+        body: JSON.stringify({
+          inviteInfo: inviteData,
+          sessionString,
+          phone,
+          hash: (inviteData as any)?.hash || inviteData?.inviteHash,
+          channelId: inviteData.id,
+          type: inviteData.type || 'public',
+        }),
       });
+
+      if (!res.ok) {
+        // التحقق الصارم من حالة الاستجابة ومنع إطلاق أي أحداث نجاح وهمية
+        let errorMessage = isArabic ? 'فشل الانضمام' : 'Failed to join';
+        try {
+          const errorData = await res.json();
+          if (res.status === 401 || errorData.error === 'AUTH_KEY_UNREGISTERED') {
+            errorMessage = isArabic ? 'يرجى تسجيل الدخول أولاً' : 'Please log in first';
+          } else if (res.status === 410 || errorData.error === 'INVITE_HASH_EXPIRED') {
+            errorMessage = isArabic ? 'رابط الدعوة منتهي الصلاحية' : 'Invite link expired';
+          } else if (res.status === 429 || errorData.error === 'FLOOD_WAIT') {
+            errorMessage = isArabic
+              ? `الانتظار ${errorData.seconds || 60} ثانية قبل المحاولة مرة أخرى`
+              : `Wait ${errorData.seconds || 60}s before retrying`;
+          } else {
+            errorMessage = errorData.message || errorData.error || (isArabic ? 'حدث خطأ أثناء الانضمام' : 'Failed to join');
+          }
+        } catch {
+          errorMessage = isArabic ? 'حدث خطأ في الاتصال بالخادم' : 'Server connection error';
+        }
+        showToast(errorMessage, '❌');
+        return; // منع إطلاق حدث tg-joined-chat نهائياً عند الفشل
+      }
+
       const data = await res.json();
 
-      // Broadcast new chat creation
-      const customEvent = new CustomEvent('tg-joined-chat', { detail: data.joinedChat || inviteData });
-      window.dispatchEvent(customEvent);
+      // التأكد الصارم من أن الخادم أعاد نجاحاً فعلياً وبيانات المحادثة المنضم إليها
+      if (data && data.success && data.joinedChat) {
+        // إطلاق حدث الانضمام لتحديث الواجهة
+        const customEvent = new CustomEvent('tg-joined-chat', { detail: data.joinedChat });
+        window.dispatchEvent(customEvent);
 
-      notificationsController.postNotification({
-        category: 'channel_post',
-        title: isArabic ? 'تم الانضمام بنجاح 🎉' : 'Joined Successfully 🎉',
-        body: inviteData.title,
-        avatar: inviteData.avatar,
-        chatId: inviteData.id,
-      });
+        // استدعاء المزامنة السحابية الفورية من خوادم تيليجرام (messages.getDialogs)
+        try {
+          if (syncInitializationRoutine) {
+            await syncInitializationRoutine(phone, sessionString);
+          }
+        } catch (syncErr) {
+          console.warn('[JoinInviteModal] Cloud sync warning:', syncErr);
+        }
 
-      showToast(
-        isArabic
-          ? `تم الانضمام بنجاح إلى "${inviteData.title}"`
-          : `Joined "${inviteData.title}" successfully`,
-        '✨'
-      );
-      setInviteData(null);
+        notificationsController.postNotification({
+          category: 'channel_post',
+          title: isArabic ? 'تم الانضمام بنجاح 🎉' : 'Joined Successfully 🎉',
+          body: data.joinedChat.title || inviteData.title,
+          avatar: data.joinedChat.avatar || inviteData.avatar,
+          chatId: data.joinedChat.id || inviteData.id,
+        });
+
+        showToast(
+          isArabic
+            ? `تم الانضمام إلى ${data.joinedChat.title} بنجاح!`
+            : `Joined "${data.joinedChat.title}" successfully!`,
+          '✅'
+        );
+        setInviteData(null);
+      } else {
+        // حالة استجابة غير ناجحة
+        showToast(data?.message || data?.error || (isArabic ? 'فشل الانضمام' : 'Failed to join'), '❌');
+      }
     } catch {
-      // Fallback local join
-      const customEvent = new CustomEvent('tg-joined-chat', { detail: inviteData });
-      window.dispatchEvent(customEvent);
-      showToast(
-        isArabic ? `تم الانضمام إلى "${inviteData.title}"` : `Joined "${inviteData.title}"`,
-        '✨'
-      );
-      setInviteData(null);
+      showToast(isArabic ? 'حدث خطأ في الاتصال بالخادم' : 'Server connection error', '❌');
     } finally {
       setIsJoining(false);
     }
