@@ -1,5 +1,5 @@
 // @ts-ignore
-import initSqlJs from 'sql.js/dist/sql-asm.js';
+import initSqlJs from 'sql.js/dist/sql-asm-memory-growth.js';
 import type { Database } from 'sql.js';
 import { get, set } from 'idb-keyval';
 import { Chat, Message, User } from '../types';
@@ -10,6 +10,7 @@ class TelegramSQLiteDatabase {
   private db: Database | null = null;
   private isInitialized = false;
   private initPromise: Promise<void> | null = null;
+  private persistTimeout: any = null;
 
   public async init(): Promise<void> {
     if (this.isInitialized && this.db) return;
@@ -20,21 +21,47 @@ class TelegramSQLiteDatabase {
         const SQL = await initSqlJs();
         if (!SQL) return;
 
-        // Check if existing SQLite binary DB stored in IndexedDB (MMAP-like persistent local cache)
-        const savedBinary = await get<Uint8Array>(SQLITE_STORAGE_KEY);
+        let loaded = false;
+        try {
+          // Check if existing SQLite binary DB stored in IndexedDB (MMAP-like persistent local cache)
+          const savedBinary = await get<Uint8Array>(SQLITE_STORAGE_KEY);
+          if (savedBinary && savedBinary.byteLength > 0) {
+            // Guard against corrupt/oversized binary blobs causing asm.js OOM (>8MB in asm.js)
+            if (savedBinary.byteLength > 8 * 1024 * 1024) {
+              console.warn('[SQLite MMAP] Cached database exceeds safe memory threshold (OOM guard), resetting to fresh DB...');
+              try { await set(SQLITE_STORAGE_KEY, null); } catch {}
+              this.db = new SQL.Database();
+              loaded = true;
+            } else {
+              this.db = new SQL.Database(savedBinary);
+              console.log('[SQLite MMAP] Restored existing encrypted/compressed SQLite database.');
+              loaded = true;
+            }
+          }
+        } catch (loadErr) {
+          console.warn('[SQLite MMAP] Failed to restore saved binary, resetting cache:', loadErr);
+          try {
+            await set(SQLITE_STORAGE_KEY, null);
+          } catch {}
+        }
 
-        if (savedBinary && savedBinary.byteLength > 0) {
-          this.db = new SQL.Database(savedBinary);
-          console.log('[SQLite MMAP] Restored existing encrypted/compressed SQLite database.');
-        } else {
+        if (!loaded || !this.db) {
           this.db = new SQL.Database();
-          console.log('[SQLite MMAP] Created fresh SQLite database tables.');
+          console.log('[SQLite MMAP] Created fresh SQLite database instance.');
         }
 
         this.bootstrapSchema();
         this.isInitialized = true;
       } catch (err) {
-        console.warn('[SQLite] Fallback to in-memory SQLite instance due to:', err);
+        console.warn('[SQLite] Fallback initialization due to:', err);
+        try {
+          const SQL = await initSqlJs();
+          this.db = new SQL.Database();
+          this.bootstrapSchema();
+          this.isInitialized = true;
+        } catch (fallbackErr) {
+          console.error('[SQLite] Critical init error:', fallbackErr);
+        }
       }
     })();
 
@@ -44,36 +71,34 @@ class TelegramSQLiteDatabase {
   private bootstrapSchema() {
     if (!this.db) return;
 
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS users (
+    const tableStatements = [
+      `CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         name TEXT,
         username TEXT,
         phone TEXT,
         avatar TEXT,
-        is_online INTEGER,
-        is_premium INTEGER,
+        is_online INTEGER DEFAULT 0,
+        is_premium INTEGER DEFAULT 0,
         bio TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS chats (
+      );`,
+      `CREATE TABLE IF NOT EXISTS chats (
         id TEXT PRIMARY KEY,
         type TEXT,
         title TEXT,
         username TEXT,
         avatar TEXT,
-        unread_count INTEGER,
-        is_pinned INTEGER,
-        is_muted INTEGER,
+        unread_count INTEGER DEFAULT 0,
+        is_pinned INTEGER DEFAULT 0,
+        is_muted INTEGER DEFAULT 0,
         is_secret INTEGER DEFAULT 0,
         ttl_seconds INTEGER DEFAULT 0,
         encryption_key TEXT,
         last_message_text TEXT,
         last_message_time TEXT,
         data_json TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS messages (
+      );`,
+      `CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
         chat_id TEXT,
         sender_id TEXT,
@@ -81,15 +106,13 @@ class TelegramSQLiteDatabase {
         text TEXT,
         timestamp TEXT,
         date TEXT,
-        is_outgoing INTEGER,
+        is_outgoing INTEGER DEFAULT 0,
         status TEXT,
         media_json TEXT,
         is_secret INTEGER DEFAULT 0,
-        expires_at INTEGER DEFAULT 0,
-        FOREIGN KEY(chat_id) REFERENCES chats(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS stories (
+        expires_at INTEGER DEFAULT 0
+      );`,
+      `CREATE TABLE IF NOT EXISTS stories (
         id TEXT PRIMARY KEY,
         user_id TEXT,
         user_name TEXT,
@@ -102,38 +125,33 @@ class TelegramSQLiteDatabase {
         views_count INTEGER DEFAULT 0,
         is_viewed INTEGER DEFAULT 0,
         is_my_story INTEGER DEFAULT 0
-      );
-
-      CREATE TABLE IF NOT EXISTS secret_sessions (
+      );`,
+      `CREATE TABLE IF NOT EXISTS secret_sessions (
         chat_id TEXT PRIMARY KEY,
         dh_public_key TEXT,
         dh_shared_secret TEXT,
         fingerprint TEXT,
         ttl_seconds INTEGER DEFAULT 0
-      );
-
-      CREATE TABLE IF NOT EXISTS channel_pts (
+      );`,
+      `CREATE TABLE IF NOT EXISTS channel_pts (
         channel_id TEXT PRIMARY KEY,
         pts INTEGER,
         updated_at INTEGER
-      );
-
-      CREATE TABLE IF NOT EXISTS diff_params (
+      );`,
+      `CREATE TABLE IF NOT EXISTS diff_params (
         account_id TEXT PRIMARY KEY,
         pts INTEGER,
         seq INTEGER,
         date INTEGER,
         qts INTEGER,
         updated_at INTEGER
-      );
-
-      CREATE TABLE IF NOT EXISTS privacy_rules (
+      );`,
+      `CREATE TABLE IF NOT EXISTS privacy_rules (
         rule_key TEXT PRIMARY KEY,
         rules_json TEXT,
         updated_at INTEGER
-      );
-
-      CREATE TABLE IF NOT EXISTS chat_scroll (
+      );`,
+      `CREATE TABLE IF NOT EXISTS chat_scroll (
         scroll_key TEXT PRIMARY KEY,
         dialog_id TEXT,
         position INTEGER,
@@ -141,15 +159,23 @@ class TelegramSQLiteDatabase {
         message_id TEXT,
         is_bottom INTEGER,
         updated_at INTEGER
-      );
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);`,
+    ];
 
-      CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
-    `);
+    for (const stmt of tableStatements) {
+      try {
+        this.db.exec(stmt);
+      } catch (err) {
+        console.warn('[SQLite Schema] Error creating table or index:', err);
+      }
+    }
 
     // Auto-migrate tables to ensure any new columns (like data_json) exist on restored databases
     this.runSchemaMigrations();
 
-    this.persist();
+    this.persistDebounced(1000);
   }
 
   private ensureColumnExists(table: string, column: string, colDef: string): void {
@@ -218,13 +244,29 @@ class TelegramSQLiteDatabase {
     }
   }
 
+  public persistDebounced(delayMs: number = 300): void {
+    if (this.persistTimeout) {
+      clearTimeout(this.persistTimeout);
+    }
+    this.persistTimeout = setTimeout(() => {
+      this.persist();
+    }, delayMs);
+  }
+
   public async persist(): Promise<void> {
     if (!this.db) return;
     try {
       const data = this.db.export();
       await set(SQLITE_STORAGE_KEY, data);
-    } catch (e) {
-      console.warn('[SQLite Persistence] Error exporting database:', e);
+    } catch (e: any) {
+      if (e && String(e).includes('OOM')) {
+        console.warn('[SQLite Persistence] OOM in export, clearing cache to recover:', e);
+        try {
+          await set(SQLITE_STORAGE_KEY, null);
+        } catch {}
+      } else {
+        console.warn('[SQLite Persistence] Error exporting database:', e);
+      }
     }
   }
 
@@ -256,11 +298,11 @@ class TelegramSQLiteDatabase {
       }
       stmt.free();
       this.db.run('COMMIT');
-      this.persist();
+      this.persistDebounced();
     } catch (e: any) {
       try { this.db.run('ROLLBACK'); } catch (_) {}
-      if (e?.message && e.message.includes('has no column named')) {
-        this.runSchemaMigrations();
+      if (e?.message && (e.message.includes('has no column named') || e.message.includes('no such table'))) {
+        this.bootstrapSchema();
         try {
           this.db.run('BEGIN TRANSACTION');
           const stmt = this.db.prepare(`
@@ -285,7 +327,7 @@ class TelegramSQLiteDatabase {
           }
           stmt.free();
           this.db.run('COMMIT');
-          this.persist();
+          this.persistDebounced();
           return;
         } catch (retryErr) {
           try { this.db.run('ROLLBACK'); } catch (_) {}
@@ -337,8 +379,12 @@ class TelegramSQLiteDatabase {
           } as Chat;
         });
       }
-    } catch (e) {
-      console.error('[SQLite] getChats error:', e);
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      } else {
+        console.error('[SQLite] getChats error:', e);
+      }
     }
     return [];
   }
@@ -365,10 +411,10 @@ class TelegramSQLiteDatabase {
           expiresAt,
         ]
       );
-      this.persist();
+      this.persistDebounced();
     } catch (e: any) {
-      if (e?.message && e.message.includes('has no column named')) {
-        this.runSchemaMigrations();
+      if (e?.message && (e.message.includes('has no column named') || e.message.includes('no such table'))) {
+        this.bootstrapSchema();
         try {
           this.db.run(
             `INSERT OR REPLACE INTO messages (id, chat_id, sender_id, sender_name, text, timestamp, date, is_outgoing, status, media_json, is_secret, expires_at)
@@ -388,7 +434,7 @@ class TelegramSQLiteDatabase {
               expiresAt,
             ]
           );
-          this.persist();
+          this.persistDebounced();
           return;
         } catch (_) {}
       }
@@ -423,11 +469,11 @@ class TelegramSQLiteDatabase {
       }
       stmt.free();
       this.db.run('COMMIT');
-      this.persist();
+      this.persistDebounced();
     } catch (e: any) {
       try { this.db.run('ROLLBACK'); } catch (_) {}
-      if (e?.message && e.message.includes('has no column named')) {
-        this.runSchemaMigrations();
+      if (e?.message && (e.message.includes('has no column named') || e.message.includes('no such table'))) {
+        this.bootstrapSchema();
         try {
           this.db.run('BEGIN TRANSACTION');
           const stmt = this.db.prepare(`
@@ -453,7 +499,7 @@ class TelegramSQLiteDatabase {
           }
           stmt.free();
           this.db.run('COMMIT');
-          this.persist();
+          this.persistDebounced();
           return;
         } catch (retryErr) {
           try { this.db.run('ROLLBACK'); } catch (_) {}
@@ -507,71 +553,105 @@ class TelegramSQLiteDatabase {
       if (!messagesOnly) {
         this.db.run('DELETE FROM chats WHERE id = ?', [chatId]);
       }
-      this.persist();
-    } catch (e) {
-      console.error('[SQLite] deleteDialog error:', e);
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      } else {
+        console.error('[SQLite] deleteDialog error:', e);
+      }
     }
   }
 
   public cleanUpDatabase(): void {
     if (!this.db) return;
     try {
+      this.bootstrapSchema();
       this.db.run('DELETE FROM messages');
       this.db.run('DELETE FROM chats');
       this.db.run('DELETE FROM users');
       this.db.run('DELETE FROM stories');
-      this.persist();
-    } catch (e) {
-      console.error('[SQLite] cleanUpDatabase error:', e);
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+        try {
+          this.db.run('DELETE FROM messages');
+          this.db.run('DELETE FROM chats');
+          this.db.run('DELETE FROM users');
+          this.db.run('DELETE FROM stories');
+          this.persistDebounced();
+        } catch (_) {}
+      } else {
+        console.warn('[SQLite] cleanUpDatabase notice:', e?.message || e);
+      }
     }
   }
 
   // Secret Session operations
   public saveSecretSession(chatId: string, fingerprint: string, sharedKey: string, ttl: number) {
     if (!this.db) return;
-    this.db.run(
-      `INSERT OR REPLACE INTO secret_sessions (chat_id, dh_public_key, dh_shared_secret, fingerprint, ttl_seconds)
-       VALUES (?, ?, ?, ?, ?)`,
-      [chatId, 'DH_PUB_' + Math.random().toString(36).substring(7), sharedKey, fingerprint, ttl]
-    );
-    this.persist();
+    try {
+      this.db.run(
+        `INSERT OR REPLACE INTO secret_sessions (chat_id, dh_public_key, dh_shared_secret, fingerprint, ttl_seconds)
+         VALUES (?, ?, ?, ?, ?)`,
+        [chatId, 'DH_PUB_' + Math.random().toString(36).substring(7), sharedKey, fingerprint, ttl]
+      );
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      }
+    }
   }
 
   public getSecretSession(chatId: string) {
     if (!this.db) return null;
-    const stmt = this.db.prepare('SELECT * FROM secret_sessions WHERE chat_id = ?');
-    stmt.bind([chatId]);
-    if (stmt.step()) {
-      const res = stmt.getAsObject();
+    try {
+      const stmt = this.db.prepare('SELECT * FROM secret_sessions WHERE chat_id = ?');
+      stmt.bind([chatId]);
+      if (stmt.step()) {
+        const res = stmt.getAsObject();
+        stmt.free();
+        return res;
+      }
       stmt.free();
-      return res;
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      }
     }
-    stmt.free();
     return null;
   }
 
   // SQLite Ops for Contacts
   public saveContacts(contacts: User[]): void {
     if (!this.db) return;
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO users (id, name, username, phone, avatar, is_online, is_premium, bio)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    try {
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO users (id, name, username, phone, avatar, is_online, is_premium, bio)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
 
-    for (const u of contacts) {
-      stmt.run([
-        u.id,
-        u.name,
-        u.username || '',
-        u.phone || '',
-        u.avatar || '',
-        u.isOnline ? 1 : 0,
-        u.isPremium ? 1 : 0,
-        u.bio || '',
-      ]);
+      for (const u of contacts) {
+        stmt.run([
+          u.id,
+          u.name,
+          u.username || '',
+          u.phone || '',
+          u.avatar || '',
+          u.isOnline ? 1 : 0,
+          u.isPremium ? 1 : 0,
+          u.bio || '',
+        ]);
+      }
+      stmt.free();
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      }
     }
-    stmt.free();
-    this.persist();
   }
 
   public getContacts(): User[] {
@@ -597,8 +677,12 @@ class TelegramSQLiteDatabase {
           };
         });
       }
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      } else {
+        console.error(e);
+      }
     }
     return [];
   }
@@ -608,9 +692,18 @@ class TelegramSQLiteDatabase {
     try {
       const now = Date.now();
       this.db.run('DELETE FROM messages WHERE is_secret = 1 AND expires_at > 0 AND expires_at < ?', [now]);
-      this.persist();
-    } catch (e) {
-      console.error('[SQLite] Error purging expired messages:', e);
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+        try {
+          const now = Date.now();
+          this.db.run('DELETE FROM messages WHERE is_secret = 1 AND expires_at > 0 AND expires_at < ?', [now]);
+          this.persistDebounced();
+        } catch (_) {}
+      } else {
+        console.warn('[SQLite] Notice purging expired messages:', e?.message || e);
+      }
     }
   }
 
@@ -622,9 +715,13 @@ class TelegramSQLiteDatabase {
         'INSERT OR REPLACE INTO channel_pts (channel_id, pts, updated_at) VALUES (?, ?, ?)',
         [String(channelId), Number(pts) || 0, Date.now()]
       );
-      this.persist();
-    } catch (e) {
-      console.warn('[SQLite] saveChannelPts error:', e);
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      } else {
+        console.warn('[SQLite] saveChannelPts error:', e);
+      }
     }
   }
 
@@ -667,9 +764,13 @@ class TelegramSQLiteDatabase {
         'INSERT OR REPLACE INTO diff_params (account_id, pts, seq, date, qts, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
         [String(accountId), Number(pts) || 0, Number(seq) || 0, Number(date) || 0, Number(qts) || 0, Date.now()]
       );
-      this.persist();
-    } catch (e) {
-      console.warn('[SQLite] saveDiffParams error:', e);
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      } else {
+        console.warn('[SQLite] saveDiffParams error:', e);
+      }
     }
   }
 
@@ -704,9 +805,13 @@ class TelegramSQLiteDatabase {
         'INSERT OR REPLACE INTO privacy_rules (rule_key, rules_json, updated_at) VALUES (?, ?, ?)',
         [ruleKey, JSON.stringify(rules), Date.now()]
       );
-      this.persist();
-    } catch (e) {
-      console.warn('[SQLite] savePrivacyRules error:', e);
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      } else {
+        console.warn('[SQLite] savePrivacyRules error:', e);
+      }
     }
   }
 
@@ -746,9 +851,13 @@ class TelegramSQLiteDatabase {
         'INSERT OR REPLACE INTO chat_scroll (scroll_key, dialog_id, position, top_offset, message_id, is_bottom, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [scrollKey, dialogId, position, topOffset, String(messageId), isAtBottom ? 1 : 0, Date.now()]
       );
-      this.persist();
-    } catch (e) {
-      console.warn('[SQLite] saveChatScroll error:', e);
+      this.persistDebounced();
+    } catch (e: any) {
+      if (e?.message && e.message.includes('no such table')) {
+        this.bootstrapSchema();
+      } else {
+        console.warn('[SQLite] saveChatScroll error:', e);
+      }
     }
   }
 

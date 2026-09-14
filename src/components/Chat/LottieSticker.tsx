@@ -36,6 +36,16 @@ const STICKER_DATA_LOOKUP: Record<string, any> = {
   st_cat_2: LOTTIE_HEART_PULSE,
   st_pepe_1: LOTTIE_TON_GEM,
   st_pepe_2: LOTTIE_FIRE_FLAME,
+  st_duck_wink: LOTTIE_DUCK_WINK,
+  st_duck_party: LOTTIE_PARTY_POPPER,
+  st_duck_love: LOTTIE_HEART_PULSE,
+  st_duck_fire: LOTTIE_FIRE_FLAME,
+  st_rdog_rocket: LOTTIE_ROCKET_BOOST,
+  st_rdog_fire: LOTTIE_FIRE_FLAME,
+  st_ton_diamond: LOTTIE_TON_GEM,
+  st_ton_rocket: LOTTIE_ROCKET_BOOST,
+  st_cherry_heart: LOTTIE_HEART_PULSE,
+  st_cherry_fire: LOTTIE_FIRE_FLAME,
 };
 
 const LottieStickerComponent: React.FC<LottieStickerProps> = ({

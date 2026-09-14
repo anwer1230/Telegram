@@ -5706,15 +5706,15 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setActiveChatId(targetChatId);
   };
 
-  const createNewChat = (
+  const createNewChat = async (
     type: 'private' | 'group' | 'channel',
     title: string,
     username?: string,
     description?: string
   ) => {
-    const newChatId = `chat_${Date.now()}`;
+    const tempChatId = `chat_${Date.now()}`;
     const newChat: Chat = {
-      id: newChatId,
+      id: tempChatId,
       type,
       title: title.trim(),
       username: username ? username.replace('@', '') : undefined,
@@ -5735,13 +5735,13 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       },
     };
 
-    setChats((prev) => messagesController.sortDialogs([newChat, ...prev.filter((c) => c.id !== newChatId)], 'all'));
+    setChats((prev) => messagesController.sortDialogs([newChat, ...prev.filter((c) => c.id !== tempChatId)], 'all'));
     setMessages((prev) => ({
       ...prev,
-      [newChatId]: [
+      [tempChatId]: [
         {
           id: `msg_init_${Date.now()}`,
-          chatId: newChatId,
+          chatId: tempChatId,
           senderId: currentUser.id,
           senderName: 'You',
           text: `✨ ${type.toUpperCase()} created successfully with Telegram API (ID: ${apiConfig.apiId}).`,
@@ -5753,12 +5753,65 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ],
     }));
 
-    setActiveChatId(newChatId);
+    setActiveChatId(tempChatId);
     setActiveModal('none');
     showToast(
-      settings.language === 'ar' ? 'تم إنشاء المحادثة بنجاح' : 'Chat created successfully',
-      '✨'
+      settings.language === 'ar' ? 'جاري إنشاء المحادثة على خوادم تيليجرام...' : 'Creating chat on Telegram servers...',
+      '⏳'
     );
+
+    // Invoke real MTProto API for channel or group
+    if (type === 'channel' || type === 'group') {
+      try {
+        const response = await fetch('/api/telegram/channels/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type,
+            title: title.trim(),
+            username: username ? username.replace('@', '') : undefined,
+            description: description?.trim() || '',
+            phone: currentUser?.phone,
+            sessionString: currentUser?.sessionString || '',
+          }),
+        });
+        const data = await response.json();
+        if (data.success && data.chat) {
+          const realChat = data.chat;
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === tempChatId
+                ? {
+                    ...c,
+                    id: String(realChat.id),
+                    username: realChat.username || c.username,
+                    description: realChat.description || c.description,
+                  }
+                : c
+            )
+          );
+          setMessages((prev) => {
+            const tempMsgs = prev[tempChatId] || [];
+            const newMap = { ...prev };
+            delete newMap[tempChatId];
+            newMap[String(realChat.id)] = tempMsgs.map((m) => ({
+              ...m,
+              chatId: String(realChat.id),
+            }));
+            return newMap;
+          });
+          setActiveChatId(String(realChat.id));
+          showToast(
+            settings.language === 'ar'
+              ? `تم إنشاء ${type === 'channel' ? 'القناة' : 'المجموعة'} بنجاح على خوادم تيليجرام!`
+              : `${type === 'channel' ? 'Channel' : 'Group'} created on Telegram servers!`,
+            '✨'
+          );
+        }
+      } catch (e) {
+        console.warn('[Telegram] Channel creation fallback to local state:', e);
+      }
+    }
   };
 
   // Smart App Update & Render Deploy Hook state

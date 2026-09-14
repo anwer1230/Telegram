@@ -49,28 +49,12 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { telegramRPCRegistry } from './server/TelegramRPCRegistry';
 import { sqliteDatabase } from './server/sqliteService';
 import { redisCache } from './server/redisCacheService';
-import { SECURITY_CONFIG, isAllowedOrigin } from './server/security/config';
-import { signSessionToken, verifySessionToken, generateCsrfToken, verifyCsrfToken } from './server/security/sessions';
-import {
-  securityCookieParser,
-  securityHelmet,
-  dynamicCorsAndOriginCheck,
-  apiRateLimiter,
-  authRateLimiter,
-  authenticateSession,
-  csrfProtection,
-} from './server/security/middleware';
-import { setupWebSocketSecurity } from './server/security/wsAuth';
 
 export { sqliteDatabase, redisCache };
 
-// Permanent Telegram API Credentials (Immutable System Hardcoded)
-export const PERMANENT_TELEGRAM_API_ID = 22043994;
-export const PERMANENT_TELEGRAM_API_HASH = '56f64582b363d367280db96586b97801';
-
-// Dynamic Environment & Credentials Resolution with Permanent Fallback
-const TELEGRAM_API_ID = process.env.API_ID || process.env.TELEGRAM_API_ID || String(PERMANENT_TELEGRAM_API_ID);
-const TELEGRAM_API_HASH = process.env.API_HASH || process.env.TELEGRAM_API_HASH || PERMANENT_TELEGRAM_API_HASH;
+// Dynamic Environment & Credentials Resolution (from process.env)
+const TELEGRAM_API_ID = process.env.API_ID || process.env.TELEGRAM_API_ID || '22043994';
+const TELEGRAM_API_HASH = process.env.API_HASH || process.env.TELEGRAM_API_HASH || '56f64582b363d367280db96586b97801';
 const TDLIB_API_HASH = process.env.TDLIB_API_HASH || TELEGRAM_API_HASH;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'tg_session_anwer_foud_secure_key_2026';
 // NOTE: Telegram sessions are strictly isolated in sessions/account_{index}.json and NEVER stored in .env or global variables.
@@ -396,17 +380,11 @@ export function getAccountInstance(accountIndex: number = currentAccount): Accou
 }
 
 // ==========================================
-// VAPID & WEB PUSH NOTIFICATION SUBSYSTEM (PERMANENT CONFIGURATION)
+// VAPID & WEB PUSH NOTIFICATION SUBSYSTEM
 // ==========================================
-export const PERMANENT_VAPID_PUBLIC_KEY =
-  'BE36BmheMRx2GxzjWpp_4bmXq_hZg55bP_M_vNVysfnjTxns9VCI0hiCHgnRBx0URe_LoxWaAgrS9G9QZbQhOh8';
-export const PERMANENT_VAPID_PRIVATE_KEY =
-  '13NU1_GmeL7bDQcVtlFyuKqsnnsX3XkOyE--2rAQJw4';
-export const PERMANENT_VAPID_SUBJECT = 'mailto:anwrfwad178@gmail.com';
-
-let VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || PERMANENT_VAPID_PUBLIC_KEY;
-let VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || PERMANENT_VAPID_PRIVATE_KEY;
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT || PERMANENT_VAPID_SUBJECT;
+let VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+let VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@telegram-anwer.app';
 
 // Persist auto-generated keys to disk so they survive server restarts if not provided in process.env
 const VAPID_KEYS_FILE = path.join(SESSIONS_DIR, 'vapid_keys.json');
@@ -446,7 +424,7 @@ if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   try {
     webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-    console.log('[WebPush] VAPID configuration initialized successfully with permanent keys.');
+    console.log('[WebPush] VAPID configuration initialized successfully.');
   } catch (err) {
     console.warn('[WebPush] setVapidDetails error:', err);
   }
@@ -502,38 +480,27 @@ const fallbackAvatarSvg = Buffer.from(
 
 async function startServer() {
   const app = express();
-  // Trust proxy for accurate client IP resolution behind Cloud Run / Nginx
-  app.set('trust proxy', 1);
   const server = http.createServer(app);
   const io = new SocketIOServer(server, {
     cors: {
-      origin: (origin, callback) => {
-        if (!origin || isAllowedOrigin(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error('Origin not allowed by security policy'));
-        }
-      },
-      credentials: true,
+      origin: '*',
       methods: ['GET', 'POST'],
     },
     transports: ['websocket', 'polling'],
   });
-
-  // Attach Socket.IO comprehensive security layer (Origin, Auth check, Event rate limit, Heartbeat)
-  setupWebSocketSecurity(io);
-
   // The PORT value (3000) is hardcoded by the infrastructure and must not read process.env.PORT
   const PORT = 3000;
 
-  // Security Headers via Helmet
-  app.use(securityHelmet);
-
-  // Dynamic CORS & Strict Origin Validation on HTTP
-  app.use(dynamicCorsAndOriginCheck);
-
-  // Parse signed cookies
-  app.use(securityCookieParser);
+  // CORS & Preflight Handling
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
 
   // Anti-Cache & Browser Freshness Headers (Prevents White Screen due to stale chunks on Render/Production)
   app.use((req, res, next) => {
@@ -548,26 +515,6 @@ async function startServer() {
 
   app.use(express.json({ limit: '20mb' }));
   app.use(express.urlencoded({ extended: true, limit: '20mb' }));
-
-  // Global Session Authentication & Ingress Rate Limiting
-  app.use('/api/', apiRateLimiter);
-  app.use('/api/telegram/auth/', authRateLimiter);
-  app.use('/api/telegram/auth/verify-code', authRateLimiter);
-  app.use('/api/telegram/auth/resend-code', authRateLimiter);
-  app.use(authenticateSession);
-
-  // CSRF Token Generation Endpoint
-  app.get('/api/csrf-token', (req, res) => {
-    const sessionId = (req as any).userSession?.userId || req.cookies?.[SECURITY_CONFIG.cookieName] || req.ip || 'anon_session';
-    const token = generateCsrfToken(sessionId);
-    res.json({
-      success: true,
-      csrfToken: token,
-    });
-  });
-
-  // CSRF Protection for state-changing mutations
-  app.use(csrfProtection);
 
   // Health check endpoint
   app.get('/api/health', (req, res) => {
@@ -4264,22 +4211,12 @@ async function startServer() {
         authenticatedTelegramClients.set(savedSessionString, sessionData.client);
       }
 
-      // Issue cryptographically signed session cookie (HttpOnly, SameSite=Lax, MaxAge=7d)
-      const authToken = signSessionToken({
-        userId: String(authorizedUser.id || Date.now()),
-        phone: formattedPhone,
-        sessionIndex: targetAccountIndex,
-        sessionString: savedSessionString,
-      });
-      res.cookie(SECURITY_CONFIG.cookieName, authToken, SECURITY_CONFIG.cookieOptions);
-
       return res.json({
         success: true,
         verified: true,
         isRealTelegramMTProto: true,
         phone: formattedPhone,
         sessionId,
-        token: authToken,
         sessionString: savedSessionString,
         user: {
           id: String(authorizedUser.id || Date.now()),
@@ -5561,154 +5498,6 @@ async function startServer() {
         message: `فشل تثبيت المحادثة عبر خوادم تيليجرام: ${err?.message || err}`,
       });
     }
-  });
-
-  // ==========================================
-  // REAL TELEGRAM CHANNEL & GROUP CREATION (Api.channels.CreateChannel)
-  // Resolves FAB functionality (Channel/Megagroup/Chat creation via MTProto)
-  // ==========================================
-  app.post('/api/telegram/channels/create', async (req, res) => {
-    const {
-      type = 'channel', // 'channel' | 'group' | 'private'
-      title,
-      description = '',
-      username = '',
-      phone,
-      sessionString,
-    } = req.body;
-
-    if (!title || !title.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: 'TITLE_REQUIRED',
-        message: 'اسم القناة أو المجموعة مطلوب',
-      });
-    }
-
-    try {
-      const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
-      if (!client || !client.connected) {
-        return res.status(401).json({
-          success: false,
-          error: 'AUTH_KEY_UNREGISTERED',
-          message: 'جلسة تيليجرام غير متصلة أو غير مصادق عليها.',
-        });
-      }
-
-      console.log(`[MTProto] Creating real Telegram ${type}: "${title}"...`);
-
-      const isChannel = type === 'channel';
-      const isMegagroup = type === 'group';
-
-      const updates: any = await client.invoke(
-        new Api.channels.CreateChannel({
-          title: title.trim(),
-          about: (description || '').trim(),
-          broadcast: isChannel,
-          megagroup: isMegagroup,
-        })
-      );
-
-      let createdChat: any = null;
-      if (updates && updates.chats && updates.chats.length > 0) {
-        createdChat = updates.chats[0];
-      }
-
-      let assignedUsername = '';
-      if (createdChat && username && username.trim()) {
-        const cleanUser = username.trim().replace(/^@/, '');
-        try {
-          await client.invoke(
-            new Api.channels.UpdateUsername({
-              channel: createdChat,
-              username: cleanUser,
-            })
-          );
-          assignedUsername = cleanUser;
-        } catch (unErr: any) {
-          console.warn('[MTProto] Channel username assignment warning:', unErr?.message || unErr);
-        }
-      }
-
-      // Generate or export invite link
-      let inviteLink = '';
-      if (createdChat) {
-        try {
-          const exportResult: any = await client.invoke(
-            new Api.messages.ExportChatInvite({
-              peer: createdChat,
-            })
-          );
-          inviteLink = exportResult?.link || '';
-        } catch (invErr: any) {
-          console.warn('[MTProto] Export invite link error (safe fallback):', invErr?.message || invErr);
-        }
-      }
-
-      const realChatId = createdChat ? String(createdChat.id) : `tg_${Date.now()}`;
-      return res.json({
-        success: true,
-        chat: {
-          id: realChatId,
-          title: title.trim(),
-          type: isChannel ? 'channel' : 'group',
-          username: assignedUsername || (createdChat?.username || ''),
-          description: description || '',
-          inviteLink,
-          memberCount: 1,
-          isCreator: true,
-          date: new Date().toISOString(),
-        },
-        message: `تم إنشاء ${isChannel ? 'القناة' : 'المجموعة'} بنجاح على خوادم تيليجرام الرسمية!`,
-      });
-    } catch (err: any) {
-      console.error('[MTProto] CreateChannel failed:', err);
-      return res.status(500).json({
-        success: false,
-        error: err?.errorMessage || err?.message || 'CREATE_CHANNEL_FAILED',
-        message: `فشل إنشاء القناة على خوادم تيليجرام: ${err?.message || err}`,
-      });
-    }
-  });
-
-  // ==========================================
-  // TELEGRAM STICKERS RPC & PACKS ENDPOINTS
-  // ==========================================
-  app.get('/api/telegram/stickers/all', (req, res) => {
-    res.json({
-      success: true,
-      count: 4,
-      packs: [
-        {
-          id: 'pack_spotty_duck',
-          title: 'Spotty the Duck',
-          shortName: 'SpottyDuckOfficial',
-          isAnimated: true,
-          count: 6,
-        },
-        {
-          id: 'pack_resistance_dog',
-          title: 'Resistance Dog',
-          shortName: 'ResistanceDogTG',
-          isAnimated: true,
-          count: 4,
-        },
-        {
-          id: 'pack_ton_diamonds',
-          title: 'TON Crypto & Stars',
-          shortName: 'TONStarsOfficial',
-          isAnimated: true,
-          count: 3,
-        },
-        {
-          id: 'pack_hot_cherry',
-          title: 'Hot Cherry & Reactions',
-          shortName: 'HotCherryTelegram',
-          isAnimated: true,
-          count: 4,
-        },
-      ],
-    });
   });
 
   // 10. Create / Update Chat Folders Dispatcher (Api.messages.UpdateDialogFilter)

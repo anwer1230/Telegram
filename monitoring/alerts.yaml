@@ -1,0 +1,138 @@
+# ==============================================================================
+# Telegram_Anwer - Cloud Monitoring & Incident Alerting Policies
+# monitoring/alerts.yaml
+#
+# Production Alerting Configurations for Google Cloud Monitoring / Alertmanager
+# ==============================================================================
+
+version: '1.0'
+project: 'telegram-anwer'
+
+policies:
+  # 1. Backup Failure Alert
+  - name: 'TelegramAnwer_Backup_Failure'
+    displayName: 'Automated SQLite & Session Backup Failed'
+    documentation:
+      content: |
+        ## Alert: Backup Pipeline Failure
+        The periodic SQLite snapshot or GCS upload has failed.
+        ### Remediation:
+        1. SSH or exec into container and check logs: `tail -n 100 /var/log/backup.log`
+        2. Run manual verification drill: `./scripts/restore-drill.sh`
+        3. Refer to docs/RUNBOOK.md Section 3.1.
+      mimeType: 'text/markdown'
+    combiner: 'OR'
+    conditions:
+      - displayName: 'Backup Exit Code Non-Zero'
+        conditionThreshold:
+          filter: 'metric.type="custom.googleapis.com/backup/failure_count" AND resource.type="global"'
+          comparison: 'COMPARISON_GT'
+          thresholdValue: 0
+          duration: '300s'
+          trigger:
+            count: 1
+    notificationChannels:
+      - 'projects/telegram-anwer/notificationChannels/ops-pagerduty'
+      - 'projects/telegram-anwer/notificationChannels/telegram-alerts'
+    severity: 'CRITICAL'
+
+  # 2. Out Of Memory (OOM) / Memory Exhaustion Alert
+  - name: 'TelegramAnwer_Memory_Spike'
+    displayName: 'Container Memory Utilization > 85%'
+    documentation:
+      content: |
+        ## Alert: Memory Consumption Near Threshold
+        Memory usage has exceeded 85% of allocated container limit.
+        Risk of Aborted(OOM) in Node.js or SQLite WebAssembly engine.
+        ### Remediation:
+        1. Check active Socket.IO connections and MTProto buffer.
+        2. Execute SQLite `VACUUM` if database fragmentation is high.
+        3. Consult docs/RUNBOOK.md Section 4.2.
+      mimeType: 'text/markdown'
+    combiner: 'OR'
+    conditions:
+      - displayName: 'Memory Usage High'
+        conditionThreshold:
+          filter: 'metric.type="run.googleapis.com/container/memory/utilizations" AND resource.type="cloud_run_revision"'
+          comparison: 'COMPARISON_GT'
+          thresholdValue: 0.85
+          duration: '180s'
+          trigger:
+            percent: 100
+    notificationChannels:
+      - 'projects/telegram-anwer/notificationChannels/ops-pagerduty'
+    severity: 'WARNING'
+
+  # 3. HTTP 5xx Server Error Spike (> 5% of requests)
+  - name: 'TelegramAnwer_HTTP_5xx_Spike'
+    displayName: 'High HTTP 5xx Error Rate (> 5%)'
+    documentation:
+      content: |
+        ## Alert: High HTTP 5xx Error Rate
+        The application is returning 5xx responses for > 5% of incoming traffic.
+        ### Remediation:
+        1. Check application logs for unhandled exceptions or proxy errors.
+        2. Verify `/api/health` endpoint response.
+        3. Initiate regional failover if primary remains degraded: `./scripts/failover-to-secondary.sh`
+      mimeType: 'text/markdown'
+    combiner: 'OR'
+    conditions:
+      - displayName: '5xx Error Rate Spike'
+        conditionThreshold:
+          filter: 'metric.type="run.googleapis.com/request_count" AND metric.labels.response_code_class="5xx"'
+          comparison: 'COMPARISON_GT'
+          thresholdValue: 0.05
+          duration: '120s'
+          trigger:
+            percent: 50
+    notificationChannels:
+      - 'projects/telegram-anwer/notificationChannels/ops-pagerduty'
+    severity: 'CRITICAL'
+
+  # 4. Telegram MTProto Disconnection / Auth Revocation
+  - name: 'TelegramAnwer_MTProto_Disconnected'
+    displayName: 'MTProto Client Disconnected / Session Revoked'
+    documentation:
+      content: |
+        ## Alert: Telegram MTProto Connection Severed
+        The background GramJS MTProto client has disconnected and failed auto-reconnect.
+        ### Remediation:
+        1. Check session file integrity in `sessions/account_0.json`.
+        2. Test connectivity to Telegram Data Centers (DC1-DC5).
+        3. See docs/RUNBOOK.md Section 5.
+      mimeType: 'text/markdown'
+    combiner: 'OR'
+    conditions:
+      - displayName: 'MTProto Connection Down'
+        conditionThreshold:
+          filter: 'metric.type="custom.googleapis.com/telegram/connection_state" AND metric.labels.state="disconnected"'
+          comparison: 'COMPARISON_GT'
+          thresholdValue: 0
+          duration: '300s'
+          trigger:
+            count: 1
+    severity: 'CRITICAL'
+
+  # 5. SQLite Storage & Disk Utilization Alert
+  - name: 'TelegramAnwer_Disk_Utilization'
+    displayName: 'Persistent Volume Disk Usage > 80%'
+    documentation:
+      content: |
+        ## Alert: Disk Space Running Low
+        Local disk or mounted volume storage is over 80% capacity.
+        ### Remediation:
+        1. Clean up old temporary logs and expired cache records.
+        2. Run `PRAGMA wal_checkpoint(TRUNCATE)` and `VACUUM`.
+        3. Verify backup retention has pruned archives older than 7 days.
+      mimeType: 'text/markdown'
+    combiner: 'OR'
+    conditions:
+      - displayName: 'Disk Space High'
+        conditionThreshold:
+          filter: 'metric.type="custom.googleapis.com/disk/utilization"'
+          comparison: 'COMPARISON_GT'
+          thresholdValue: 0.80
+          duration: '300s'
+          trigger:
+            count: 1
+    severity: 'WARNING'

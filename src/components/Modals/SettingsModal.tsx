@@ -116,6 +116,7 @@ import { CacheByChatsView } from './CacheByChatsView';
 import { AppUpdateSettingsView } from './AppUpdateSettingsView';
 import { AccountSettingsView } from './AccountSettingsView';
 import { AccountProfileSettings } from '../Settings/AccountProfileSettings';
+import { StorageBreakdownComponent } from '../Settings/StorageBreakdownComponent';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -796,8 +797,8 @@ const MainSettingsView: React.FC<{
           <SettingsListItem
             icon={<PieChart className="w-5 h-5 text-sky-400" />}
             iconBg="bg-sky-500/20"
-            title={isArabic ? 'التنزيل والتخزين' : 'Data and Storage'}
-            subtitle={isArabic ? 'إعدادات التنزيل التلقائي والشبكة' : 'Network usage, Auto-download media'}
+            title={isArabic ? 'البيانات والتخزين' : 'Data and Storage'}
+            subtitle={isArabic ? 'توزيع مساحة التخزين، الذاكرة المؤقتة، والشبكة' : 'Storage breakdown, cache usage & network'}
             onClick={() => onNavigate('data_storage')}
           />
           <SettingsListItem
@@ -2166,30 +2167,25 @@ const ToggleRow: React.FC<{
 // 8. DATA & STORAGE VIEW (Screenshot 12)
 // ==========================================
 const DataStorageView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
-  const { settings, showToast } = useTelegram();
+  const { settings, showToast, setSettingsSubPage } = useTelegram();
   const isArabic = settings.language === 'ar';
 
   const [searchFilter, setSearchFilter] = useState('');
   const [storageTab, setStorageTab] = useState<'all' | 'cache' | 'network' | 'media'>('all');
-  const [cacheSizeMB, setCacheSizeMB] = useState(586.4);
+  const [cacheSizeMB, setCacheSizeMB] = useState(482.6);
   const [dbSizeMB, setDbSizeMB] = useState(142.8);
   const [mediaAutoMobile, setMediaAutoMobile] = useState(true);
   const [mediaAutoWifi, setMediaAutoWifi] = useState(true);
   const [mediaAutoRoaming, setMediaAutoRoaming] = useState(false);
 
-  const handleClearCache = () => {
-    setCacheSizeMB(0);
-    showToast(isArabic ? 'تم تنظيف ذاكرة التخزين المؤقت بنجاح (0.0 MB)' : 'Cache cleared successfully (0.0 MB)', '🧹');
-  };
-
   const sections = [
     {
       id: 'storage_usage',
-      title: isArabic ? 'استخدام التخزين والقرص' : 'Storage & Disk Usage',
+      title: isArabic ? 'قواعد البيانات والتخزين المحلي' : 'Local Databases & Chat Storage',
       category: 'cache',
       items: [
-        { label: isArabic ? 'ذاكرة التخزين المؤقت (Cache)' : 'Cache Files', val: `${cacheSizeMB.toFixed(1)} MB`, icon: PieChart, color: 'text-sky-400', action: handleClearCache, actionLabel: isArabic ? 'مسح الذاكرة' : 'Clear Cache' },
-        { label: isArabic ? 'قاعدة بيانات المحادثات (MTProto MMAP)' : 'Chat Database', val: `${dbSizeMB.toFixed(1)} MB`, icon: HardDrive, color: 'text-indigo-400' },
+        { label: isArabic ? 'قاعدة بيانات المحادثات (MTProto MMAP SQLite)' : 'Chat Database (MTProto MMAP SQLite)', val: `${dbSizeMB.toFixed(1)} MB`, icon: HardDrive, color: 'text-indigo-400' },
+        { label: isArabic ? 'إدارة التخزين المؤقت للمحادثات' : 'Granular Cache by Chats', val: isArabic ? 'إدارة' : 'Manage', icon: PieChart, color: 'text-sky-400', action: () => setSettingsSubPage('cache_by_chats') },
       ]
     },
     {
@@ -2271,6 +2267,14 @@ const DataStorageView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Visual Storage Breakdown Component for Cache (Media, Documents, Stickers) */}
+        {(storageTab === 'all' || storageTab === 'cache') && !searchFilter && (
+          <StorageBreakdownComponent
+            onCacheCleared={(cleared) => {
+              setCacheSizeMB((prev) => Math.max(0, Number((prev - cleared).toFixed(1))));
+            }}
+          />
+        )}
         {filteredSections.map((sec) => (
           <div key={sec.id} className="bg-[#17212b] rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden">
             <div className="p-3 text-[11px] font-bold text-[#5288c1] uppercase">{sec.title}</div>
@@ -2295,15 +2299,15 @@ const DataStorageView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-xs font-mono font-semibold text-gray-300">{it.val}</span>
-                    {it.actionLabel && (
+                    {(it as any).actionLabel && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          it.action?.();
+                          (it as any).action?.();
                         }}
                         className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 transition-all"
                       >
-                        {it.actionLabel}
+                        {(it as any).actionLabel}
                       </button>
                     )}
                   </div>

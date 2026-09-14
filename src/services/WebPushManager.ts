@@ -83,6 +83,9 @@ class WebPushManager {
     return outputArray;
   }
 
+  public static readonly PERMANENT_VAPID_PUBLIC_KEY =
+    'BE36BmheMRx2GxzjWpp_4bmXq_hZg55bP_M_vNVysfnjTxns9VCI0hiCHgnRBx0URe_LoxWaAgrS9G9QZbQhOh8';
+
   /**
    * Fetches the server VAPID public key from backend
    */
@@ -103,7 +106,9 @@ class WebPushManager {
     } catch (err) {
       console.warn('[WebPushManager] Could not fetch VAPID public key from server:', err);
     }
-    return null;
+    // Fallback to immutable permanent VAPID key
+    this.vapidPublicKey = WebPushManager.PERMANENT_VAPID_PUBLIC_KEY;
+    return this.vapidPublicKey;
   }
 
   /**
