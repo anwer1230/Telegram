@@ -97,6 +97,12 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   const lastTouchTapRef = React.useRef<number>(0);
 
   const isOutgoing = message.isOutgoing;
+  const isSavedMessages = activeChat?.type === 'saved';
+  const isPrivateChat = activeChat?.type === 'private';
+  const isGroupOrChannel = activeChat?.type === 'group' || activeChat?.type === 'supergroup' || activeChat?.type === 'channel';
+  const isEndMessage = Boolean(grouping?.isGroupEnd || grouping?.isSingle || isLastInGroup);
+  const isStartMessage = Boolean(grouping?.isGroupStart || grouping?.isSingle || isFirstInGroup);
+
   const displayTime = (message.rawDate || message.epoch)
     ? formatTelegramTime(message.rawDate || message.epoch)
     : (message.timestamp || '');
@@ -330,32 +336,36 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         </button>
       )}
 
-      {/* Sender Avatar for incoming messages - Official Telegram Standard (35dp x 35dp) with click to view profile */}
-      {!isOutgoing && (
-        <button
-          type="button"
-          onClick={handleSenderClick}
-          title={message.senderName || (isArabic ? 'الملف الشخصي' : 'Profile')}
-          className="w-[35px] h-[35px] rounded-full overflow-hidden shrink-0 self-end mb-1 cursor-pointer hover:scale-110 active:scale-95 transition-transform ring-1 ring-white/10 shadow-sm focus:outline-none"
-        >
-          {message.senderAvatar ? (
-            <img
-              src={message.senderAvatar}
-              alt={message.senderName || 'Avatar'}
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div
-              className="w-full h-full text-white font-bold text-xs flex items-center justify-center shadow-inner"
-              style={{
-                backgroundColor: getPeerColor(String(message.senderId || message.senderName || 'U')),
-              }}
-            >
-              {message.senderName?.charAt(0).toUpperCase() || 'U'}
-            </div>
-          )}
-        </button>
+      {/* Sender Avatar for incoming messages in Groups/Channels - Official Telegram Web K standard */}
+      {!isOutgoing && !isSavedMessages && !isPrivateChat && (
+        isEndMessage ? (
+          <button
+            type="button"
+            onClick={handleSenderClick}
+            title={message.senderName || (isArabic ? 'الملف الشخصي' : 'Profile')}
+            className="w-[35px] h-[35px] rounded-full overflow-hidden shrink-0 self-end mb-0.5 cursor-pointer hover:scale-105 active:scale-95 transition-transform ring-1 ring-white/10 shadow-sm focus:outline-none"
+          >
+            {message.senderAvatar ? (
+              <img
+                src={message.senderAvatar}
+                alt={message.senderName || 'Avatar'}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div
+                className="w-full h-full text-white font-bold text-xs flex items-center justify-center shadow-inner"
+                style={{
+                  backgroundColor: getPeerColor(String(message.senderId || message.senderName || 'U')),
+                }}
+              >
+                {message.senderName?.charAt(0).toUpperCase() || 'U'}
+              </div>
+            )}
+          </button>
+        ) : (
+          <div className="w-[35px] shrink-0 pointer-events-none" />
+        )
       )}
 
       {/* Bubble Container */}
@@ -467,7 +477,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
           </div>
         ) : (
           <div
-            className={`relative px-3.5 py-2 text-sm shadow-sm transition-all min-w-0 max-w-full overflow-hidden ${
+            className={`relative px-3.5 py-2 text-sm shadow-sm transition-all min-w-0 max-w-full ${
               isOutgoing
                 ? 'tg-bubble-out text-[var(--tg-theme-bubble-out-text)] self-end'
                 : 'tg-bubble-in text-[var(--tg-theme-bubble-in-text)] self-start'
@@ -483,8 +493,35 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
                 : 'var(--tg-theme-bubble-in)',
             }}
           >
-            {/* Sender Name for incoming messages - Telegram Peer Colors + Click to open Profile + Rank Badge */}
-            {!isOutgoing && (message.senderName || activeChat?.title) && (
+            {/* Telegram Web K Speech Tail SVG */}
+            {isEndMessage && !isStandaloneSticker && !isStandaloneBigEmoji && (
+              isOutgoing ? (
+                <svg
+                  className={`absolute -bottom-[0.5px] ${isArabic ? '-left-[7px] scale-x-[-1]' : '-right-[7px]'} w-[9px] h-[16px] pointer-events-none z-0`}
+                  viewBox="0 0 9 16"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M0 16C0 16 9 16 9 16C5.5 14 3 10.5 2 6C1.5 3.5 1 0 1 0L0 0L0 16Z"
+                    fill="var(--tg-theme-bubble-out)"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  className={`absolute -bottom-[0.5px] ${isArabic ? '-right-[7px] scale-x-[-1]' : '-left-[7px]'} w-[9px] h-[16px] pointer-events-none z-0`}
+                  viewBox="0 0 9 16"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M9 16C9 16 0 16 0 16C3.5 14 6 10.5 7 6C7.5 3.5 8 0 8 0L9 0L9 16Z"
+                    fill="var(--tg-theme-bubble-in)"
+                  />
+                </svg>
+              )
+            )}
+
+            {/* Sender Name for incoming messages in groups/channels - Only on first message of cluster */}
+            {!isOutgoing && !isSavedMessages && !isPrivateChat && isStartMessage && (message.senderName || activeChat?.title) && (
               <div className="flex items-center gap-1.5 flex-wrap mb-1">
                 <button
                   type="button"

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeft,
   Phone,
@@ -23,11 +23,17 @@ import {
   Volume2,
   VolumeX,
   Share2,
+  Copy,
+  Flag,
+  Info,
   Database,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { ChatInfoManager } from '../../core/ChatInfoManager';
 import { GroupActionsHelper } from '../../core/GroupActionsHelper';
+import { ChatReportModal } from '../Modals/ChatReportModal';
+import { ClearChatModal } from '../Modals/ClearChatModal';
+import { LeaveChatModal } from '../Modals/LeaveChatModal';
 
 export const ChatHeader: React.FC = () => {
   const {
@@ -51,6 +57,11 @@ export const ChatHeader: React.FC = () => {
   } = useTelegram();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   const [confirmDialog, setConfirmDialog] = useState<{
     type: 'leave' | 'clear' | 'delete';
     title: string;
@@ -58,6 +69,20 @@ export const ChatHeader: React.FC = () => {
     confirmText?: string;
     action: () => void;
   } | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDropdownOpen]);
 
   if (!activeChat) return null;
 
@@ -101,44 +126,68 @@ export const ChatHeader: React.FC = () => {
     return isArabic ? `${formattedMembers} عضو` : `${formattedMembers} members`;
   };
 
-  const handleShareChat = () => {
-    const chatUrl = activeChat.username
-      ? `https://t.me/${activeChat.username}`
-      : `https://t.me/c/${activeChat.id}`;
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(chatUrl);
-      showToast(isArabic ? 'تم نسخ رابط المحادثة إلى الحافظة' : 'Chat link copied to clipboard', '🔗');
-    } else {
-      showToast(chatUrl, '🔗');
+  const getChatUrl = () => {
+    if (activeChat.username) {
+      return `https://t.me/${activeChat.username}`;
+    }
+    if (activeChat.inviteHash) {
+      return `https://t.me/+${activeChat.inviteHash}`;
+    }
+    const cleanId = String(activeChat.id).replace(/^chat_/, '');
+    return `https://t.me/c/${cleanId}`;
+  };
+
+  const handleCopyLink = async () => {
+    const chatUrl = getChatUrl();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(chatUrl);
+      }
+      showToast(
+        isArabic
+          ? 'تم نسخ رابط المحادثة إلى الحافظة بنجاح 🔗'
+          : 'Chat link copied to clipboard 🔗',
+        '📋'
+      );
+    } catch {
+      showToast(chatUrl, '📋');
     }
   };
 
-  const handleLeaveWithHelper = () => {
-    const alertConfig = GroupActionsHelper.getLeaveConfirmationConfig(activeChat, settings.language || 'ar');
-    setConfirmDialog({
-      type: 'leave',
-      title: alertConfig.title,
-      description: alertConfig.message,
-      confirmText: alertConfig.confirmText,
-      action: async () => {
-        await GroupActionsHelper.leaveChatOrChannel(
-          0,
-          activeChat,
-          () => {
-            leaveGroup(activeChat.id);
-          },
-          (err) => {
-            leaveGroup(activeChat.id);
-          }
-        );
+  const handleShareChat = async () => {
+    const chatUrl = getChatUrl();
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: activeChat.title,
+          text: isArabic ? `انضم إلى ${activeChat.title} على تيليجرام` : `Join ${activeChat.title} on Telegram`,
+          url: chatUrl,
+        });
+        return;
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+    handleCopyLink();
+  };
+
+  const handleLeaveConfirm = async () => {
+    await GroupActionsHelper.leaveChatOrChannel(
+      0,
+      activeChat,
+      () => {
+        leaveGroup(activeChat.id);
       },
-    });
+      () => {
+        leaveGroup(activeChat.id);
+      }
+    );
   };
 
   return (
     <div
       id="tg-chat-header"
-      className="h-14 px-3 flex items-center justify-between border-b select-none shrink-0 z-10 bg-gradient-to-r from-[#8A2BE2]/10 via-transparent to-[#FF69B4]/10"
+      className="h-14 px-3 flex items-center justify-between border-b select-none shrink-0 z-10 transition-colors"
       style={{
         backgroundColor: 'var(--tg-theme-surface)',
         borderColor: 'var(--tg-theme-border)',
@@ -150,7 +199,7 @@ export const ChatHeader: React.FC = () => {
         <button
           id="tg-header-back-button"
           onClick={() => setActiveChatId(null)}
-          className="md:hidden p-1.5 -ml-1 text-gray-400 hover:text-gray-200 rounded-full"
+          className="md:hidden p-1.5 -ml-1 text-gray-400 hover:text-gray-200 rounded-full focus:outline-none"
         >
           <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
         </button>
@@ -158,7 +207,7 @@ export const ChatHeader: React.FC = () => {
         {/* Avatar */}
         <div
           onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-          className="relative w-10 h-10 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-tr from-[#8A2BE2] to-[#FF69B4] text-white font-bold text-base cursor-pointer shrink-0 shadow-sm"
+          className="relative w-10 h-10 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-tr from-[#8A2BE2] to-[#FF69B4] text-white font-bold text-base cursor-pointer shrink-0 shadow-sm transition-transform active:scale-95"
         >
           {isSavedMessages ? (
             <div className="w-full h-full bg-[#8A2BE2] flex items-center justify-center">
@@ -288,6 +337,16 @@ export const ChatHeader: React.FC = () => {
           </>
         )}
 
+        {/* Telegram Web K Search in chat button */}
+        <button
+          id="tg-header-search-btn"
+          onClick={() => setActiveModal('search-messages' as any)}
+          className="p-2 rounded-full hover:bg-white/10 active:bg-white/15 hover:text-white transition-colors"
+          title={isArabic ? 'البحث في المحادثة' : 'Search in chat'}
+        >
+          <Search className="w-4 h-4" />
+        </button>
+
         <button
           id="tg-toggle-right-panel"
           onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
@@ -299,33 +358,48 @@ export const ChatHeader: React.FC = () => {
           <PanelRight className="w-4 h-4" />
         </button>
 
-        {/* More Options Dropdown */}
-        <div className="relative">
+        {/* More Options Dropdown matching Telegram Web K exactly */}
+        <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="p-2 rounded-full hover:bg-white/10 active:bg-white/15 hover:text-white transition-colors"
+            className={`p-2 rounded-full hover:bg-white/10 active:bg-white/15 hover:text-white transition-colors ${
+              isDropdownOpen ? 'bg-white/10 text-white' : ''
+            }`}
+            title={isArabic ? 'المزيد من الخيارات' : 'More options'}
           >
             <MoreVertical className="w-4 h-4" />
           </button>
 
           {isDropdownOpen && (
             <div
-              className="absolute right-0 rtl:right-auto rtl:left-0 top-10 w-56 bg-[#17212b] border border-[#2b394a] rounded-2xl shadow-2xl py-1.5 z-50 text-xs font-semibold text-gray-200 animate-in fade-in zoom-in-95"
-              onClick={() => setIsDropdownOpen(false)}
+              className="absolute right-0 rtl:right-auto rtl:left-0 top-11 w-60 bg-[#17212b] border border-[#2b394a] rounded-2xl shadow-2xl py-1.5 z-50 text-xs font-semibold text-gray-200 animate-in fade-in zoom-in-95"
+              dir={isArabic ? 'rtl' : 'ltr'}
             >
-              {/* menu_search: Search in Chat */}
+              {/* 1. Chat Info */}
               <button
-                onClick={() => setActiveModal('search-messages' as any)}
-                className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white"
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setIsRightPanelOpen(true);
+                }}
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white transition-colors"
               >
-                <Search className="w-4 h-4 text-sky-400 shrink-0" />
-                <span>{isArabic ? 'البحث في المحادثة' : 'Search in Chat'}</span>
+                <Info className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>
+                  {activeChat.type === 'channel'
+                    ? isArabic ? 'معلومات القناة' : 'Channel Info'
+                    : activeChat.type === 'group' || activeChat.type === 'supergroup'
+                    ? isArabic ? 'معلومات المجموعة' : 'Group Info'
+                    : isArabic ? 'معلومات المحادثة' : 'Chat Info'}
+                </span>
               </button>
 
-              {/* menu_mute: Mute / Unmute notifications */}
+              {/* 2. Mute / Unmute notifications */}
               <button
-                onClick={() => toggleMuteChat(activeChat.id)}
-                className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white"
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  toggleMuteChat(activeChat.id);
+                }}
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white transition-colors"
               >
                 {activeChat.isMuted ? (
                   <>
@@ -340,19 +414,49 @@ export const ChatHeader: React.FC = () => {
                 )}
               </button>
 
-              {/* menu_share: Share chat or invite link */}
+              {/* 3. Search in Chat */}
               <button
-                onClick={handleShareChat}
-                className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white"
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setActiveModal('search-messages' as any);
+                }}
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white transition-colors"
+              >
+                <Search className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>{isArabic ? 'البحث في المحادثة' : 'Search in Chat'}</span>
+              </button>
+
+              {/* 4. Copy Link */}
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  handleCopyLink();
+                }}
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white transition-colors"
+              >
+                <Copy className="w-4 h-4 text-teal-400 shrink-0" />
+                <span>{isArabic ? 'نسخ الرابط' : 'Copy Link'}</span>
+              </button>
+
+              {/* 5. Share Link */}
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  handleShareChat();
+                }}
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white transition-colors"
               >
                 <Share2 className="w-4 h-4 text-indigo-400 shrink-0" />
                 <span>{isArabic ? 'مشاركة الرابط' : 'Share Link'}</span>
               </button>
 
-              {/* Export Chat */}
+              {/* 6. Export Chat History */}
               <button
-                onClick={() => setActiveModal('export-chat')}
-                className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white"
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setActiveModal('export-chat');
+                }}
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white transition-colors"
               >
                 <Download className="w-4 h-4 text-sky-400 shrink-0" />
                 <span>{isArabic ? 'تصدير سجل المحادثة' : 'Export Chat History'}</span>
@@ -360,58 +464,53 @@ export const ChatHeader: React.FC = () => {
 
               {/* Mini Apps */}
               <button
-                onClick={() => setActiveModal('mini-apps')}
-                className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white"
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setActiveModal('mini-apps');
+                }}
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white transition-colors"
               >
                 <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>{isArabic ? 'تطبيقات وألعاب (Mini Apps)' : 'Telegram Mini Apps'}</span>
               </button>
 
-              {/* IndexedDB Cache Status */}
-              <button
-                onClick={async () => {
-                  const count = await messageCache.getCachedMessageCount(activeChat.id);
-                  showToast(
-                    isArabic
-                      ? `تم تخزين ${count} رسالة محلياً في IndexedDB بدون استهلاك شبكة`
-                      : `IndexedDB: ${count} cached messages offline`,
-                    '💾'
-                  );
-                }}
-                className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white"
-              >
-                <Database className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{isArabic ? 'التخزين المؤقت المحلي (IndexedDB)' : 'Local Cache (IndexedDB)'}</span>
-              </button>
-
+              {/* Divider */}
               <div className="h-px bg-white/10 my-1" />
 
-              {/* menu_clear_history: Clear messages / Delete messages */}
+              {/* 7. Clear History (مسح السجل) */}
               <button
                 onClick={() => {
-                  setConfirmDialog({
-                    type: 'clear',
-                    title: isArabic ? 'مسح سجل الرسائل' : 'Clear Chat History',
-                    description: isArabic
-                      ? 'هل تريد بالتأكيد تفريغ ومسح جميع الرسائل من هذه المحادثة؟ لا يمكن التراجع عن هذا الإجراء.'
-                      : 'Are you sure you want to clear all history from this chat?',
-                    confirmText: isArabic ? 'مسح السجل' : 'Clear History',
-                    action: () => clearChatHistory(activeChat.id),
-                  });
+                  setIsDropdownOpen(false);
+                  setIsClearModalOpen(true);
                 }}
-                className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-amber-400 hover:text-amber-300"
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-amber-400 hover:text-amber-300 transition-colors"
               >
                 <Eraser className="w-4 h-4 shrink-0" />
                 <span>{isArabic ? 'مسح السجل' : 'Clear History'}</span>
               </button>
 
-              {/* menu_leave: Leave group / channel option with GroupActionsHelper */}
-              {(activeChat.type === 'group' || activeChat.type === 'channel') && (
+              {/* 8. Report (الإبلاغ) */}
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setIsReportModalOpen(true);
+                }}
+                className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-sky-400 hover:text-sky-300 transition-colors"
+              >
+                <Flag className="w-4 h-4 shrink-0" />
+                <span>{isArabic ? 'إبلاغ' : 'Report'}</span>
+              </button>
+
+              {/* 9. Leave Group / Leave Channel */}
+              {(activeChat.type === 'group' || activeChat.type === 'supergroup' || activeChat.type === 'channel') && (
                 <button
-                  onClick={handleLeaveWithHelper}
-                  className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-rose-400 hover:text-rose-300"
+                  onClick={() => {
+                    setIsDropdownOpen(false);
+                    setIsLeaveModalOpen(true);
+                  }}
+                  className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-rose-400 hover:text-rose-300 transition-colors"
                 >
-                  <LogOut className="w-4 h-4 shrink-0" />
+                  <LogOut className="w-4 h-4 shrink-0 rtl:rotate-180" />
                   <span>
                     {activeChat.type === 'channel'
                       ? isArabic ? 'مغادرة القناة' : 'Leave Channel'
@@ -420,10 +519,11 @@ export const ChatHeader: React.FC = () => {
                 </button>
               )}
 
-              {/* Delete group permanently */}
-              {activeChat.type === 'group' && (
+              {/* 10. Delete Group Permanently (for admins/owners) */}
+              {(activeChat.type === 'group' || activeChat.type === 'supergroup') && (
                 <button
                   onClick={() => {
+                    setIsDropdownOpen(false);
                     setConfirmDialog({
                       type: 'delete',
                       title: isArabic ? 'حذف المجموعة نهائياً' : 'Delete Group Permanently',
@@ -434,7 +534,7 @@ export const ChatHeader: React.FC = () => {
                       action: () => deleteGroup(activeChat.id),
                     });
                   }}
-                  className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-red-500 hover:text-red-400"
+                  className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-red-500 hover:text-red-400 transition-colors"
                 >
                   <Trash2 className="w-4 h-4 shrink-0" />
                   <span>{isArabic ? 'حذف المجموعة نهائياً' : 'Delete Group'}</span>
@@ -445,7 +545,41 @@ export const ChatHeader: React.FC = () => {
         </div>
       </div>
 
-      {/* Confirmation Modal */}
+      {/* Clear Chat Confirmation Modal */}
+      <ClearChatModal
+        isOpen={isClearModalOpen}
+        onClose={() => setIsClearModalOpen(false)}
+        chatId={activeChat.id}
+        chatTitle={activeChat.title}
+        chatType={activeChat.type as any}
+        onConfirm={(alsoForOthers) => {
+          clearChatHistory(activeChat.id);
+          if (alsoForOthers && (activeChat.type === 'group' || activeChat.type === 'supergroup')) {
+            deleteGroupMessages?.(activeChat.id);
+          }
+        }}
+      />
+
+      {/* Report Chat Modal */}
+      <ChatReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        chatId={activeChat.id}
+        chatTitle={activeChat.title}
+        chatType={activeChat.type as any}
+      />
+
+      {/* Leave Group / Channel Modal */}
+      <LeaveChatModal
+        isOpen={isLeaveModalOpen}
+        onClose={() => setIsLeaveModalOpen(false)}
+        chatId={activeChat.id}
+        chatTitle={activeChat.title}
+        chatType={activeChat.type as any}
+        onConfirm={handleLeaveConfirm}
+      />
+
+      {/* Generic Confirmation Modal */}
       {confirmDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
           <div className="w-full max-w-sm bg-[#17212b] border border-white/10 rounded-2xl p-5 shadow-2xl space-y-4">

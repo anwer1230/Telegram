@@ -179,7 +179,11 @@ const ChatListItemComponent: React.FC<ChatListItemProps> = ({ chat, isActive }) 
         style={{
           transform: `translateX(${offset}px)`,
           transition: isDragging ? 'none' : 'transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1)',
-          backgroundColor: isActive ? 'rgba(36, 129, 204, 0.12)' : 'var(--tg-theme-surface)',
+          backgroundColor: isActive
+            ? 'rgba(36, 129, 204, 0.12)'
+            : chat.isPinned
+            ? 'rgba(245, 158, 11, 0.04)'
+            : 'var(--tg-theme-surface)',
         }}
         className={`relative z-10 group flex items-center gap-3 px-3 cursor-pointer select-none transition-colors duration-100 min-h-[72px] ${
           isThreeLines ? 'py-3' : 'py-2'

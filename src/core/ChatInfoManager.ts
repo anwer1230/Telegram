@@ -40,7 +40,7 @@ export class ChatInfoManager {
     this.currentAccount = currentAccount;
   }
 
-  private static formatNumber(num: number): string {
+  public static formatNumber(num: number): string {
     if (num >= 1000000) {
       return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
     }

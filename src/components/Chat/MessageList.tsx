@@ -64,8 +64,8 @@ function estimateItemHeight(item?: GroupedItem): number {
 
   let height = 8; // py-1 padding (4px top + 4px bottom)
 
-  // Sender Name (in groups/channels)
-  if (!msg.isOutgoing && msg.senderName) {
+  // Sender Name (in groups/channels) - only on start of cluster
+  if (!msg.isOutgoing && msg.senderName && (item.isGroupStart || item.isSingle)) {
     height += 20;
   }
   // Forwarded Header

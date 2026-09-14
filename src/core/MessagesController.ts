@@ -478,7 +478,9 @@ export class MessagesController {
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
       if (a.isPinned && b.isPinned) {
-        return (a.pinnedIndex ?? 0) - (b.pinnedIndex ?? 0);
+        if (a.pinnedIndex !== undefined && b.pinnedIndex !== undefined && a.pinnedIndex !== b.pinnedIndex) {
+          return a.pinnedIndex - b.pinnedIndex;
+        }
       }
 
       const draftA = this.draftsMap.get(a.id)?.date || 0;

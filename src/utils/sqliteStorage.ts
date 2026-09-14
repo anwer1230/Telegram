@@ -994,6 +994,110 @@ class TelegramSQLiteDatabase {
       tables,
     };
   }
+
+  public getDatabaseInstance(): any {
+    return this.db;
+  }
+
+  public async inspectAllTables(): Promise<any[]> {
+    if (!this.db) await this.init();
+    const tables = await this.getTableList();
+    const result = [];
+    for (const t of tables) {
+      const cols = await this.getTableColumns(t.name);
+      result.push({
+        name: t.name,
+        rowCount: t.count,
+        columns: cols.map((c, i) => ({
+          cid: i,
+          name: c.name,
+          type: c.type,
+          notnull: 0,
+          pk: c.pk ? 1 : 0,
+        })),
+      });
+    }
+    return result;
+  }
+
+  public async getDatabaseStorageStats(): Promise<any> {
+    const meta = await this.getDatabaseMetadata();
+    const byteSize = meta.binarySizeBytes;
+    const formattedSize = byteSize > 1024 * 1024
+      ? `${(byteSize / (1024 * 1024)).toFixed(2)} MB`
+      : `${(byteSize / 1024).toFixed(1)} KB`;
+    return {
+      storageKey: meta.storageKey,
+      byteSize,
+      formattedSize,
+      tableCount: meta.tableCount,
+      totalRows: meta.totalRows,
+    };
+  }
+
+  public async getSyncDiagnosticsReport(): Promise<any> {
+    if (!this.db) await this.init();
+    const diffParams = this.getDiffParams(0);
+    const ptsRecord = this.getAllChannelPts();
+    const channelPtsList = Object.entries(ptsRecord).map(([channelId, pts]) => ({
+      channelId,
+      pts,
+    }));
+    const chats = this.getChats();
+    const users = this.getContacts();
+
+    let totalMessages = 0;
+    try {
+      const stmt = this.db.prepare('SELECT COUNT(*) as c FROM messages');
+      if (stmt.step()) totalMessages = (stmt.getAsObject().c as number) || 0;
+      stmt.free();
+    } catch (_) {}
+
+    return {
+      diffParams,
+      channelPtsList,
+      totalChats: chats.length,
+      totalMessages,
+      totalUsers: users.length,
+      activeSecretSessions: 0,
+    };
+  }
+
+  public async queryTableData(
+    tableName: string,
+    options: { page: number; pageSize: number; search?: string; sortCol?: string; sortDir?: 'ASC' | 'DESC' }
+  ): Promise<{ columns: string[]; rows: any[]; total: number }> {
+    const limit = options.pageSize || 50;
+    const offset = ((options.page || 1) - 1) * limit;
+    const res = await this.getTableRows(tableName, limit, offset, options.search);
+    return {
+      columns: res.columns,
+      rows: res.rows,
+      total: res.rowCount,
+    };
+  }
+
+  public async runDevSql(query: string): Promise<any> {
+    const start = performance.now();
+    try {
+      const res = await this.executeSelectQuery(query);
+      const executionTimeMs = Math.round(performance.now() - start);
+      return {
+        columns: res.columns,
+        rows: res.rows,
+        rowCount: res.rows.length,
+        executionTimeMs,
+      };
+    } catch (e: any) {
+      return {
+        columns: [],
+        rows: [],
+        rowCount: 0,
+        executionTimeMs: Math.round(performance.now() - start),
+        error: e?.message || String(e),
+      };
+    }
+  }
 }
 
 export const telegramDB = new TelegramSQLiteDatabase();

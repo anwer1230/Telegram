@@ -325,11 +325,51 @@ const MainSettingsView: React.FC<{
   searchFilter: string;
   setSearchFilter: (v: string) => void;
 }> = ({ onNavigate, onClose, isSearchActive, setIsSearchActive, searchFilter, setSearchFilter }) => {
-  const { currentUser, accounts, activeAccountId, switchAccount, settings, showToast, setActiveModal } = useTelegram();
+  const { currentUser, accounts, activeAccountId, switchAccount, settings, updateSettings, showToast, setActiveModal } = useTelegram();
   const isArabic = settings.language === 'ar';
   const BackIcon = isArabic ? ArrowRight : ArrowLeft;
 
   const otherAccounts = accounts.filter((a) => a.id !== activeAccountId);
+
+  const isMuted = settings.muteChatSounds !== undefined ? Boolean(settings.muteChatSounds) : true;
+  const soundVolume = typeof settings.soundVolume === 'number' ? settings.soundVolume : 0;
+
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    const nextVol = nextMuted ? 0 : (soundVolume > 0 ? soundVolume : 70);
+    updateSettings({ muteChatSounds: nextMuted, soundVolume: nextMuted ? soundVolume : nextVol });
+    telegramAudio?.setMuted?.(nextMuted);
+    audioService?.setMuted?.(nextMuted);
+    if (!nextMuted) {
+      telegramAudio?.setVolume?.(nextVol);
+      audioService?.setVolume?.(nextVol);
+    }
+    showToast(
+      nextMuted
+        ? (isArabic ? 'تم كتم أصوات الإشعارات 🔕' : 'Notification sounds muted 🔕')
+        : (isArabic ? `تم تفعيل أصوات الإشعارات (${nextVol}%) 🔔` : `Notification sounds unmuted (${nextVol}%) 🔔`),
+      nextMuted ? '🔕' : '🔔'
+    );
+  };
+
+  const handleVolumeChange = (newVol: number) => {
+    const clamped = Math.max(0, Math.min(100, newVol));
+    const nextMuted = clamped === 0;
+    updateSettings({ soundVolume: clamped, muteChatSounds: nextMuted });
+    telegramAudio?.setVolume?.(clamped);
+    audioService?.setVolume?.(clamped);
+    telegramAudio?.setMuted?.(nextMuted);
+    audioService?.setMuted?.(nextMuted);
+  };
+
+  const handlePlayPreview = () => {
+    if (isMuted || soundVolume === 0) {
+      showToast(isArabic ? 'صوت الإشعارات مكتوم حالياً 🔕 (قم بإلغاء الكتم أو رفع مستوى الصوت للمعاينة)' : 'Notification sounds are muted 🔕 (Unmute or raise volume to preview)', '⚠️');
+      return;
+    }
+    telegramAudio?.playMessageChime?.();
+    showToast(isArabic ? `معاينة صوت الإشعار بنسبة ${soundVolume}% 🔔` : `Preview chime at ${soundVolume}% 🔔`, '🔔');
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -559,13 +599,140 @@ const MainSettingsView: React.FC<{
             subtitle={isArabic ? 'التحقق بخطوتين، آخر ظهور، الجلسات، مفاتيح المرور' : '2FA, Last Seen, Devices, Passkeys'}
             onClick={() => onNavigate('privacy_security')}
           />
-          <SettingsListItem
-            icon={<Bell className="w-5 h-5 text-pink-400" />}
-            iconBg="bg-pink-500/20"
-            title={isArabic ? 'الإشعارات والأصوات' : 'Notifications and Sounds'}
-            subtitle={isArabic ? 'الأصوات، المكالمات، الشارات' : 'Sounds, Calls, Badges'}
-            onClick={() => onNavigate('notifications_sounds')}
-          />
+          {/* Direct Notification Sound & Mute Controller (مكتوم افتراضياً) */}
+          <div className="mx-3 my-2.5 rounded-2xl bg-[#111923] border border-white/10 overflow-hidden shadow-lg">
+            {/* Header */}
+            <div className="px-3.5 py-2.5 bg-white/[0.03] border-b border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
+                  isMuted ? 'bg-rose-500/20 text-rose-400' : 'bg-[#2481cc]/20 text-[#5288c1]'
+                }`}>
+                  {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                </div>
+                <span className="text-xs font-bold text-gray-200">
+                  {isArabic ? 'صوت الإشعارات والتحكم بالكتم' : 'Notification Sound & Mute'}
+                </span>
+              </div>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                isMuted
+                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+              }`}>
+                {isMuted ? (isArabic ? 'مكتوم افتراضياً 🔕' : 'Muted by default 🔕') : `${soundVolume}% 🔔`}
+              </span>
+            </div>
+
+            {/* Mute Toggle Row */}
+            <div className="px-3.5 py-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={handleToggleMute}
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors ${
+                    isMuted ? 'bg-rose-500/20 text-rose-400 hover:bg-rose-500/30' : 'bg-[#2481cc]/20 text-[#5288c1] hover:bg-[#2481cc]/30'
+                  }`}
+                  title={isMuted ? (isArabic ? 'إلغاء الكتم' : 'Unmute') : (isArabic ? 'كتم الصوت' : 'Mute')}
+                >
+                  {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                </button>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-white flex items-center gap-2">
+                    <span>{isArabic ? 'كتم صوت الإشعارات' : 'Mute Notification Sounds'}</span>
+                    {isMuted && (
+                      <span className="text-[9px] bg-rose-500/20 text-rose-300 px-1.5 py-0.2 rounded font-semibold">
+                        {isArabic ? 'مكتوم' : 'Muted'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-gray-400 truncate">
+                    {isArabic
+                      ? 'مكتوم افتراضياً - كتم نغمات الرسائل والتنبيهات'
+                      : 'Muted by default - mute chimes for alerts & messages'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Toggle Switch */}
+              <button
+                type="button"
+                onClick={handleToggleMute}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  isMuted ? 'bg-rose-500' : 'bg-[#2481cc]'
+                }`}
+                role="switch"
+                aria-checked={isMuted}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    isMuted ? (isArabic ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Volume Slider & Test Row */}
+            <div className="px-3.5 py-2.5 bg-black/20 border-t border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-gray-300 font-medium">
+                  <span>{isArabic ? 'مستوى الصوت:' : 'Volume:'}</span>
+                  <span className="font-mono text-xs font-bold text-[#5288c1]">
+                    {isMuted ? '0%' : `${soundVolume}%`}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handlePlayPreview}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-[#2481cc]/20 hover:bg-[#2481cc]/30 text-[#5288c1] hover:text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  title={isArabic ? 'تجربة ومعاينة الصوت' : 'Test sound chime'}
+                >
+                  <Play className="w-3 h-3 fill-current" />
+                  <span>{isArabic ? 'تجربة الصوت' : 'Test Sound'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleToggleMute}
+                  className="text-gray-400 hover:text-white p-0.5 cursor-pointer"
+                  title={isMuted ? (isArabic ? 'إلغاء الكتم' : 'Unmute') : (isArabic ? 'كتم' : 'Mute')}
+                >
+                  {isMuted || soundVolume === 0 ? (
+                    <VolumeX className="w-4 h-4 text-rose-400" />
+                  ) : soundVolume < 50 ? (
+                    <Volume1 className="w-4 h-4 text-amber-400" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 text-[#5288c1]" />
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={isMuted ? 0 : soundVolume}
+                  onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                  className="flex-1 h-2 bg-gray-700/60 rounded-lg appearance-none cursor-pointer accent-[#2481cc]"
+                />
+                <span className="text-[10px] text-gray-400 font-mono w-7 text-right rtl:text-left">
+                  {isMuted ? '0%' : `${soundVolume}%`}
+                </span>
+              </div>
+            </div>
+
+            {/* Link to Full Notifications Subpage */}
+            <button
+              type="button"
+              onClick={() => onNavigate('notifications_sounds')}
+              className="w-full px-3.5 py-2.5 bg-white/[0.02] hover:bg-white/[0.06] border-t border-white/5 flex items-center justify-between text-xs text-[#5288c1] font-semibold transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Bell className="w-4 h-4 text-pink-400" />
+                <span>{isArabic ? 'الإشعارات والأصوات المتقدمة (النغمات والشارات)' : 'Advanced Notifications & Sounds (Ringtones, Badges)'}</span>
+              </div>
+              {isArabic ? <ChevronLeft className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+            </button>
+          </div>
           <SettingsListItem
             icon={<Radio className="w-5 h-5 text-emerald-400 animate-pulse" />}
             iconBg="bg-emerald-500/20"
@@ -1668,36 +1835,39 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
 
   const handleToggleMute = () => {
     const nextMuted = !isMuted;
-    updateSettings({ muteChatSounds: nextMuted });
-    telegramAudio.setMuted(nextMuted);
-    audioService.setMuted(nextMuted);
+    const nextVol = nextMuted ? 0 : (soundVolume > 0 ? soundVolume : 70);
+    updateSettings({ muteChatSounds: nextMuted, soundVolume: nextMuted ? soundVolume : nextVol });
+    telegramAudio?.setMuted?.(nextMuted);
+    audioService?.setMuted?.(nextMuted);
+    if (!nextMuted) {
+      telegramAudio?.setVolume?.(nextVol);
+      audioService?.setVolume?.(nextVol);
+    }
     showToast(
       nextMuted
-        ? (isArabic ? 'تم كتم أصوات المحادثات 🔕' : 'Chat sounds muted 🔕')
-        : (isArabic ? 'تم تفعيل أصوات المحادثات 🔔' : 'Chat sounds unmuted 🔔'),
+        ? (isArabic ? 'تم كتم صوت الإشعارات 🔕' : 'Notification sounds muted 🔕')
+        : (isArabic ? `تم تفعيل صوت الإشعارات (${nextVol}%) 🔔` : `Notification sounds unmuted (${nextVol}%) 🔔`),
       nextMuted ? '🔕' : '🔔'
     );
   };
 
   const handleVolumeChange = (newVol: number) => {
     const clamped = Math.max(0, Math.min(100, newVol));
-    updateSettings({ soundVolume: clamped });
-    telegramAudio.setVolume(clamped);
-    audioService.setVolume(clamped);
-    if (clamped > 0 && isMuted) {
-      updateSettings({ muteChatSounds: false });
-      telegramAudio.setMuted(false);
-      audioService.setMuted(false);
-    }
+    const nextMuted = clamped === 0;
+    updateSettings({ soundVolume: clamped, muteChatSounds: nextMuted });
+    telegramAudio?.setVolume?.(clamped);
+    audioService?.setVolume?.(clamped);
+    telegramAudio?.setMuted?.(nextMuted);
+    audioService?.setMuted?.(nextMuted);
   };
 
   const handlePlayPreview = () => {
     if (isMuted || soundVolume === 0) {
-      showToast(isArabic ? 'أصوات المحادثات مكتومة حالياً 🔕' : 'Chat sounds are currently muted 🔕', '⚠️');
+      showToast(isArabic ? 'صوت الإشعارات مكتوم حالياً 🔕 (قم بإلغاء الكتم أو رفع مستوى الصوت للمعاينة)' : 'Notification sounds are muted 🔕 (Unmute or raise volume to preview)', '⚠️');
       return;
     }
-    telegramAudio.playMessageChime();
-    showToast(isArabic ? `معاينة الصوت بنسبة ${soundVolume}%` : `Preview chime at ${soundVolume}%`, '🔔');
+    telegramAudio?.playMessageChime?.();
+    showToast(isArabic ? `معاينة صوت الإشعار بنسبة ${soundVolume}% 🔔` : `Preview chime at ${soundVolume}% 🔔`, '🔔');
   };
 
   const handleToggleNotify = async (peerType: 'users' | 'chats' | 'broadcasts', enable: boolean) => {
@@ -1742,9 +1912,9 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
         {/* Real Chat Mute & Volume Control Section */}
         <div className="bg-[#17212b] rounded-2xl border border-white/10 overflow-hidden shadow-lg">
           <div className="p-3.5 pb-2 text-[11px] font-bold text-[#5288c1] uppercase flex items-center justify-between">
-            <span>{isArabic ? 'أصوات المحادثات والتحكم بالصوت' : 'Chat Sounds & Volume'}</span>
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${isMuted ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-              {isMuted ? (isArabic ? 'مكتوم' : 'Muted') : `${soundVolume}%`}
+            <span>{isArabic ? 'صوت الإشعارات والتحكم بالكتم' : 'Notification Sound & Mute Control'}</span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${isMuted ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'}`}>
+              {isMuted ? (isArabic ? 'مكتوم افتراضياً 🔕' : 'Muted by default 🔕') : `${soundVolume}% 🔔`}
             </span>
           </div>
 
@@ -1758,7 +1928,7 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
               </div>
               <div>
                 <div className="text-xs font-bold text-white flex items-center gap-2">
-                  <span>{isArabic ? 'كتم أصوات المحادثات' : 'Mute Chat Sounds'}</span>
+                  <span>{isArabic ? 'كتم صوت الإشعارات' : 'Mute Notification Sounds'}</span>
                   {isMuted && (
                     <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.2 rounded-md font-semibold">
                       {isArabic ? 'مكتوم' : 'Muted'}
@@ -1767,8 +1937,8 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
                 </div>
                 <div className="text-[11px] text-gray-400">
                   {isArabic
-                    ? 'كتم تشغيل النغمات عند إرسال واستقبال الرسائل'
-                    : 'Mute all sounds for incoming & outgoing messages'}
+                    ? 'مكتوم افتراضياً - كتم تشغيل النغمات عند إرسال واستقبال الرسائل والتنبيهات'
+                    : 'Muted by default - mute sounds for incoming & outgoing messages and alerts'}
                 </div>
               </div>
             </div>

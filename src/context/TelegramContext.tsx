@@ -76,7 +76,7 @@ interface TelegramContextType {
   activeFolderId: string;
   folders: Folder[];
   searchQuery: string;
-  searchFilter: 'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private';
+  searchFilter: 'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private' | 'contacts';
   isSearchActive: boolean;
   chatsWithDraftsCount: number;
   refreshDialogs: () => Promise<void>;
@@ -169,7 +169,7 @@ interface TelegramContextType {
   setActiveChatId: (id: string | null) => void;
   setActiveFolderId: (id: string) => void;
   setSearchQuery: (q: string) => void;
-  setSearchFilter: (filter: 'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private') => void;
+  setSearchFilter: (filter: 'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private' | 'contacts') => void;
   setIsSearchActive: (active: boolean) => void;
   setIsDrawerOpen: (open: boolean) => void;
   setIsRightPanelOpen: (open: boolean) => void;
@@ -661,7 +661,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [activeFolderId, setActiveFolderId] = useState<string>('all');
   const [folders, setFolders] = useState<Folder[]>(DEFAULT_FOLDERS);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [searchFilter, setSearchFilter] = useState<'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private'>('all');
+  const [searchFilter, setSearchFilter] = useState<'all' | 'drafts' | 'channels' | 'groups' | 'bots' | 'private' | 'contacts'>('all');
   const [isSearchActive, setIsSearchActive] = useState<boolean>(false);
 
   const chatsWithDraftsCount = chats.filter((chat) => {
@@ -743,7 +743,15 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [inAppNotifications, setInAppNotifications] = useState<InAppNotification[]>([]);
 
   const [apiConfig, setApiConfig] = useState<TelegramApiConfig>(DEFAULT_TELEGRAM_API_CONFIG);
-  const [settings, setSettings] = useState<AppSettings>(() => initialActiveAcc?.settings || DEFAULT_APP_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    const accSettings = initialActiveAcc?.settings;
+    return {
+      ...DEFAULT_APP_SETTINGS,
+      ...(accSettings || {}),
+      muteChatSounds: accSettings?.muteChatSounds !== undefined ? Boolean(accSettings.muteChatSounds) : true,
+      soundVolume: typeof accSettings?.soundVolume === 'number' ? accSettings.soundVolume : 0,
+    };
+  });
   const [settingsSubPage, setSettingsSubPage] = useState<SettingsSubPage>('main');
 
   // Incremental Pagination & Stream Sync States
@@ -853,13 +861,17 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Sync Audio Engine Volume & Mute Settings in Real-time
   useEffect(() => {
-    if (typeof settings.soundVolume === 'number') {
-      telegramAudio.setVolume(settings.soundVolume);
-      audioService.setVolume(settings.soundVolume);
-    }
-    if (typeof settings.muteChatSounds === 'boolean') {
-      telegramAudio.setMuted(settings.muteChatSounds);
-      audioService.setMuted(settings.muteChatSounds);
+    try {
+      if (typeof settings.soundVolume === 'number') {
+        telegramAudio?.setVolume?.(settings.soundVolume);
+        audioService?.setVolume?.(settings.soundVolume);
+      }
+      if (typeof settings.muteChatSounds === 'boolean') {
+        telegramAudio?.setMuted?.(settings.muteChatSounds);
+        audioService?.setMuted?.(settings.muteChatSounds);
+      }
+    } catch (e) {
+      console.warn('Audio settings sync warning:', e);
     }
   }, [settings.soundVolume, settings.muteChatSounds]);
 
@@ -1284,7 +1296,12 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Load persisted custom settings
     storageSyncManager.loadSettings().then((savedSettings) => {
       if (savedSettings) {
-        setSettings((prev) => ({ ...prev, ...savedSettings }));
+        setSettings((prev) => ({
+          ...prev,
+          ...savedSettings,
+          muteChatSounds: savedSettings.muteChatSounds !== undefined ? Boolean(savedSettings.muteChatSounds) : (prev.muteChatSounds ?? true),
+          soundVolume: typeof savedSettings.soundVolume === 'number' ? savedSettings.soundVolume : (prev.soundVolume ?? 0),
+        }));
         if (savedSettings.bubbleCornerRadius !== undefined) {
           themeController.applyBubbleCornerRadius(savedSettings.bubbleCornerRadius);
         }
@@ -1522,7 +1539,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           // If not in the active dialog and not muted, alert the user with in-app banner & audio chime
           if (!isCurrentActiveDialog) {
             if (!isMuted && (settings.soundEffects || settings.inAppSounds)) {
-              telegramAudio.playMessageChime();
+              telegramAudio?.playMessageChime?.();
             }
 
             // Trigger in-app notification banner
@@ -1789,7 +1806,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!targetAcc || targetAccountId === activeAccountId) return;
 
     if (settings.soundEffects) {
-      telegramAudio.playMessageChime();
+      telegramAudio?.playMessageChime?.();
     }
 
     // Dynamic MTProto ConnectionsManager switch without reload
@@ -2378,12 +2395,12 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       themeController.applyFontSize(newSettings.fontSize);
     }
     if (newSettings.soundVolume !== undefined) {
-      telegramAudio.setVolume(newSettings.soundVolume);
-      audioService.setVolume(newSettings.soundVolume);
+      telegramAudio?.setVolume?.(newSettings.soundVolume);
+      audioService?.setVolume?.(newSettings.soundVolume);
     }
     if (newSettings.muteChatSounds !== undefined) {
-      telegramAudio.setMuted(newSettings.muteChatSounds);
-      audioService.setMuted(newSettings.muteChatSounds);
+      telegramAudio?.setMuted?.(newSettings.muteChatSounds);
+      audioService?.setMuted?.(newSettings.muteChatSounds);
     }
     setSettings((prev) => {
       const updated = { ...prev, ...newSettings };
@@ -2732,7 +2749,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           })
         );
 
-        telegramAudio.playMessageChime();
+        telegramAudio?.playMessageChime?.();
 
         // Update lastReadMessageId if user is at the bottom of the active chat
         if (incomingMsg.id) {
@@ -3090,7 +3107,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             : 'Cloud sync complete via MTProto 2.0 (Layer 184)',
           '🔄'
         );
-        telegramAudio.playSentPop();
+        telegramAudio?.playSentPop?.();
       }
     } catch (err: any) {
       const errMsg = err?.message || String(err);
@@ -3418,7 +3435,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       )
     );
 
-    telegramAudio.playMessageChime();
+    telegramAudio?.playMessageChime?.();
 
     // Dispatch window custom event for link_joined
     try {
@@ -4066,19 +4083,33 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const togglePinChat = (chatId: string) => {
     let isPinned = false;
-    setChats((prev) =>
-      prev.map((c) => {
+    setChats((prev) => {
+      const target = prev.find((c) => c.id === chatId);
+      isPinned = !target?.isPinned;
+
+      const updated = prev.map((c) => {
         if (c.id === chatId) {
-          isPinned = !c.isPinned;
-          return { ...c, isPinned };
+          return {
+            ...c,
+            isPinned,
+            pinnedIndex: isPinned ? 0 : undefined,
+          };
+        }
+        if (isPinned && c.isPinned) {
+          return {
+            ...c,
+            pinnedIndex: (c.pinnedIndex ?? 0) + 1,
+          };
         }
         return c;
-      })
-    );
+      });
+
+      return messagesController.sortDialogs(updated, 'all');
+    });
     messagesController.setDialogPinned(chatId, isPinned);
     showToast(
       isPinned
-        ? settings.language === 'ar' ? 'تم تثبيت المحادثة في الأعلى' : 'Chat pinned'
+        ? settings.language === 'ar' ? 'تم تثبيت المحادثة في الأعلى' : 'Chat pinned to top'
         : settings.language === 'ar' ? 'تم إلغاء تثبيت المحادثة' : 'Chat unpinned',
       '📌'
     );
@@ -4487,7 +4518,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             peerId: alert.peerId,
           });
           if (settings.soundEffects) {
-            telegramAudio.playMessageChime();
+            telegramAudio?.playMessageChime?.();
           }
           triggerNotification({
             category: 'keyword_alert',
@@ -4505,7 +4536,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const remoteData = data.remoteMessage.data || {};
           const chatId = remoteData.chat_id || remoteData.chatId || 'chat_general';
           if (settings.soundEffects) {
-            telegramAudio.playMessageChime();
+            telegramAudio?.playMessageChime?.();
           }
           if (chatId !== activeChatId) {
             triggerNotification({
@@ -4795,7 +4826,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // 3. If incoming (not sent by us), trigger audio, notifications, and private auto-reply evaluation
       if (!isOut) {
         if (settings.soundEffects) {
-          telegramAudio.playMessageChime();
+          telegramAudio?.playMessageChime?.();
         }
 
         // Web Worker background evaluation for private chats (completely isolated from keyword monitor)
@@ -4864,7 +4895,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // 2. Play alert chime
       if (settings.soundEffects) {
-        telegramAudio.playMessageChime();
+        telegramAudio?.playMessageChime?.();
       }
 
       // 3. Show In-App Notification Banner

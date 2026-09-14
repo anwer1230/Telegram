@@ -144,6 +144,20 @@ export class ChannelDifferenceService {
         : '';
 
     let currentPts = storage.getChannelPts(chatId) || storage.getChannelPts(cleanChanId) || 0;
+    if (!currentPts || currentPts <= 0) {
+      try {
+        const storedMsgs = storage.getMessages(chatId) || storage.getMessages(cleanChanId) || [];
+        for (const sm of storedMsgs) {
+          if (sm && typeof (sm as any).pts === 'number' && (sm as any).pts > 0) {
+            currentPts = Math.max(currentPts, (sm as any).pts);
+          }
+        }
+        if (currentPts > 0) {
+          storage.setChannelPts(chatId, currentPts);
+          storage.setChannelPts(cleanChanId, currentPts);
+        }
+      } catch (_) {}
+    }
     let accumulatedMessages: Message[] = [];
     let isTooLongEncountered = false;
     let recoveredHistoryCount = 0;

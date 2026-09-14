@@ -290,42 +290,76 @@ export const Sidebar: React.FC = () => {
     }
   });
 
+  // Priority sorting helper: Strictly prioritizes pinned chats at the top
+  const prioritizePinned = useCallback((list: Chat[]) => {
+    return [...list].sort((a, b) => {
+      const aPinned = Boolean(a.isPinned);
+      const bPinned = Boolean(b.isPinned);
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      if (aPinned && bPinned) {
+        if (a.pinnedIndex !== undefined && b.pinnedIndex !== undefined && a.pinnedIndex !== b.pinnedIndex) {
+          return a.pinnedIndex - b.pinnedIndex;
+        }
+      }
+      return 0;
+    });
+  }, []);
+
   // Collect all conversations with an unsent draft
   const allChatsWithDrafts = chats.filter((chat) => {
     const d = chat.draft || draftSyncService.getDraftText(chat.id);
     return Boolean(d && d.trim().length > 0);
   });
 
-  // Filter drafts matching current search query (title, handle, or draft text)
-  const matchingDraftChats = allChatsWithDrafts.filter((chat) => {
-    if (!q) return true;
-    const d = chat.draft || draftSyncService.getDraftText(chat.id);
-    return (
-      chat.title.toLowerCase().includes(q) ||
-      chat.username?.toLowerCase().includes(q) ||
-      (d && d.toLowerCase().includes(q))
-    );
-  });
+  // Filter drafts matching current search query (title, handle, or draft text), prioritized by pinned
+  const matchingDraftChats = useMemo(() => {
+    const filtered = allChatsWithDrafts.filter((chat) => {
+      if (!q) return true;
+      const d = chat.draft || draftSyncService.getDraftText(chat.id);
+      return (
+        chat.title.toLowerCase().includes(q) ||
+        chat.username?.toLowerCase().includes(q) ||
+        (d && d.toLowerCase().includes(q))
+      );
+    });
+    return prioritizePinned(filtered);
+  }, [allChatsWithDrafts, q, prioritizePinned]);
 
   // Grouped search categories for search overlay
-  const matchingChats = chats.filter((chat) => {
-    if (!isSearching) return true;
-    const d = chat.draft || draftSyncService.getDraftText(chat.id);
-    return (
-      chat.title.toLowerCase().includes(q) ||
-      chat.username?.toLowerCase().includes(q) ||
-      chat.lastMessage?.text?.toLowerCase().includes(q) ||
-      (d && d.toLowerCase().includes(q))
-    );
-  });
-  const matchingBots = matchingChats.filter((c) => c.type === 'bot');
-  const matchingChannelsAndGroups = matchingChats.filter(
-    (c) => c.type === 'channel' || c.type === 'group'
+  const matchingChats = useMemo(() => {
+    const filtered = chats.filter((chat) => {
+      if (!isSearching) return true;
+      const d = chat.draft || draftSyncService.getDraftText(chat.id);
+      return (
+        chat.title.toLowerCase().includes(q) ||
+        chat.username?.toLowerCase().includes(q) ||
+        chat.lastMessage?.text?.toLowerCase().includes(q) ||
+        (d && d.toLowerCase().includes(q))
+      );
+    });
+    return prioritizePinned(filtered);
+  }, [chats, isSearching, q, prioritizePinned]);
+
+  const matchingBots = useMemo(
+    () => prioritizePinned(matchingChats.filter((c) => c.type === 'bot')),
+    [matchingChats, prioritizePinned]
   );
-  const matchingChannels = matchingChats.filter((c) => c.type === 'channel');
-  const matchingGroups = matchingChats.filter((c) => c.type === 'group');
-  const matchingPrivateChats = matchingChats.filter(
-    (c) => c.type === 'private' || c.type === 'saved' || c.isSecret
+  const matchingChannelsAndGroups = useMemo(
+    () => prioritizePinned(matchingChats.filter((c) => c.type === 'channel' || c.type === 'group')),
+    [matchingChats, prioritizePinned]
+  );
+  const matchingChannels = useMemo(
+    () => prioritizePinned(matchingChats.filter((c) => c.type === 'channel')),
+    [matchingChats, prioritizePinned]
+  );
+  const matchingGroups = useMemo(
+    () => prioritizePinned(matchingChats.filter((c) => c.type === 'group')),
+    [matchingChats, prioritizePinned]
+  );
+  const matchingPrivateChats = useMemo(
+    () => prioritizePinned(matchingChats.filter((c) => c.type === 'private' || c.type === 'saved' || c.isSecret)),
+    [matchingChats, prioritizePinned]
   );
 
   // Search inside all messages (combining in-memory state + IndexedDB MultiEntry token index)
@@ -377,12 +411,15 @@ export const Sidebar: React.FC = () => {
     }
   }
 
-  // Exact DrKLO MessagesController & DialogsAdapter sorting algorithm
-  const sortedChats = messagesController.sortDialogs(
-    chats,
-    isSearching ? 'all' : activeFolderId,
-    searchQuery
-  );
+  // Exact DrKLO MessagesController & DialogsAdapter sorting algorithm with strict pinned chat priority
+  const sortedChats = useMemo(() => {
+    const dialogs = messagesController.sortDialogs(
+      chats,
+      isSearching ? 'all' : activeFolderId,
+      searchQuery
+    );
+    return prioritizePinned(dialogs);
+  }, [chats, isSearching, activeFolderId, searchQuery, prioritizePinned]);
 
   const chatRowProps = useMemo<ChatRowCustomProps>(() => ({
     sortedChats,

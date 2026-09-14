@@ -386,7 +386,7 @@ export const TelemetryLogModal: React.FC<TelemetryLogModalProps> = ({ isOpen, on
 
         {/* Tab Content */}
         {activeTab === 'database' ? (
-          <DatabaseBrowserView onShowToast={showToast} />
+          <DatabaseBrowserView />
         ) : (
           <>
             {/* Security & Persistence Rules Badge */}

@@ -183,6 +183,7 @@ export interface Chat {
   onlineCount?: number;
   description?: string;
   inviteLink?: string;
+  inviteHash?: string;
   folderIds?: string[];
   customWallpaper?: string;
   customTone?: string;

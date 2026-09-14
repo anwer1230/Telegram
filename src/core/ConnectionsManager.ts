@@ -1178,6 +1178,20 @@ export class ConnectionsManager {
    * Fetches updates.getChannelDifference for a channel/supergroup
    */
   public async getChannelDifference(channelId: string | number, pts: number): Promise<any> {
+    try {
+      const res = await fetch('/api/telegram/updates/channel-difference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelId: String(channelId || '').replace('chat_', ''),
+          pts: Number(pts) || 0,
+        }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+
     return this.sendRequest({
       _: 'updates.getChannelDifference',
       channel: channelId,

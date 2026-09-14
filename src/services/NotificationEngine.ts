@@ -214,13 +214,13 @@ export class NotificationEngine {
     // 1. Play auditory feedback if not muted
     if (!shouldSilence && this.soundEffectsEnabled) {
       if (notif.category === 'channel_post') {
-        telegramAudio.playChannelPostSound();
+        telegramAudio?.playChannelPostSound?.();
       } else if (notif.category === 'reaction') {
-        telegramAudio.playReactionSound();
+        telegramAudio?.playReactionSound?.();
       } else if (notif.category === 'keyword_alert') {
         notificationsController.playNotificationSound('alert');
       } else {
-        telegramAudio.playMessageChime();
+        telegramAudio?.playMessageChime?.();
       }
     }
 

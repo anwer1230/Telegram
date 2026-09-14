@@ -29,7 +29,7 @@ export class SessionSecurityManager {
     return biometricAuthService.verifyPasscode(passcode);
   }
 
-  public setPasscode(passcode: string): void {
+  public setPasscode(passcode: string, _type?: string): void {
     biometricAuthService.setPasscode(passcode);
   }
 
@@ -94,8 +94,16 @@ export class SessionSecurityManager {
     biometricAuthService.clearPasscode();
   }
 
-  public async enrollBiometrics(username?: string): Promise<boolean> {
-    return this.registerBiometrics(username);
+  public async enrollBiometrics(username?: string): Promise<{ success: boolean; isCancelled?: boolean; error?: string }> {
+    try {
+      const ok = await this.registerBiometrics(username);
+      return { success: ok };
+    } catch (e: any) {
+      if (e?.name === 'NotAllowedError') {
+        return { success: false, isCancelled: true };
+      }
+      return { success: false, error: e?.message || 'Biometric enrollment failed' };
+    }
   }
 
   public subscribe(callback: (locked: boolean) => void): () => void {

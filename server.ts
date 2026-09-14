@@ -6153,35 +6153,188 @@ async function startServer() {
   });
 
   // 8.0.1 MTProto updates.getChannelDifference function & endpoint
+  function isPtsError(err: any): boolean {
+    const msg = (err?.message || err?.errorMessage || err?.text || String(err || '')).toUpperCase();
+    return (
+      msg.includes('PERSISTENT_TIMESTAMP_EMPTY') ||
+      msg.includes('PERSISTENT_TIMESTAMP_INVALID') ||
+      msg.includes('PERSISTENT_TIMESTAMP_OUTDATED') ||
+      msg.includes('CHANNEL_INVALID') ||
+      msg.includes('CHANNEL_PRIVATE') ||
+      msg.includes('CHANNEL_PUBLIC_GROUP_NA') ||
+      msg.includes('MSG_WAIT_FAILED')
+    );
+  }
+
+  async function resolveChannelInputEntity(channelId: string | number, client: any): Promise<any> {
+    const cleanChanId = String(channelId || '').replace('chat_', '');
+    let targetEntity: any = null;
+    try {
+      targetEntity = await client.getInputEntity(cleanChanId).catch(() => null);
+    } catch (_) {}
+
+    if (!targetEntity && !isNaN(Number(cleanChanId))) {
+      const numId = Number(cleanChanId);
+      try {
+        targetEntity = await client.getInputEntity(numId).catch(() => null);
+      } catch (_) {}
+      if (!targetEntity && cleanChanId.startsWith('-100')) {
+        try {
+          const strippedId = Number(cleanChanId.replace('-100', ''));
+          targetEntity = await client.getInputEntity(strippedId).catch(() => null);
+        } catch (_) {}
+      }
+    }
+
+    if (!targetEntity) {
+      try {
+        targetEntity = await client.getInputEntity(BigInt(cleanChanId)).catch(() => null);
+      } catch (_) {}
+    }
+
+    if (!targetEntity) {
+      try {
+        targetEntity = await client.getEntity(cleanChanId).catch(() => null);
+      } catch (_) {}
+    }
+
+    return targetEntity || cleanChanId;
+  }
+
+  async function fetchChannelBaseline(
+    channelId: string | number,
+    targetEntity: any,
+    client: any,
+    limit: number = 100
+  ): Promise<{
+    rawMessages: any[];
+    resolvedPts: number;
+    topMessage: number;
+    unreadCount: number;
+    readInboxMaxId: number;
+  }> {
+    let rawMessages: any[] = [];
+    let resolvedPts = 0;
+    let topMessage = 0;
+    let unreadCount = 0;
+    let readInboxMaxId = 0;
+
+    // 1. Primary MTProto RPC: client.invoke(Api.messages.GetHistory)
+    try {
+      const historyRes: any = await client.invoke(
+        new Api.messages.GetHistory({
+          peer: targetEntity,
+          offsetId: 0,
+          offsetDate: 0,
+          addOffset: 0,
+          limit,
+          maxId: 0,
+          minId: 0,
+          hash: BigInt(0) as any,
+        })
+      );
+
+      if (historyRes) {
+        if (Array.isArray(historyRes.messages)) {
+          rawMessages = historyRes.messages;
+        } else if (Array.isArray(historyRes)) {
+          rawMessages = historyRes;
+        }
+        if (typeof historyRes.pts === 'number' && historyRes.pts > 0) {
+          resolvedPts = historyRes.pts;
+        }
+        if (typeof historyRes.unreadCount === 'number') {
+          unreadCount = historyRes.unreadCount;
+        }
+        if (typeof historyRes.readInboxMaxId === 'number') {
+          readInboxMaxId = historyRes.readInboxMaxId;
+        }
+      }
+    } catch (histErr: any) {
+      // 2. Secondary fallback: client.getMessages
+      try {
+        const msgs = await client.getMessages(targetEntity, { limit });
+        if (Array.isArray(msgs)) {
+          rawMessages = msgs;
+        }
+      } catch (_) {}
+    }
+
+    // 3. Scan messages for pts if not resolved yet
+    if (!resolvedPts && Array.isArray(rawMessages)) {
+      for (const m of rawMessages) {
+        if (typeof m?.pts === 'number' && m.pts > 0) {
+          resolvedPts = Math.max(resolvedPts, m.pts);
+        }
+      }
+    }
+
+    // 4. If still no pts, try Api.channels.GetFullChannel
+    if (!resolvedPts) {
+      try {
+        const fullRes: any = await client.invoke(
+          new Api.channels.GetFullChannel({ channel: targetEntity })
+        );
+        if (typeof fullRes?.fullChat?.pts === 'number' && fullRes.fullChat.pts > 0) {
+          resolvedPts = fullRes.fullChat.pts;
+        }
+        if (typeof fullRes?.fullChat?.readInboxMaxId === 'number') {
+          readInboxMaxId = fullRes.fullChat.readInboxMaxId;
+        }
+        if (typeof fullRes?.fullChat?.unreadCount === 'number') {
+          unreadCount = fullRes.fullChat.unreadCount;
+        }
+      } catch (_) {}
+    }
+
+    // 5. Ensure resolvedPts is at least 1 (to satisfy MTProto pts > 0 requirement for subsequent calls)
+    if (!resolvedPts || resolvedPts <= 0) {
+      const highestId = rawMessages && rawMessages.length > 0 && rawMessages[0]?.id ? Number(rawMessages[0].id) : 1;
+      resolvedPts = Math.max(1, isNaN(highestId) ? 1 : highestId);
+    }
+
+    topMessage = rawMessages && rawMessages.length > 0 && rawMessages[0]?.id ? Number(rawMessages[0].id) : 0;
+
+    return {
+      rawMessages,
+      resolvedPts,
+      topMessage,
+      unreadCount,
+      readInboxMaxId,
+    };
+  }
+
   async function getChannelDifference(channelId: string | number, pts: number, targetClient?: any): Promise<any> {
     const client = targetClient || mainTelegramClient;
     if (!client || !client.connected) {
       throw new Error('Telegram client is not connected');
     }
-    const cleanChanId = String(channelId || '').replace('chat_', '');
-    let targetEntity: any = cleanChanId;
-    try {
-      targetEntity = await client.getInputEntity(cleanChanId).catch(() => null);
-      if (!targetEntity && !isNaN(Number(cleanChanId))) {
-        const numId = Number(cleanChanId);
-        targetEntity = await client.getInputEntity(numId).catch(() => null);
-        if (!targetEntity && cleanChanId.startsWith('-100')) {
-          const strippedId = Number(cleanChanId.replace('-100', ''));
-          targetEntity = await client.getInputEntity(strippedId).catch(() => null);
-        }
-      }
-      if (!targetEntity) {
-        targetEntity = await client.getEntity(cleanChanId).catch(() => null);
-      }
-    } catch (_) {
-      targetEntity = cleanChanId;
+    const targetEntity = await resolveChannelInputEntity(channelId, client);
+
+    const safePts = Number(pts) || 0;
+    if (safePts <= 0) {
+      // pts must be > 0 in MTProto. Return baseline directly
+      const baseline = await fetchChannelBaseline(channelId, targetEntity, client);
+      return {
+        _: 'updates.channelDifferenceTooLong',
+        className: 'updates.ChannelDifferenceTooLong',
+        pts: baseline.resolvedPts,
+        timeout: 30,
+        topMessage: baseline.topMessage,
+        readInboxMaxId: baseline.readInboxMaxId,
+        unreadCount: baseline.unreadCount,
+        messages: baseline.rawMessages,
+        chats: [],
+        users: [],
+        final: true,
+      };
     }
 
     return await client.invoke(
       new Api.updates.GetChannelDifference({
         channel: targetEntity,
         filter: new Api.ChannelMessagesFilterEmpty(),
-        pts: Number(pts) || 0,
+        pts: safePts,
         limit: 100,
       })
     );
@@ -6200,68 +6353,87 @@ async function startServer() {
       }
 
       const cleanChanId = String(channelId || '').replace('chat_', '');
-      let targetEntity: any = cleanChanId;
-      try {
-        targetEntity = await client.getInputEntity(cleanChanId).catch(() => null);
-        if (!targetEntity && !isNaN(Number(cleanChanId))) {
-          const numId = Number(cleanChanId);
-          targetEntity = await client.getInputEntity(numId).catch(() => null);
-          if (!targetEntity && cleanChanId.startsWith('-100')) {
-            const strippedId = Number(cleanChanId.replace('-100', ''));
-            targetEntity = await client.getInputEntity(strippedId).catch(() => null);
-          }
-        }
-        if (!targetEntity) {
-          targetEntity = await client.getEntity(cleanChanId).catch(() => null);
-        }
-      } catch (_) {
-        targetEntity = cleanChanId;
-      }
+      const targetEntity = await resolveChannelInputEntity(cleanChanId, client);
 
+      const numericPts = Number(pts) || 0;
       let channelDiff: any = null;
-      try {
-        channelDiff = await getChannelDifference(channelId, pts, client);
-      } catch (invokeErr: any) {
-        // If channel difference fails due to invalid PTS or PERSISTENT_TIMESTAMP_INVALID, retry with pts=0 or fallback
-        console.warn(`[MTProto] GetChannelDifference failed for ${channelId} (pts=${pts}):`, invokeErr?.message || invokeErr);
-        if (pts && Number(pts) > 0) {
-          try {
-            channelDiff = await getChannelDifference(channelId, 0, client);
-          } catch (retryErr: any) {
-            throw retryErr;
-          }
-        } else {
-          throw invokeErr;
-        }
-      }
+      let rawMessages: any[] = [];
+      let resolvedPts = 0;
+      let isTooLong = false;
+      let isSlice = false;
+      let isEmpty = false;
+      let isFinal = true;
+      let topMessage = 0;
+      let unreadCount = 0;
+      let readInboxMaxId = 0;
 
-      if (!channelDiff) {
-        return res.json({ success: true, empty: true, pts: Number(pts) || 0, isFinal: true });
-      }
-
-      const isSlice = channelDiff.className === 'updates.ChannelDifferenceSlice' || channelDiff._ === 'updates.channelDifferenceSlice';
-      const isTooLong = channelDiff.className === 'updates.ChannelDifferenceTooLong' || channelDiff._ === 'updates.channelDifferenceTooLong';
-      const isEmpty = channelDiff.className === 'updates.ChannelDifferenceEmpty' || channelDiff._ === 'updates.channelDifferenceEmpty';
-      const isFinal = channelDiff.final !== undefined ? Boolean(channelDiff.final) : (!isSlice);
-
-      let rawMessages = channelDiff.newMessages || channelDiff.messages || [];
-      let resolvedPts = channelDiff.pts !== undefined ? channelDiff.pts : Number(pts) || 0;
-
-      // Handle ChannelDifferenceTooLong: fetch last 100 messages via GetHistory and update pts to newest received message
-      if (isTooLong) {
+      if (numericPts <= 0) {
+        // Initial baseline sync: pts is 0/empty, so fetch latest messages and current channel pts directly
+        console.log(`[MTProto] Initial baseline sync for channel ${channelId} (pts=${pts} is uninitialized). Fetching via GetHistory...`);
+        const baseline = await fetchChannelBaseline(channelId, targetEntity, client);
+        rawMessages = baseline.rawMessages;
+        resolvedPts = baseline.resolvedPts;
+        topMessage = baseline.topMessage;
+        unreadCount = baseline.unreadCount;
+        readInboxMaxId = baseline.readInboxMaxId;
+        isTooLong = true;
+        isFinal = true;
+        isEmpty = rawMessages.length === 0;
+      } else {
+        // Normal incremental diff sync: pts > 0
         try {
-          console.log(`[MTProto] ChannelDifferenceTooLong detected for ${channelId}. Fetching recent 100 messages via GetHistory...`);
-          const historyMsgs: any = await client.getMessages(targetEntity, { limit: 100 });
-          if (Array.isArray(historyMsgs) && historyMsgs.length > 0) {
-            rawMessages = historyMsgs;
-            const newestMsgWithPts = historyMsgs.find((m: any) => m?.pts);
-            if (newestMsgWithPts?.pts) {
-              resolvedPts = Number(newestMsgWithPts.pts);
+          channelDiff = await getChannelDifference(channelId, numericPts, client);
+        } catch (invokeErr: any) {
+          if (isPtsError(invokeErr)) {
+            console.log(`[MTProto] Channel difference requires baseline reset for ${channelId} (pts=${numericPts}): ${invokeErr?.message || invokeErr}. Recovering via GetHistory...`);
+            const baseline = await fetchChannelBaseline(channelId, targetEntity, client);
+            rawMessages = baseline.rawMessages;
+            resolvedPts = baseline.resolvedPts;
+            topMessage = baseline.topMessage;
+            unreadCount = baseline.unreadCount;
+            readInboxMaxId = baseline.readInboxMaxId;
+            isTooLong = true;
+            isFinal = true;
+            isEmpty = rawMessages.length === 0;
+          } else {
+            throw invokeErr;
+          }
+        }
+
+        if (channelDiff) {
+          isSlice = channelDiff.className === 'updates.ChannelDifferenceSlice' || channelDiff._ === 'updates.channelDifferenceSlice';
+          isTooLong = channelDiff.className === 'updates.ChannelDifferenceTooLong' || channelDiff._ === 'updates.channelDifferenceTooLong';
+          isEmpty = channelDiff.className === 'updates.ChannelDifferenceEmpty' || channelDiff._ === 'updates.channelDifferenceEmpty';
+          isFinal = channelDiff.final !== undefined ? Boolean(channelDiff.final) : (!isSlice);
+
+          rawMessages = channelDiff.newMessages || channelDiff.messages || [];
+          resolvedPts = channelDiff.pts !== undefined ? channelDiff.pts : numericPts;
+          topMessage = channelDiff.topMessage || 0;
+          readInboxMaxId = channelDiff.readInboxMaxId || 0;
+          unreadCount = channelDiff.unreadCount || 0;
+
+          if (isTooLong) {
+            try {
+              console.log(`[MTProto] ChannelDifferenceTooLong detected for ${channelId}. Fetching recent 100 messages via GetHistory...`);
+              const baseline = await fetchChannelBaseline(channelId, targetEntity, client);
+              if (baseline.rawMessages && baseline.rawMessages.length > 0) {
+                rawMessages = baseline.rawMessages;
+              }
+              if (baseline.resolvedPts && baseline.resolvedPts > 0) {
+                resolvedPts = baseline.resolvedPts;
+              }
+              topMessage = baseline.topMessage || topMessage;
+              readInboxMaxId = baseline.readInboxMaxId || readInboxMaxId;
+              unreadCount = baseline.unreadCount || unreadCount;
+            } catch (histErr: any) {
+              console.warn('[MTProto] Fallback getMessages on ChannelDifferenceTooLong:', histErr?.message || histErr);
             }
           }
-        } catch (histErr: any) {
-          console.warn('[MTProto] Fallback getMessages on ChannelDifferenceTooLong:', histErr?.message || histErr);
         }
+      }
+
+      if (!channelDiff && rawMessages.length === 0 && resolvedPts <= 0) {
+        return res.json({ success: true, empty: true, pts: 0, isFinal: true });
       }
 
       const newMessages: any[] = [];
@@ -6323,16 +6495,16 @@ async function startServer() {
         success: true,
         channelId,
         newMessages,
-        otherUpdates: channelDiff.otherUpdates || [],
+        otherUpdates: channelDiff?.otherUpdates || [],
         pts: resolvedPts,
-        timeout: channelDiff.timeout,
+        timeout: channelDiff?.timeout,
         isSlice,
         isTooLong,
         isEmpty,
         isFinal,
-        topMessage: channelDiff.topMessage,
-        readInboxMaxId: channelDiff.readInboxMaxId,
-        unreadCount: channelDiff.unreadCount,
+        topMessage: channelDiff?.topMessage !== undefined ? channelDiff.topMessage : topMessage,
+        readInboxMaxId: channelDiff?.readInboxMaxId !== undefined ? channelDiff.readInboxMaxId : readInboxMaxId,
+        unreadCount: channelDiff?.unreadCount !== undefined ? channelDiff.unreadCount : unreadCount,
       });
     } catch (err: any) {
       console.error('[MTProto] updates.getChannelDifference error:', err?.message || err);

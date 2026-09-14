@@ -40,33 +40,51 @@ export const ChatContextMenuView: React.FC = () => {
   const posY = Math.min(chatContextMenu.y, window.innerHeight - 260);
 
   return (
-    <div
-      id="tg-chat-context-menu"
-      style={{
-        left: `${posX}px`,
-        top: `${posY}px`,
-        backgroundColor: 'var(--tg-theme-surface)',
-        borderColor: 'var(--tg-theme-border)',
-        color: 'var(--tg-theme-bubble-in-text)',
-      }}
-      onClick={(e) => e.stopPropagation()}
-      className="fixed z-50 w-52 py-1.5 rounded-2xl shadow-2xl border backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 text-xs font-semibold select-none"
-    >
-      {/* Pin / Unpin */}
-      <button
-        onClick={() => {
-          togglePinChat(chat.id);
+    <>
+      {/* Outside click backdrop to dismiss context menu */}
+      <div
+        id="tg-chat-context-menu-backdrop"
+        className="fixed inset-0 z-40 bg-black/10 backdrop-blur-[0.5px]"
+        onClick={() => setChatContextMenu(null)}
+        onContextMenu={(e) => {
+          e.preventDefault();
           setChatContextMenu(null);
         }}
-        className="w-full flex items-center gap-3 px-3.5 py-2 hover:bg-white/10 text-left rtl:text-right transition-colors"
+      />
+
+      <div
+        id="tg-chat-context-menu"
+        style={{
+          left: `${posX}px`,
+          top: `${posY}px`,
+          backgroundColor: 'var(--tg-theme-surface)',
+          borderColor: 'var(--tg-theme-border)',
+          color: 'var(--tg-theme-bubble-in-text)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+        className="fixed z-50 w-52 py-1.5 rounded-2xl shadow-2xl border backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 text-xs font-semibold select-none"
       >
-        <Pin className="w-4 h-4 text-sky-400" />
-        <span>
-          {chat.isPinned
-            ? isArabic ? 'إلغاء التثبيت' : 'Unpin from Top'
-            : isArabic ? 'تثبيت في الأعلى' : 'Pin to Top'}
-        </span>
-      </button>
+        {/* Pin / Unpin option */}
+        <button
+          id="chat-context-menu-pin-option"
+          onClick={() => {
+            togglePinChat(chat.id);
+            setChatContextMenu(null);
+          }}
+          className="w-full flex items-center gap-3 px-3.5 py-2 hover:bg-white/10 text-left rtl:text-right transition-colors cursor-pointer group"
+        >
+          <Pin className={`w-4 h-4 transition-transform group-hover:scale-110 ${chat.isPinned ? 'text-amber-400 fill-amber-400/20 -rotate-45' : 'text-sky-400'}`} />
+          <span className="flex-1">
+            {chat.isPinned
+              ? isArabic ? 'إلغاء التثبيت' : 'Unpin'
+              : isArabic ? 'تثبيت في الأعلى' : 'Pin'}
+          </span>
+          {chat.isPinned && (
+            <span className="text-[10px] text-amber-400/90 font-medium px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/20">
+              {isArabic ? 'مثبت' : 'Pinned'}
+            </span>
+          )}
+        </button>
 
       {/* Archive / Unarchive */}
       <button
@@ -167,5 +185,6 @@ export const ChatContextMenuView: React.FC = () => {
         <span>{isArabic ? 'حذف المحادثة' : 'Delete Chat'}</span>
       </button>
     </div>
+    </>
   );
 };

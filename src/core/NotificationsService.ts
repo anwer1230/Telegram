@@ -714,6 +714,16 @@ export class NotificationsService {
     this.notifyStateChange();
   }
 
+  public async retryTransientFailedTasks(onProgress?: (processed: number, total: number) => void): Promise<void> {
+    const failedTasks = this.autoJoinTasks.filter(
+      (t) => t.status === 'invalid' || t.status === 'rate_limited' || t.status === 'banned'
+    );
+    const links = failedTasks.map((t) => t.url);
+    if (links.length > 0) {
+      await this.startAutoJoinTasks(links, onProgress);
+    }
+  }
+
   // ==========================================
   // 5. AUTO RESPONDER IMPLEMENTATION
   // ==========================================

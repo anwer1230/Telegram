@@ -523,6 +523,10 @@ export class BackgroundSyncService {
     this.notifyStateChange();
   }
 
+  public syncFromPrivateAutoReplies(rules: any[]) {
+    this.setAutoReplyRules(rules as AutoReplyRule[]);
+  }
+
   public addAutoReplyRule(rule: Omit<AutoReplyRule, 'id' | 'timesTriggered'>) {
     const newRule: AutoReplyRule = {
       ...rule,

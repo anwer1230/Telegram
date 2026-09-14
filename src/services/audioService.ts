@@ -7,8 +7,8 @@ import { telegramAudio } from '../utils/audioNotification';
 
 export class AudioService {
   private static instance: AudioService;
-  private volume: number = 0.8;
-  private isMuted: boolean = false;
+  private volume: number = 0;
+  private isMuted: boolean = true;
   private soundType: string = 'crystal';
   private ringtoneInterval: any = null;
 
@@ -20,7 +20,13 @@ export class AudioService {
   }
 
   public setVolume(vol: number): void {
-    this.volume = Math.max(0, Math.min(1, vol));
+    if (typeof vol !== 'number' || isNaN(vol)) return;
+    const normalized = vol > 1 ? vol / 100 : vol;
+    this.volume = Math.max(0, Math.min(1, normalized));
+    if (this.volume > 0) {
+      this.isMuted = false;
+    }
+    telegramAudio?.setVolume?.(this.volume);
   }
 
   public getVolume(): number {
@@ -28,7 +34,11 @@ export class AudioService {
   }
 
   public setMuted(muted: boolean): void {
-    this.isMuted = muted;
+    this.isMuted = Boolean(muted);
+    if (!this.isMuted && this.volume <= 0) {
+      this.volume = 0.7;
+    }
+    telegramAudio?.setMuted?.(this.isMuted);
   }
 
   public getMuted(): boolean {
@@ -45,40 +55,40 @@ export class AudioService {
 
   public playNotification(_type?: string): void {
     if (this.isMuted) return;
-    telegramAudio.playMessageChime(false);
+    telegramAudio?.playMessageChime?.(false);
   }
 
   public playIncoming(): void {
     if (this.isMuted) return;
-    telegramAudio.playMessageChime(false);
+    telegramAudio?.playMessageChime?.(false);
   }
 
   public playSent(): void {
     if (this.isMuted) return;
-    telegramAudio.playSentPop();
+    telegramAudio?.playSentPop?.();
   }
 
   public playBubblePop(): void {
     if (this.isMuted) return;
-    telegramAudio.playReactionSound();
+    telegramAudio?.playReactionSound?.();
   }
 
   public playClick(): void {
     if (this.isMuted) return;
-    telegramAudio.playSentPop();
+    telegramAudio?.playSentPop?.();
   }
 
   public playReaction(): void {
     if (this.isMuted) return;
-    telegramAudio.playReactionSound();
+    telegramAudio?.playReactionSound?.();
   }
 
   public playCallRingtone(): void {
     if (this.isMuted) return;
     if (this.ringtoneInterval) return;
-    telegramAudio.playChannelPostSound(false);
+    telegramAudio?.playChannelPostSound?.(false);
     this.ringtoneInterval = setInterval(() => {
-      telegramAudio.playChannelPostSound(false);
+      telegramAudio?.playChannelPostSound?.(false);
     }, 2800);
   }
 
@@ -90,4 +100,20 @@ export class AudioService {
   }
 }
 
-export const audioService = AudioService.getInstance();
+const rawAudioService = AudioService.getInstance();
+
+export const audioService: AudioService = new Proxy(rawAudioService, {
+  get(target: any, prop: string | symbol) {
+    if (prop in target) {
+      const val = target[prop];
+      return typeof val === 'function' ? val.bind(target) : val;
+    }
+    return (..._args: any[]) => {
+      // Safe no-op fallback
+    };
+  },
+});
+
+if (typeof window !== 'undefined') {
+  (window as any).audioService = audioService;
+}
