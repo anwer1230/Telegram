@@ -69,8 +69,8 @@ export const PERMANENT_TELEGRAM_API_ID = 22043994;
 export const PERMANENT_TELEGRAM_API_HASH = '56f64582b363d367280db96586b97801';
 
 // Dynamic Environment & Credentials Resolution with Permanent Fallback
-const TELEGRAM_API_ID = process.env.API_ID || process.env.TELEGRAM_API_ID || String(PERMANENT_TELEGRAM_API_ID);
-const TELEGRAM_API_HASH = process.env.API_HASH || process.env.TELEGRAM_API_HASH || PERMANENT_TELEGRAM_API_HASH;
+const TELEGRAM_API_ID = process.env.TELEGRAM_API_ID || process.env.API_ID || String(PERMANENT_TELEGRAM_API_ID);
+const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH || process.env.API_HASH || PERMANENT_TELEGRAM_API_HASH;
 const TDLIB_API_HASH = process.env.TDLIB_API_HASH || TELEGRAM_API_HASH;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'tg_session_anwer_foud_secure_key_2026';
 // NOTE: Telegram sessions are strictly isolated in sessions/account_{index}.json and NEVER stored in .env or global variables.
@@ -682,7 +682,7 @@ async function startServer() {
   // ==========================================
 
   // Permanent Render Deploy Hook URL built directly into server backend
-  const PERMANENT_RENDER_DEPLOY_HOOK_URL = 'https://api.render.com/deploy/srv-da843ujtqb8s73b52ho0?key=IRLl8JQiTBs';
+  const PERMANENT_RENDER_DEPLOY_HOOK_URL = 'https://api.render.com/deploy/srv-d8rb0avavr4c73ebc2pg?key=1_fvBe3GPP8';
 
   // Determine current server commit hash (set by Render RENDER_GIT_COMMIT or local git HEAD)
   let serverCurrentCommit: string = process.env.RENDER_GIT_COMMIT || '';
@@ -1720,6 +1720,30 @@ async function startServer() {
         const client = item.client;
         const cleanUrl = item.url.trim();
 
+        // 0. Automatic Internal Validation Step: Check if blacklisted before attempting to access!
+        const blacklistCheck = sqliteDatabase.checkLinkAgainstBlacklist(cleanUrl);
+        if (blacklistCheck.isBlacklisted) {
+          console.log(`[LinkRadar] ⛔ Skipping blacklisted link: ${cleanUrl} (${blacklistCheck.reason})`);
+          sqliteDatabase.insertLinkRadarLog({
+            id: `radar_log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            url: cleanUrl,
+            type: 'blacklisted',
+            action: 'skipped_blacklisted',
+            source_chat_id: item.sourceChatId,
+            source_chat_title: item.sourceChatTitle,
+            sender_name: item.senderName,
+            details: `درع الحماية الداخلي: الرابط مدرج بالقائمة السوداء (${blacklistCheck.reason || blacklistCheck.matchedPattern}) - تم منع الانضمام التلقائي بأمان`,
+            created_at: Date.now(),
+          });
+
+          io.emit('link_radar_update', {
+            action: 'skipped_blacklisted',
+            url: cleanUrl,
+            message: `تم منع الانضمام التلقائي: الرابط محظور بالقائمة السوداء (${blacklistCheck.reason})`,
+          });
+          continue;
+        }
+
         // 1. Enforce Hourly Rate Limit: "ولاتنضم اكثر من عشرة روابط في الساعه الواحدة"
         const currentHourlyJoins = sqliteDatabase.getLinkRadarHourlyJoinsCount();
         if (currentHourlyJoins >= 10) {
@@ -1878,7 +1902,24 @@ async function startServer() {
           } catch (inviteErr: any) {
             const errMsg = inviteErr?.errorMessage || inviteErr?.message || '';
             console.warn('[LinkRadar] Invite join error:', errMsg);
-            if (errMsg.includes('USER_ALREADY_PARTICIPANT')) {
+            if (errMsg.includes('INVITE_HASH_EXPIRED') || errMsg.includes('INVITE_HASH_INVALID')) {
+              sqliteDatabase.insertLinkRadarLog({
+                id: `radar_log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                url: cleanUrl,
+                type: 'expired_invite',
+                action: 'skipped_inactive',
+                source_chat_id: item.sourceChatId,
+                source_chat_title: item.sourceChatTitle,
+                sender_name: item.senderName,
+                details: 'فحص التحقق الآلي: رابط الدعوة غير نشط أو منتهي الصلاحية (INVITE_HASH_EXPIRED)',
+                created_at: Date.now(),
+              });
+              io.emit('link_radar_update', {
+                action: 'skipped_inactive',
+                url: cleanUrl,
+                message: 'تم تخطي الرابط تلقائياً: رابط الدعوة غير نشط أو منتهي الصلاحية',
+              });
+            } else if (errMsg.includes('USER_ALREADY_PARTICIPANT')) {
               sqliteDatabase.insertLinkRadarLog({
                 id: `radar_log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
                 url: cleanUrl,
@@ -2029,17 +2070,36 @@ async function startServer() {
           } catch (resolveErr: any) {
             const errMsg = resolveErr?.errorMessage || resolveErr?.message || '';
             console.warn('[LinkRadar] Resolve/join error for @' + rawUsername + ':', errMsg);
-            sqliteDatabase.insertLinkRadarLog({
-              id: `radar_log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-              url: cleanUrl,
-              type: 'unknown',
-              action: 'failed',
-              source_chat_id: item.sourceChatId,
-              source_chat_title: item.sourceChatTitle,
-              sender_name: item.senderName,
-              details: `تعذر الانضمام: ${errMsg}`,
-              created_at: Date.now(),
-            });
+            if (errMsg.includes('USERNAME_NOT_OCCUPIED') || errMsg.includes('USERNAME_INVALID')) {
+              sqliteDatabase.insertLinkRadarLog({
+                id: `radar_log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                url: cleanUrl,
+                type: 'invalid_username',
+                action: 'skipped_inactive',
+                source_chat_id: item.sourceChatId,
+                source_chat_title: item.sourceChatTitle,
+                sender_name: item.senderName,
+                details: 'فحص التحقق الآلي: المعرف غير نشط أو غير موجود (USERNAME_NOT_OCCUPIED)',
+                created_at: Date.now(),
+              });
+              io.emit('link_radar_update', {
+                action: 'skipped_inactive',
+                url: cleanUrl,
+                message: 'تم تخطي الرابط تلقائياً: المعرف غير نشط أو غير موجود',
+              });
+            } else {
+              sqliteDatabase.insertLinkRadarLog({
+                id: `radar_log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                url: cleanUrl,
+                type: 'unknown',
+                action: 'failed',
+                source_chat_id: item.sourceChatId,
+                source_chat_title: item.sourceChatTitle,
+                sender_name: item.senderName,
+                details: `تعذر الانضمام: ${errMsg}`,
+                created_at: Date.now(),
+              });
+            }
           }
         }
       }
@@ -6100,6 +6160,16 @@ async function startServer() {
         return res.status(503).json({ success: false, error: 'لا يوجد حساب تيليجرام نشط ومتصل حالياً' });
       }
 
+      // Check blacklist before enqueuing
+      const blCheck = sqliteDatabase.checkLinkAgainstBlacklist(String(url).trim());
+      if (blCheck.isBlacklisted) {
+        return res.status(400).json({
+          success: false,
+          isBlacklisted: true,
+          error: `الرابط مدرج في القائمة السوداء (${blCheck.reason}) - تم حظر معالجته والانضمام إليه بأمان`,
+        });
+      }
+
       radarQueue.push({
         id: `radar_manual_${Date.now()}`,
         url: String(url).trim(),
@@ -6118,6 +6188,278 @@ async function startServer() {
         success: true,
         message: 'تم إضافة الرابط إلى رادار الفحص والانضمام بنجاح',
       });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message });
+    }
+  });
+
+  // Automatic Link Validation Check (Internal Blacklist + Live/Format Activity Check)
+  app.post('/api/telegram/radar/validate-link', async (req, res) => {
+    try {
+      const { url } = req.body || {};
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ success: false, error: 'URL is required' });
+      }
+
+      const cleanUrl = url.trim();
+
+      // 1. Internal Blacklist Check
+      const blacklistResult = sqliteDatabase.checkLinkAgainstBlacklist(cleanUrl);
+      if (blacklistResult.isBlacklisted) {
+        return res.json({
+          success: true,
+          url: cleanUrl,
+          isValid: false,
+          isActive: false,
+          isBlacklisted: true,
+          status: 'blacklisted',
+          reason: `مدرج بالقائمة السوداء: ${blacklistResult.reason || blacklistResult.matchedPattern}`,
+          matchedPattern: blacklistResult.matchedPattern,
+        });
+      }
+
+      // 2. Syntax & Entity Check
+      const isInvite = cleanUrl.includes('+') || cleanUrl.includes('joinchat/') || cleanUrl.includes('tg://join?invite=');
+      let inviteHash = '';
+      if (isInvite) {
+        if (cleanUrl.includes('+')) {
+          inviteHash = cleanUrl.split('+')[1].split('/')[0].split('?')[0];
+        } else if (cleanUrl.includes('joinchat/')) {
+          inviteHash = cleanUrl.split('joinchat/')[1].split('/')[0].split('?')[0];
+        } else if (cleanUrl.includes('invite=')) {
+          inviteHash = cleanUrl.split('invite=')[1].split('&')[0];
+        }
+      }
+
+      // Check active Telegram client for live MTProto verification
+      let activeClient: any = null;
+      for (const inst of accountInstances.values()) {
+        if (inst.client && inst.client.connected) {
+          activeClient = inst.client;
+          break;
+        }
+      }
+
+      if (inviteHash) {
+        if (inviteHash.length < 5) {
+          return res.json({
+            success: true,
+            url: cleanUrl,
+            isValid: false,
+            isActive: false,
+            isBlacklisted: false,
+            status: 'inactive',
+            reason: 'رمز الدعوة الخاصة (+) غير مكتمل أو تالف',
+          });
+        }
+
+        if (activeClient) {
+          try {
+            const inviteCheck: any = await activeClient.invoke(new Api.messages.CheckChatInvite({ hash: inviteHash }));
+            const isBroadcast = Boolean(inviteCheck.broadcast || (inviteCheck.chat && inviteCheck.chat.broadcast));
+            const title = inviteCheck.title || inviteCheck.chat?.title || 'مجموعة خاصة';
+
+            return res.json({
+              success: true,
+              url: cleanUrl,
+              isValid: true,
+              isActive: true,
+              isBlacklisted: false,
+              status: 'active',
+              type: isBroadcast && !inviteCheck.megagroup ? 'private_channel' : 'public_group',
+              chatTitle: title,
+              memberCount: inviteCheck.participantsCount || 0,
+              reason:
+                isBroadcast && !inviteCheck.megagroup
+                  ? 'قناة خاصة نشطة (سيتم تخطيها وفقاً لسياسة الرادار)'
+                  : 'مجموعة دعوة نشطة وصالحة',
+            });
+          } catch (inviteErr: any) {
+            const errMsg = inviteErr?.errorMessage || inviteErr?.message || '';
+            if (errMsg.includes('INVITE_HASH_EXPIRED') || errMsg.includes('INVITE_HASH_INVALID')) {
+              return res.json({
+                success: true,
+                url: cleanUrl,
+                isValid: false,
+                isActive: false,
+                isBlacklisted: false,
+                status: 'inactive',
+                reason: 'رابط الدعوة غير نشط أو منتهي الصلاحية (INVITE_HASH_EXPIRED)',
+              });
+            } else if (errMsg.includes('USER_ALREADY_PARTICIPANT')) {
+              return res.json({
+                success: true,
+                url: cleanUrl,
+                isValid: true,
+                isActive: true,
+                isBlacklisted: false,
+                status: 'active',
+                type: 'public_group',
+                reason: 'الحساب منضم مسبقاً لهذه المجموعة',
+              });
+            } else {
+              return res.json({
+                success: true,
+                url: cleanUrl,
+                isValid: false,
+                isActive: false,
+                isBlacklisted: false,
+                status: 'inactive',
+                reason: `تعذر فحص رابط الدعوة (${errMsg})`,
+              });
+            }
+          }
+        } else {
+          // Client offline: fallback to format validation
+          return res.json({
+            success: true,
+            url: cleanUrl,
+            isValid: true,
+            isActive: true,
+            isBlacklisted: false,
+            status: 'active',
+            type: 'private_invite',
+            reason: 'صيغة رابط دعوة صالحة (فحص نسقي داخلي)',
+          });
+        }
+      }
+
+      // Public Username link
+      const rawUsername = cleanUrl
+        .replace(/^https?:\/\/(?:t\.me|telegram\.me)\//i, '')
+        .replace('@', '')
+        .split('/')[0]
+        .split('?')[0]
+        .trim();
+
+      if (!rawUsername || rawUsername.length < 3) {
+        return res.json({
+          success: true,
+          url: cleanUrl,
+          isValid: false,
+          isActive: false,
+          isBlacklisted: false,
+          status: 'inactive',
+          reason: 'اسم المستخدم قصير جداً أو غير صالح',
+        });
+      }
+
+      // Reserved names check
+      const reserved = ['joinchat', 'share', 'contact', 'addstickers', 'proxy', 'socks', 'login', 'c'];
+      if (reserved.includes(rawUsername.toLowerCase())) {
+        return res.json({
+          success: true,
+          url: cleanUrl,
+          isValid: false,
+          isActive: false,
+          isBlacklisted: false,
+          status: 'inactive',
+          reason: `مسار غير مخصص لمجموعة (${rawUsername})`,
+        });
+      }
+
+      if (activeClient) {
+        try {
+          const resolved: any = await activeClient.invoke(new Api.contacts.ResolveUsername({ username: rawUsername }));
+          const targetChat = resolved && resolved.chats && resolved.chats[0];
+          if (!targetChat) {
+            return res.json({
+              success: true,
+              url: cleanUrl,
+              isValid: false,
+              isActive: false,
+              isBlacklisted: false,
+              status: 'inactive',
+              reason: 'المعرف تابع لمستخدم شخصي أو بوت وليس مجموعة',
+            });
+          }
+
+          const isBroadcast = Boolean(targetChat.broadcast);
+          return res.json({
+            success: true,
+            url: cleanUrl,
+            isValid: true,
+            isActive: true,
+            isBlacklisted: false,
+            status: 'active',
+            type: isBroadcast && !targetChat.megagroup ? 'channel' : 'public_group',
+            chatTitle: targetChat.title,
+            reason:
+              isBroadcast && !targetChat.megagroup
+                ? 'قناة عامة نشطة (سيتم تخطيها)'
+                : 'مجموعة عامة نشطة وجاهزة للانضمام',
+          });
+        } catch (resolveErr: any) {
+          const errMsg = resolveErr?.errorMessage || resolveErr?.message || '';
+          if (errMsg.includes('USERNAME_NOT_OCCUPIED') || errMsg.includes('USERNAME_INVALID')) {
+            return res.json({
+              success: true,
+              url: cleanUrl,
+              isValid: false,
+              isActive: false,
+              isBlacklisted: false,
+              status: 'inactive',
+              reason: 'اسم المستخدم غير موجود أو محذوف (USERNAME_NOT_OCCUPIED)',
+            });
+          }
+          return res.json({
+            success: true,
+            url: cleanUrl,
+            isValid: false,
+            isActive: false,
+            isBlacklisted: false,
+            status: 'inactive',
+            reason: `تعذر فحص المعرف: ${errMsg}`,
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        url: cleanUrl,
+        isValid: true,
+        isActive: true,
+        isBlacklisted: false,
+        status: 'active',
+        type: 'public_group',
+        reason: 'صيغة معرف عامة صالحة ومطابقة (فحص نسقي داخلي)',
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message });
+    }
+  });
+
+  // Blacklist Management APIs
+  app.get('/api/telegram/radar/blacklist', (req, res) => {
+    try {
+      const list = sqliteDatabase.getLinkBlacklist();
+      res.json({ success: true, blacklist: list });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message });
+    }
+  });
+
+  app.post('/api/telegram/radar/blacklist/add', (req, res) => {
+    try {
+      const { pattern, type, reason } = req.body || {};
+      if (!pattern) {
+        return res.status(400).json({ success: false, error: 'النمط أو الرابط مطلوب' });
+      }
+      const ok = sqliteDatabase.addLinkBlacklist(String(pattern), type || 'keyword', reason || 'حظر يدوي');
+      res.json({ success: ok });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message });
+    }
+  });
+
+  app.post('/api/telegram/radar/blacklist/delete', (req, res) => {
+    try {
+      const { id } = req.body || {};
+      if (!id) {
+        return res.status(400).json({ success: false, error: 'المعرف مطلوب' });
+      }
+      const ok = sqliteDatabase.removeLinkBlacklist(String(id));
+      res.json({ success: ok });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message });
     }

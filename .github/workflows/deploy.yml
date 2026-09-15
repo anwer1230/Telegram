@@ -4,12 +4,22 @@ on:
   push:
     branches:
       - main
+      - master
+  workflow_dispatch:
 
 jobs:
   deploy:
     name: Trigger Render Deployment
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Render Deploy
+      - name: Trigger Render Deploy Hook
         run: |
-          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          DEPLOY_URL="${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          if [ -z "$DEPLOY_URL" ]; then
+            DEPLOY_URL="https://api.render.com/deploy/srv-d8rb0avavr4c73ebc2pg?key=1_fvBe3GPP8"
+          fi
+          echo "Triggering Render auto-deploy for commit $GITHUB_SHA..."
+          curl -s -S -X POST "$DEPLOY_URL"
+          echo ""
+          echo "Render deployment triggered successfully!"
+

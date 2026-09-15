@@ -59,8 +59,8 @@ export interface StoredPrivateAutoReply {
 export interface LinkRadarLogItem {
   id: string;
   url: string;
-  type: 'public_group' | 'private_channel' | 'channel' | 'unknown';
-  action: 'joined' | 'skipped_private_channel' | 'skipped_channel' | 'throttled_hour' | 'throttled_cooldown' | 'failed' | 'already_member';
+  type: 'public_group' | 'private_channel' | 'channel' | 'unknown' | 'blacklisted' | 'expired_invite' | 'invalid_username';
+  action: 'joined' | 'skipped_private_channel' | 'skipped_channel' | 'throttled_hour' | 'throttled_cooldown' | 'failed' | 'already_member' | 'skipped_blacklisted' | 'skipped_inactive';
   chat_title?: string;
   chat_id?: string;
   source_chat_id?: string;
@@ -68,6 +68,14 @@ export interface LinkRadarLogItem {
   sender_name?: string;
   saved_message_sent?: boolean;
   details?: string;
+  created_at: number;
+}
+
+export interface LinkBlacklistItem {
+  id: string;
+  pattern: string;
+  type: 'keyword' | 'domain' | 'url' | 'username';
+  reason?: string;
   created_at: number;
 }
 
@@ -289,10 +297,19 @@ export class SQLiteDatabaseService {
           created_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS link_blacklist (
+          id TEXT PRIMARY KEY,
+          pattern TEXT NOT NULL UNIQUE,
+          type TEXT NOT NULL DEFAULT 'keyword',
+          reason TEXT,
+          created_at INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_cached_messages_chat_date ON cached_messages(chat_id, date);
         CREATE INDEX IF NOT EXISTS idx_cached_messages_chat_rawdate ON cached_messages(chat_id, raw_date);
         CREATE INDEX IF NOT EXISTS idx_link_radar_created_at ON link_radar_logs(created_at);
         CREATE INDEX IF NOT EXISTS idx_link_radar_action ON link_radar_logs(action);
+        CREATE INDEX IF NOT EXISTS idx_link_blacklist_pattern ON link_blacklist(pattern);
       `);
 
       this.migrateInitialData();
@@ -418,6 +435,28 @@ export class SQLiteDatabaseService {
         }
 
         console.log(`[SQLite] Successfully migrated ${initialBatches.length} batch message records into SQLite.`);
+      }
+
+      // 3. Check link_blacklist table
+      const blacklistCountRow = this.db.get<{ count: number }>('SELECT count(*) as count FROM link_blacklist');
+      const blacklistCount = Number(blacklistCountRow?.count || 0);
+
+      if (blacklistCount === 0) {
+        console.log('[SQLite] Seeding default link blacklist rules...');
+        const defaultPatterns = [
+          { pattern: 'drainer', type: 'keyword', reason: 'سحب وتصيد محافظ وعملات رقمية' },
+          { pattern: 'airdrop_claim', type: 'keyword', reason: 'صفحات وهمية لسحب العملات' },
+          { pattern: 'free_crypto', type: 'keyword', reason: 'احتيال عملات رقمية وهمية' },
+          { pattern: 'hack_telegram', type: 'keyword', reason: 'صفحات اختراق وتصيد تيليجرام' },
+          { pattern: 'invest_profit_200', type: 'keyword', reason: 'مخطط احتيال بونزي مالي' },
+          { pattern: 't.me/joinchat/AAAAAF', type: 'url', reason: 'رابط دعوة احتيالي مبلغ عنه' },
+          { pattern: 'gift_nitro', type: 'keyword', reason: 'احتيال روابط الهدايا المجانية المزيفة' },
+          { pattern: 'fake_bot', type: 'username', reason: 'بوتات احتيالية مشبوهة' },
+        ];
+
+        for (const p of defaultPatterns) {
+          this.addLinkBlacklist(p.pattern, p.type as any, p.reason);
+        }
       }
     } catch (e) {
       console.error('[SQLite] migrateInitialData error:', e);
@@ -1069,6 +1108,105 @@ export class SQLiteDatabaseService {
       console.warn('[SQLite] getLastLinkRadarJoinTime warning:', e);
       return 0;
     }
+  }
+
+  // =========================================================================
+  // LINK BLACKLIST & INTERNAL VALIDATION ENGINE
+  // =========================================================================
+
+  public getLinkBlacklist(): LinkBlacklistItem[] {
+    if (!this.db) return [];
+    try {
+      const rows = this.db.all<any>('SELECT * FROM link_blacklist ORDER BY created_at DESC');
+      return (rows || []).map((r) => ({
+        id: r.id,
+        pattern: r.pattern,
+        type: r.type,
+        reason: r.reason,
+        created_at: r.created_at,
+      }));
+    } catch (e) {
+      console.warn('[SQLite] getLinkBlacklist error:', e);
+      return [];
+    }
+  }
+
+  public addLinkBlacklist(
+    pattern: string,
+    type: 'keyword' | 'domain' | 'url' | 'username' = 'keyword',
+    reason = 'تم الحظر بواسطة درع الفحص الداخلي'
+  ): boolean {
+    if (!this.db || !pattern) return false;
+    try {
+      const cleanPattern = pattern.trim().toLowerCase();
+      const id = `bl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      this.db.run(
+        `INSERT OR REPLACE INTO link_blacklist (id, pattern, type, reason, created_at) VALUES (?, ?, ?, ?, ?)`,
+        [id, cleanPattern, type, reason, Date.now()]
+      );
+      return true;
+    } catch (e) {
+      console.warn('[SQLite] addLinkBlacklist error:', e);
+      return false;
+    }
+  }
+
+  public removeLinkBlacklist(idOrPattern: string): boolean {
+    if (!this.db || !idOrPattern) return false;
+    try {
+      this.db.run('DELETE FROM link_blacklist WHERE id = ? OR pattern = ?', [
+        idOrPattern,
+        idOrPattern.toLowerCase().trim(),
+      ]);
+      return true;
+    } catch (e) {
+      console.warn('[SQLite] removeLinkBlacklist error:', e);
+      return false;
+    }
+  }
+
+  public checkLinkAgainstBlacklist(url: string): { isBlacklisted: boolean; matchedPattern?: string; reason?: string } {
+    if (!url) return { isBlacklisted: false };
+    const cleanUrl = url.trim().toLowerCase();
+
+    // 1. Built-in hardcoded blacklist patterns (common scam, drainer, phishing, illegal links)
+    const defaultBlocked = [
+      { pattern: 'drainer', reason: 'سحب وتصيد محافظ وعملات رقمية مشبوهة' },
+      { pattern: 'airdrop_claim', reason: 'صفحات وهمية لسحب العملات الرقمية' },
+      { pattern: 'free_crypto', reason: 'احتيال عملات رقمية مجانية وهمية' },
+      { pattern: 't.me/joinchat/AAAAAF', reason: 'رابط دعوة احتيالي معطل ومبلغ عنه' },
+      { pattern: 'hack_telegram', reason: 'صفحات اختراق وتصيد تيليجرام' },
+      { pattern: 'invest_profit_200', reason: 'مخطط احتيال مالي بونزي' },
+      { pattern: 'fake_bot', reason: 'بوتات احتيالية مشبوهة' },
+      { pattern: 'gift_nitro', reason: 'احتيال روابط الهدايا المجانية المزيفة' },
+    ];
+
+    for (const item of defaultBlocked) {
+      if (cleanUrl.includes(item.pattern.toLowerCase())) {
+        return { isBlacklisted: true, matchedPattern: item.pattern, reason: item.reason };
+      }
+    }
+
+    // 2. Dynamic database blacklist
+    if (this.db) {
+      try {
+        const items = this.getLinkBlacklist();
+        for (const item of items) {
+          const pat = item.pattern.toLowerCase();
+          if (pat && cleanUrl.includes(pat)) {
+            return {
+              isBlacklisted: true,
+              matchedPattern: item.pattern,
+              reason: item.reason || 'مدرج بالقائمة السوداء الداخلية',
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('[SQLite] checkLinkAgainstBlacklist db query warning:', e);
+      }
+    }
+
+    return { isBlacklisted: false };
   }
 
   // =========================================================================

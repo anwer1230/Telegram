@@ -15,8 +15,14 @@ services:
         value: "22043994"
       - key: API_HASH
         value: "56f64582b363d367280db96586b97801"
+      - key: TELEGRAM_API_ID
+        value: "22043994"
+      - key: TELEGRAM_API_HASH
+        value: "56f64582b363d367280db96586b97801"
       - key: TDLIB_API_HASH
         value: "56f64582b363d367280db96586b97801"
+      - key: RENDER_DEPLOY_HOOK_URL
+        value: "https://api.render.com/deploy/srv-d8rb0avavr4c73ebc2pg?key=1_fvBe3GPP8"
       - key: SESSION_SECRET
         generateValue: true
       - key: VAPID_PUBLIC_KEY

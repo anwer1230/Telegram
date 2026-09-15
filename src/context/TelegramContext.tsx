@@ -47,6 +47,7 @@ import { themeController } from '../core/ThemeController';
 import { logTelemetry } from '../utils/telemetry';
 import { PinnedAndForwardHelper } from '../core/PinnedAndForwardHelper';
 import { OpenTelegramLink } from '../core/OpenTelegramLink';
+import { validateLinkFastSync, validateLinkAsync } from '../utils/linkValidator';
 import {
   messagesController,
   messagesStorage,
@@ -3266,6 +3267,23 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const country = detectLinkCountry(url);
         const creationDate = detectLinkCreationDate(url);
 
+        // Run automatic internal validation step before processing
+        const syncCheck = validateLinkFastSync(url);
+
+        let initialStatus: CapturedLink['status'] = 'valid';
+        let initialStatusText = '✅ سليم ونشط';
+        let initialJoinStatus = 'جاهز للانضمام';
+
+        if (syncCheck.isBlacklisted) {
+          initialStatus = 'blacklisted';
+          initialStatusText = '⛔ محظور بالقائمة السوداء';
+          initialJoinStatus = `محظور (${syncCheck.reason || 'قائمة سوداء'})`;
+        } else if (!syncCheck.isActive) {
+          initialStatus = 'inactive';
+          initialStatusText = '❌ غير نشط / تالف';
+          initialJoinStatus = `تخطي (${syncCheck.reason || 'غير نشط'})`;
+        }
+
         const newCaptured: CapturedLink = {
           id: `link_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           url,
@@ -3283,11 +3301,61 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           memberCount: Math.floor(4500 + Math.random() * 95000),
           joined: false,
           autoJoined: false,
-          status: 'valid',
-          status_text: '✅ سليم',
+          status: initialStatus,
+          status_text: initialStatusText,
+          join_status: initialJoinStatus,
           creation_date: creationDate,
           country: country,
+          isBlacklisted: syncCheck.isBlacklisted,
+          blacklistReason: syncCheck.reason,
+          isActive: syncCheck.isActive,
+          validationReason: syncCheck.reason,
+          validationStatus: syncCheck.status as any,
         };
+
+        // Asynchronous live validation against server MTProto engine
+        validateLinkAsync(url).then((liveRes) => {
+          setCapturedLinks((current) =>
+            current.map((item) => {
+              if (item.url.toLowerCase() !== url.toLowerCase()) return item;
+
+              if (liveRes.isBlacklisted) {
+                return {
+                  ...item,
+                  status: 'blacklisted',
+                  status_text: '⛔ محظور بالقائمة السوداء',
+                  join_status: `تم المنع: ${liveRes.reason}`,
+                  isBlacklisted: true,
+                  blacklistReason: liveRes.reason,
+                  isActive: false,
+                  validationStatus: 'blacklisted',
+                  validationReason: liveRes.reason,
+                };
+              }
+
+              if (!liveRes.isActive) {
+                return {
+                  ...item,
+                  status: 'inactive',
+                  status_text: '❌ غير نشط / منتهي',
+                  join_status: `تخطي: ${liveRes.reason}`,
+                  isActive: false,
+                  validationStatus: 'inactive',
+                  validationReason: liveRes.reason,
+                };
+              }
+
+              return {
+                ...item,
+                isActive: true,
+                validationStatus: 'active',
+                validationReason: liveRes.reason,
+                chat_title: liveRes.chatTitle || item.chat_title,
+                extractedTitle: liveRes.chatTitle || item.extractedTitle,
+              };
+            })
+          );
+        });
 
         // Dispatch custom event for real-time listeners across modals/components
         try {
@@ -3307,6 +3375,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   join_status: newCaptured.join_status,
                   creation_date: newCaptured.creation_date,
                   country: newCaptured.country,
+                  isBlacklisted: newCaptured.isBlacklisted,
+                  isActive: newCaptured.isActive,
+                  validationReason: newCaptured.validationReason,
                 },
               },
             })
@@ -3315,10 +3386,15 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           console.warn('Dispatch link_detected failed:', e);
         }
 
-        if (autoJoinLinksEnabled) {
+        // Only auto-join if the link passed the internal validation (not blacklisted and active)
+        if (autoJoinLinksEnabled && !syncCheck.isBlacklisted && syncCheck.isActive) {
           setTimeout(() => {
             executeLinkJoin(newCaptured, true);
           }, 350);
+        } else if (syncCheck.isBlacklisted) {
+          console.log(`[LinkGuard] ⛔ Intercepted blacklisted link before auto-join: ${url}`);
+        } else if (!syncCheck.isActive) {
+          console.log(`[LinkGuard] ❌ Intercepted inactive link before auto-join: ${url}`);
         }
 
         return [newCaptured, ...prev];
@@ -3327,6 +3403,33 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const executeLinkJoin = async (link: CapturedLink, isAuto = false) => {
+    // Critical Internal Validation Check: Ensure link is not blacklisted or inactive
+    if (link.isBlacklisted || link.status === 'blacklisted') {
+      console.warn('[TelegramContext] Refusing to auto-join blacklisted link:', link.url);
+      showToast(`⛔ درع الرادار: تم حظر الرابط تلقائياً لأنه مدرج بالقائمة السوداء`, 'warning');
+      setCapturedLinks((prev) =>
+        prev.map((l) =>
+          l.id === link.id
+            ? { ...l, status: 'blacklisted', status_text: '⛔ محظور بالقائمة السوداء', join_status: 'تم الحظر بأمان' }
+            : l
+        )
+      );
+      return;
+    }
+
+    if (link.status === 'inactive' || link.isActive === false) {
+      console.warn('[TelegramContext] Refusing to auto-join inactive/expired link:', link.url);
+      showToast(`❌ درع الرادار: تم تخطي الرابط لكونه غير نشط أو منتهي الصلاحية`, 'info');
+      setCapturedLinks((prev) =>
+        prev.map((l) =>
+          l.id === link.id
+            ? { ...l, status: 'inactive', status_text: '❌ غير نشط / منتهي', join_status: 'تم التخطي لعدم الصلاحية' }
+            : l
+        )
+      );
+      return;
+    }
+
     const rawTarget = link.url.split('/').pop()?.replace('+', '') || 'telegram_group';
     const newChatId = `chat_${rawTarget.toLowerCase().replace(/[^a-z0-9_]/g, '_')}`;
     const creationDate = link.creation_date || detectLinkCreationDate(link.url);

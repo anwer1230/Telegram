@@ -422,12 +422,17 @@ export interface CapturedLink {
   joined: boolean;
   joinedAt?: string;
   autoJoined?: boolean;
-  status: 'valid' | 'invalid' | 'joined' | 'already' | 'pending' | 'failed' | 'joining' | 'already_member' | 'expired';
+  status: 'valid' | 'invalid' | 'joined' | 'already' | 'pending' | 'failed' | 'joining' | 'already_member' | 'expired' | 'blacklisted' | 'inactive';
   status_text?: string;
   join_status?: string;
   username?: string;
   creation_date?: string;
   country?: string;
+  isBlacklisted?: boolean;
+  blacklistReason?: string;
+  isActive?: boolean;
+  validationReason?: string;
+  validationStatus?: 'active' | 'inactive' | 'blacklisted' | 'checking';
 }
 
 // 1. Sender & Scheduler Types
