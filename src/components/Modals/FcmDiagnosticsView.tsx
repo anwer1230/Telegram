@@ -21,9 +21,11 @@ import {
   Smartphone,
   Eye,
   Info,
+  Flame,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import { FcmPushPacket } from '../../types';
+import { fcmManager } from '../../services/FcmManager';
 
 export const FcmDiagnosticsView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const {
@@ -48,6 +50,51 @@ export const FcmDiagnosticsView: React.FC<{ onBack: () => void }> = ({ onBack })
   const [customBody, setCustomBody] = useState('New incoming message notification');
   const [selectedTargetDialog, setSelectedTargetDialog] = useState<string>(activeChatId || (chats[0]?.id || 'chat_durov'));
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isEnablingFcm, setIsEnablingFcm] = useState(false);
+
+  const handleEnableFcm = async () => {
+    setIsEnablingFcm(true);
+    try {
+      const res = await fcmManager.requestPermissionAndEnable();
+      if (res.success) {
+        showToast(
+          isArabic
+            ? 'تم تفعيل إشعارات الخلفية عبر FCM بنجاح 🔔'
+            : 'Background notifications enabled via FCM 🔔',
+          '✅'
+        );
+        requestPushPermission();
+      } else {
+        showToast(
+          isArabic
+            ? `تعذر تفعيل الإشعارات: ${res.error || 'تم الرفض'}`
+            : `Failed to enable notifications: ${res.error}`,
+          '⚠️'
+        );
+      }
+    } finally {
+      setIsEnablingFcm(false);
+    }
+  };
+
+  const handleRealFcmTest = async () => {
+    setIsSimulating(true);
+    try {
+      const res = await fcmManager.sendTestNotification({
+        title: customTitle || 'تيليجرام: إشعار الخلفية',
+        body: customBody || 'تم استلام الإشعار في الخلفية عبر Firebase Cloud Messaging!',
+        chatId: selectedTargetDialog,
+      });
+      if (res.success) {
+        showToast(
+          isArabic ? 'تم إرسال إشعار FCM حقيقي في الخلفية' : 'Real FCM background push dispatched',
+          '🚀'
+        );
+      }
+    } finally {
+      setIsSimulating(false);
+    }
+  };
 
   const copyToken = () => {
     if (fcmDiagnostic.token) {
@@ -251,15 +298,48 @@ export const FcmDiagnosticsView: React.FC<{ onBack: () => void }> = ({ onBack })
             </div>
           </div>
 
-          {fcmDiagnostic.permissionState !== 'granted' && (
+          {/* FCM Project Credentials & Daemon Info */}
+          <div className="bg-[#0e1621] p-3 rounded-xl border border-white/5 space-y-2 text-xs">
+            <div className="flex items-center justify-between text-gray-400">
+              <span className="flex items-center gap-1.5 font-medium text-white">
+                <Flame className="w-3.5 h-3.5 text-amber-500" />
+                <span>{isArabic ? 'مشروع Firebase المرتبط' : 'Bound Firebase Project'}</span>
+              </span>
+              <span className="font-mono text-amber-400 font-bold">telegramclone-de6f2</span>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-gray-400">
+              <span>{isArabic ? 'رقم المرسل (Sender ID):' : 'Sender ID:'}</span>
+              <span className="font-mono text-gray-200 font-semibold">920850190750</span>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-gray-400">
+              <span>{isArabic ? 'خادم الخلفية (Daemon):' : 'Background Daemon:'}</span>
+              <span className="font-mono text-emerald-400 font-semibold">/firebase-messaging-sw.js</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2">
             <button
-              onClick={() => requestPushPermission()}
-              className="w-full py-2.5 bg-[#2481cc] hover:bg-[#1f6fa8] active:bg-[#195a88] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-colors"
+              onClick={handleEnableFcm}
+              disabled={isEnablingFcm}
+              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-colors"
             >
-              <Bell className="w-4 h-4" />
-              <span>{isArabic ? 'طلب إذن إشعارات النظام من المتصفح' : 'Grant Browser Push Permission'}</span>
+              <BellRing className={`w-4 h-4 ${isEnablingFcm ? 'animate-spin' : ''}`} />
+              <span>
+                {isArabic ? 'تفعيل الإشعارات في الخلفية عبر FCM' : 'Enable Background FCM Push'}
+              </span>
             </button>
-          )}
+
+            <button
+              onClick={handleRealFcmTest}
+              disabled={isSimulating}
+              className="flex-1 py-2.5 bg-[#2481cc] hover:bg-[#1f6fa8] active:bg-[#195a88] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-colors"
+            >
+              <Zap className={`w-4 h-4 ${isSimulating ? 'animate-spin' : ''}`} />
+              <span>
+                {isArabic ? 'إرسال إشعار FCM حقيقي في الخلفية' : 'Dispatch Real FCM Background Push'}
+              </span>
+            </button>
+          </div>
         </div>
 
         {/* 2. Push Simulation & Diagnostics Test Box */}

@@ -13156,7 +13156,7 @@ Please provide the concise summary.`;
   });
 
   // 2.1 Register FCM Device Token (from Android or Web devices)
-  app.post('/api/telegram/firebase/register-device-token', (req, res) => {
+  app.post(['/api/fcm/register-token', '/api/fcm/register', '/api/telegram/firebase/register-device-token'], (req, res) => {
     try {
       const { token, platform = 'android', deviceName } = req.body;
       if (!token || typeof token !== 'string') {
@@ -13170,7 +13170,7 @@ Please provide the concise summary.`;
         success: true,
         token: cleanToken,
         platform,
-        deviceName: deviceName || 'Android Device',
+        deviceName: deviceName || 'Android / Web Device',
         totalRegisteredTokens: registeredFcmTokens.size,
       });
     } catch (e: any) {
@@ -13178,24 +13178,74 @@ Please provide the concise summary.`;
     }
   });
 
+  // 2.2 Get FCM Service Status & Project Configuration
+  app.get(['/api/fcm/status', '/api/telegram/firebase/status'], (req, res) => {
+    res.json({
+      success: true,
+      fcmEnabled: true,
+      projectId: 'telegramclone-de6f2',
+      messagingSenderId: '920850190750',
+      totalRegisteredTokens: registeredFcmTokens.size,
+      hasServiceAccountKey: Boolean(firebaseServiceAccount.privateKey),
+      totalWebPushSubscriptions: webPushSubscriptions.size,
+      serviceWorkerFile: '/firebase-messaging-sw.js',
+      activeChannel: 'tg_fcm_channel_default',
+    });
+  });
+
+  // 2.3 Get Client Firebase Config
+  app.get(['/api/fcm/config', '/api/telegram/firebase/config'], (req, res) => {
+    res.json({
+      success: true,
+      apiKey: 'AIzaSyAiTBE7zpzAP9Yn7M0lZ9IC0EVPNxuQ92Y',
+      projectId: 'telegramclone-de6f2',
+      messagingSenderId: '920850190750',
+      appId: '1:920850190750:android:f65e389c2be73be145868f',
+      vapidPublicKey: VAPID_PUBLIC_KEY,
+    });
+  });
+
   // 3. Test Firebase Push Delivery with Custom Ringtone & Real FCM Dispatch
-  app.post('/api/telegram/firebase/test-push', async (req, res) => {
+  app.post(['/api/fcm/test', '/api/telegram/firebase/test-push', '/api/telegram/push/send-test'], async (req, res) => {
     try {
-      const { chatId, title = 'تجربة إشعار تليجرام', body = 'هذا إشعار تجريبي لاختبار النغمة المخصصة عبر Firebase Messaging', sound = 'default', token } = req.body;
+      const { chatId = 'chat_general', dialog_id, title = 'تيليجرام: إشعار الخلفية (FCM)', body = 'تم استلام الإشعار في الخلفية عبر FCM بنجاح 🚀', sound = 'default', token } = req.body;
+      const targetDialogId = dialog_id || chatId;
       const fcmChannelId = `tg_fcm_channel_${sound || 'default'}`;
 
       const fcmLiveResult = await sendFirebaseNotification({
-        chatId,
+        chatId: targetDialogId,
         title,
         body,
         sound,
         token,
+        data: {
+          dialog_id: targetDialogId,
+          chat_id: targetDialogId,
+          chatId: targetDialogId,
+          url: `/?dialog_id=${encodeURIComponent(targetDialogId)}#/chat/${encodeURIComponent(targetDialogId)}`,
+        },
       });
+
+      // Also trigger WebPush dispatch for subscribers
+      sendWebPushNotificationToSubscribers({
+        title,
+        body,
+        icon: 'https://telegram.org/img/t_logo.png',
+        badge: '/telegram-logo.svg',
+        tag: `tg_test_push_${Date.now()}`,
+        data: {
+          dialog_id: targetDialogId,
+          chatId: targetDialogId,
+          url: `/?dialog_id=${encodeURIComponent(targetDialogId)}#/chat/${encodeURIComponent(targetDialogId)}`,
+          fcmChannelId,
+          timestamp: Date.now(),
+        },
+      }).catch(() => {});
 
       const fcmSimulation = {
         success: true,
         messageId: fcmLiveResult.messageId || `fcm_msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-        targetChatId: chatId,
+        targetChatId: targetDialogId,
         deliveredSound: sound,
         fcmChannelId,
         firebaseServiceAccount: 'firebase-adminsdk-fbsvc@telegramclone-de6f2.iam.gserviceaccount.com',
@@ -13250,6 +13300,17 @@ Please provide the concise summary.`;
 
       webPushSubscriptions.set(id, record);
       saveSubscriptionsToDisk(webPushSubscriptions);
+
+      // If subscription endpoint is from Firebase Cloud Messaging (Chrome / Android / Edge), register token directly
+      if (subscription.endpoint && subscription.endpoint.includes('/fcm/send/')) {
+        const fcmToken = subscription.endpoint.split('/fcm/send/')[1];
+        if (fcmToken && fcmToken.trim()) {
+          registeredFcmTokens.add(fcmToken.trim());
+          saveFcmTokensToDisk(registeredFcmTokens);
+          console.log(`[FCM] Auto-linked WebPush FCM device token: ${fcmToken.trim().substring(0, 15)}... (Total FCM: ${registeredFcmTokens.size})`);
+        }
+      }
+
       console.log(`[WebPush] Subscription saved successfully (ID: ${id.substring(0, 10)}..., Total: ${webPushSubscriptions.size})`);
 
       res.json({

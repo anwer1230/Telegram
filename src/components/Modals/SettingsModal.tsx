@@ -13,6 +13,7 @@ import {
   MessageSquare,
   ShieldCheck,
   Bell,
+  BellRing,
   PieChart,
   Folder,
   Laptop,
@@ -117,6 +118,7 @@ import { AppUpdateSettingsView } from './AppUpdateSettingsView';
 import { AccountSettingsView } from './AccountSettingsView';
 import { AccountProfileSettings } from '../Settings/AccountProfileSettings';
 import { StorageBreakdownComponent } from '../Settings/StorageBreakdownComponent';
+import { fcmManager } from '../../services/FcmManager';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -2116,13 +2118,40 @@ const NotificationsSoundsView: React.FC<{ onBack: () => void }> = ({ onBack }) =
             </div>
           </div>
 
-          <button
-            onClick={() => setSettingsSubPage('fcm_diagnostics')}
-            className="w-full py-2.5 bg-[#2481cc] hover:bg-[#1f6fa8] active:bg-[#195a88] rounded-xl text-xs font-bold text-white flex items-center justify-center gap-2 transition-colors shadow-md"
-          >
-            <Radio className="w-4 h-4" />
-            <span>{isArabic ? 'فتح لوحة التشخيص ومراقبة الحزم (FCM Logs)' : 'Open FCM Diagnostics & Log Viewer'}</span>
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                const res = await fcmManager.requestPermissionAndEnable();
+                if (res.success) {
+                  showToast(
+                    isArabic
+                      ? 'تم تفعيل إشعارات الخلفية عبر FCM بنجاح 🔔'
+                      : 'FCM Background Notifications Enabled 🔔',
+                    '✅'
+                  );
+                } else {
+                  showToast(
+                    isArabic
+                      ? `تعذر التفعيل: ${res.error || 'تم الرفض'}`
+                      : `Failed: ${res.error}`,
+                    '⚠️'
+                  );
+                }
+              }}
+              className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-1.5 transition-colors shadow-md"
+            >
+              <BellRing className="w-3.5 h-3.5" />
+              <span>{isArabic ? 'تفعيل إشعارات الخلفية (FCM)' : 'Enable FCM Background'}</span>
+            </button>
+
+            <button
+              onClick={() => setSettingsSubPage('fcm_diagnostics')}
+              className="py-2 px-3 bg-[#2481cc] hover:bg-[#1f6fa8] active:bg-[#195a88] rounded-xl text-xs font-bold text-white flex items-center justify-center gap-1.5 transition-colors shadow-md"
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>{isArabic ? 'التشخيص والسجلات' : 'Logs'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Test Notification Trigger */}

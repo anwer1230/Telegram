@@ -655,6 +655,23 @@ async function showTelegramPushNotification(payload) {
       remoteMessage,
       timestamp: Date.now(),
     });
+    client.postMessage({
+      type: 'FCM_PUSH_RECEIVED',
+      dialog_id: effectiveDialogId,
+      chatId: effectiveDialogId,
+      packet: {
+        id: `fcm_${messageId}`,
+        dialog_id: effectiveDialogId,
+        sender_id: raw.sender_id || effectiveDialogId,
+        sender_name: senderName,
+        title,
+        body: displayText,
+        sound,
+        timestamp: new Date().toISOString(),
+        rawPayload: raw,
+      },
+      timestamp: Date.now(),
+    });
   });
 }
 

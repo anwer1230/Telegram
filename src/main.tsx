@@ -49,6 +49,11 @@ if ('serviceWorker' in navigator) {
       window.dispatchEvent(new CustomEvent('telegram:session_revoked', { detail: { reason } }));
     });
   }).catch(() => {});
+
+  // Firebase Cloud Messaging (FCM) Background Notification Service initialization
+  import('./services/FcmManager').then(({ fcmManager }) => {
+    fcmManager.initBackground();
+  }).catch(() => {});
 }
 
 createRoot(document.getElementById('root')!).render(
