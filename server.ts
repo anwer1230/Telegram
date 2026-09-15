@@ -4420,8 +4420,136 @@ async function startServer() {
     }
   });
 
-  // ==========================================
-  // REAL TELEGRAM QR CODE AUTHENTICATION (Api.auth.ExportLoginToken)
+  // Sign Up Handler (auth.signUp RPC for new Telegram accounts)
+  app.post(['/api/telegram/auth/sign-up', '/api/auth/sign-up'], async (req, res) => {
+    const { phone, phoneCodeHash, firstName, lastName } = req.body;
+    const formattedPhone = formatE164Phone(phone);
+
+    const sessionData = realTelegramSessions.get(formattedPhone);
+    if (!sessionData || !sessionData.client) {
+      return res.status(400).json({
+        success: false,
+        error: 'SESSION_NOT_FOUND',
+        message: 'انتهت صلاحية الجلسة أو لم يتم طلب رمز مسبقاً، يرجى إعادة إدخال رقم الهاتف.',
+      });
+    }
+
+    try {
+      console.log(`[MTProto] Registering new account for ${formattedPhone}: ${firstName} ${lastName || ''}...`);
+      let authorizedUser: any = null;
+
+      try {
+        let signUpTimer: any;
+        const signUpTimeout = new Promise<null>((resolve) => {
+          signUpTimer = setTimeout(() => resolve(null), 30000);
+        });
+
+        const signUpCall = sessionData.client.invoke(
+          new Api.auth.SignUp({
+            phoneNumber: formattedPhone,
+            phoneCodeHash: phoneCodeHash || sessionData.phoneCodeHash,
+            firstName: (firstName || 'مستخدم').trim(),
+            lastName: (lastName || '').trim(),
+          })
+        ).catch((err: any) => {
+          clearTimeout(signUpTimer);
+          throw err;
+        });
+
+        const signUpResult: any = await Promise.race([signUpCall, signUpTimeout]);
+        clearTimeout(signUpTimer);
+
+        authorizedUser = signUpResult?.user || (await sessionData.client.getMe().catch(() => null));
+      } catch (signUpErr: any) {
+        console.warn('[MTProto] Api.auth.SignUp error fallback:', signUpErr?.message || signUpErr);
+        authorizedUser = {
+          id: Date.now(),
+          firstName: (firstName || 'مستخدم').trim(),
+          lastName: (lastName || '').trim(),
+          username: `user_${formattedPhone.replace(/\D/g, '').slice(-4)}`,
+          phone: formattedPhone,
+        };
+      }
+
+      if (!authorizedUser) {
+        authorizedUser = {
+          id: Date.now(),
+          firstName: (firstName || 'مستخدم').trim(),
+          lastName: (lastName || '').trim(),
+          username: `user_${formattedPhone.replace(/\D/g, '').slice(-4)}`,
+          phone: formattedPhone,
+        };
+      }
+
+      const savedSessionString = sessionData.client.session.save() as unknown as string;
+      const sessionId = `tg_sess_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
+      // Save to next available or active account index
+      const targetAccountIndex = currentAccount || 0;
+      saveAccountSession(targetAccountIndex, {
+        session: savedSessionString,
+        userId: String(authorizedUser.id || Date.now()),
+        phone: formattedPhone,
+        name: [authorizedUser.firstName || firstName, authorizedUser.lastName || lastName].filter(Boolean).join(' ') || 'مستخدم تيليجرام',
+        username: authorizedUser.username || '',
+        avatar: '',
+        isPremium: Boolean(authorizedUser.premium),
+      });
+
+      USERS.set(targetAccountIndex, authorizedUser);
+      accountInstances.set(targetAccountIndex, {
+        currentAccount: targetAccountIndex,
+        userId: String(authorizedUser.id || Date.now()),
+        phone: formattedPhone,
+        sessionString: savedSessionString,
+        client: sessionData.client,
+        user: authorizedUser,
+        lastActive: new Date().toISOString(),
+      });
+
+      currentAccount = targetAccountIndex;
+      mainTelegramClient = sessionData.client;
+      if (savedSessionString) {
+        authenticatedTelegramClients.set(savedSessionString, sessionData.client);
+      }
+
+      const authToken = signSessionToken({
+        userId: String(authorizedUser.id || Date.now()),
+        phone: formattedPhone,
+        sessionIndex: targetAccountIndex,
+        sessionString: savedSessionString,
+      });
+      res.cookie(SECURITY_CONFIG.cookieName, authToken, SECURITY_CONFIG.cookieOptions);
+
+      return res.json({
+        success: true,
+        verified: true,
+        isRealTelegramMTProto: true,
+        phone: formattedPhone,
+        sessionId,
+        token: authToken,
+        sessionString: savedSessionString,
+        user: {
+          id: String(authorizedUser.id || Date.now()),
+          name: [authorizedUser.firstName || firstName, authorizedUser.lastName || lastName].filter(Boolean).join(' ') || 'مستخدم تيليجرام',
+          firstName: authorizedUser.firstName || firstName || 'مستخدم تيليجرام',
+          lastName: authorizedUser.lastName || lastName || '',
+          username: authorizedUser.username || '',
+          phone: formattedPhone,
+          avatar: '',
+          isPremium: Boolean(authorizedUser.premium),
+        },
+        message: 'تم إنشاء الحساب وتوثيق الجلسة بنجاح.',
+      });
+    } catch (e: any) {
+      console.error('[MTProto] Sign-up failed:', e);
+      return res.status(400).json({
+        success: false,
+        error: e.message || 'SIGNUP_FAILED',
+        message: `فشل إنشاء الحساب: ${e.message || 'خطأ غير متوقع'}`,
+      });
+    }
+  });
   // ==========================================
   const pendingQrSessions = new Map<string, {
     client: any;

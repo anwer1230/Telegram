@@ -65,7 +65,11 @@ export class LoginController {
     try {
       const resp = await fetch('/api/telegram/auth/send-code', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Telegram-Client': 'web',
+        },
         body: JSON.stringify({
           phone: phoneNumber,
           deliveryType,
@@ -126,7 +130,11 @@ export class LoginController {
     try {
       const resp = await fetch('/api/telegram/auth/verify-code', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Telegram-Client': 'web',
+        },
         body: JSON.stringify({
           phone: phoneNumber,
           phoneCodeHash,
@@ -189,7 +197,11 @@ export class LoginController {
     try {
       const resp = await fetch('/api/telegram/auth/sign-up', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Telegram-Client': 'web',
+        },
         body: JSON.stringify({
           phone: phoneNumber,
           phoneCodeHash,
@@ -456,6 +468,11 @@ export class LoginController {
       return isArabic
         ? 'تعذر الاتصال بخوادم تيليجرام. يرجى التحقق من اتصالك بالإنترنت.'
         : 'Unable to connect to Telegram servers. Please check your internet connection.';
+    }
+    if (errorStr.includes('INVALID_CSRF_TOKEN') || errorStr.includes('CSRF')) {
+      return isArabic
+        ? 'تم تحديث جلسة الأمان. يرجى المحاولة مرة أخرى.'
+        : 'Security session refreshed. Please try again.';
     }
 
     return errorStr;

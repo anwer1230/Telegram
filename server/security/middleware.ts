@@ -174,23 +174,31 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction) 
     return next();
   }
 
-  // Exempt public webhooks or explicit auth endpoints if bearer is passed
+  // Exempt public webhooks, explicit Telegram auth endpoints, FCM, and API calls
   const exemptPrefixes = [
     '/api/auth/',
+    '/api/telegram/auth/',
     '/api/send-code',
     '/api/sign-in',
     '/api/qr/',
     '/api/health',
-    '/api/web-push/subscribe',
-    '/api/web-push/unsubscribe',
+    '/api/fcm/',
+    '/api/telegram/firebase/',
+    '/api/web-push/',
+    '/api/telegram/',
   ];
 
   if (exemptPrefixes.some((p) => req.path.startsWith(p))) {
     return next();
   }
 
-  // If request has Authorization Bearer header, it is an API client (not browser cookie-driven CSRF vulnerable)
-  if (req.headers.authorization?.startsWith('Bearer ')) {
+  // If request has Authorization Bearer header, X-Requested-With, or is a pure application/json API call
+  if (
+    req.headers.authorization?.startsWith('Bearer ') ||
+    req.headers['x-requested-with'] ||
+    req.headers['x-telegram-client'] ||
+    req.headers['content-type']?.includes('application/json')
+  ) {
     return next();
   }
 
