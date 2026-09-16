@@ -35,11 +35,11 @@ interface SidebarProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   openModal: (modal: string) => void;
-  badges: {
-    learningSuggestions: number;
-    foundLinks: number;
-    activeJoins: number;
-    directJoinsToday: number;
+  badges?: {
+    learningSuggestions?: number;
+    foundLinks?: number;
+    activeJoins?: number;
+    directJoinsToday?: number;
   };
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
@@ -53,6 +53,7 @@ interface NavItemConfig {
   badge?: string | null;
   badgeColor?: string;
   color: string;
+  iconColorHex: string;
   bgColor: string;
   borderColor: string;
 }
@@ -61,7 +62,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
   openModal,
-  badges,
+  badges = {
+    learningSuggestions: 0,
+    foundLinks: 0,
+    activeJoins: 0,
+    directJoinsToday: 0,
+  },
   mobileOpen = false,
   onCloseMobile,
 }) => {
@@ -71,9 +77,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: "نظام التعلم الذكي",
       icon: Brain,
       faIcon: "fas fa-brain",
-      badge: badges.learningSuggestions ? `${badges.learningSuggestions} مقترح` : "ذكي",
+      badge: (badges?.learningSuggestions ?? 0) > 0 ? `${badges.learningSuggestions} مقترح` : "ذكي",
       badgeColor: "bg-purple-950/80 text-purple-300 border-purple-800/80",
       color: "text-purple-400",
+      iconColorHex: "#a855f7",
       bgColor: "bg-purple-500/15",
       borderColor: "border-purple-500/30",
     },
@@ -85,6 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: "دوري",
       badgeColor: "bg-emerald-950/80 text-emerald-300 border-emerald-800/80",
       color: "text-emerald-400",
+      iconColorHex: "#34d399",
       bgColor: "bg-emerald-500/15",
       borderColor: "border-emerald-500/30",
     },
@@ -93,9 +101,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: "البحث في روابطي",
       icon: Link2,
       faIcon: "fas fa-link",
-      badge: `${badges.foundLinks} رابط`,
+      badge: `${badges?.foundLinks ?? 0} رابط`,
       badgeColor: "bg-cyan-950/80 text-cyan-300 border-cyan-800/80",
       color: "text-cyan-400",
+      iconColorHex: "#22d3ee",
       bgColor: "bg-cyan-500/15",
       borderColor: "border-cyan-500/30",
     },
@@ -107,6 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: "فوري",
       badgeColor: "bg-blue-950/80 text-blue-300 border-blue-800/80",
       color: "text-blue-400",
+      iconColorHex: "#818cf8",
       bgColor: "bg-blue-500/15",
       borderColor: "border-blue-500/30",
     },
@@ -115,9 +125,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: "الانضمام المتقدم",
       icon: Zap,
       faIcon: "fas fa-bolt",
-      badge: badges.activeJoins ? `${badges.activeJoins} جارٍ` : "أمان",
+      badge: (badges?.activeJoins ?? 0) > 0 ? `${badges.activeJoins} جارٍ` : "أمان",
       badgeColor: "bg-amber-950/80 text-amber-300 border-amber-800/80",
       color: "text-amber-400",
+      iconColorHex: "#fbbf24",
       bgColor: "bg-amber-500/15",
       borderColor: "border-amber-500/30",
     },
@@ -129,6 +140,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: "دائم (60s)",
       badgeColor: "bg-rose-950/80 text-rose-300 border-rose-800/80",
       color: "text-rose-400",
+      iconColorHex: "#f43f5e",
       bgColor: "bg-rose-500/15",
       borderColor: "border-rose-500/30",
     },
@@ -140,6 +152,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: "مؤتمت",
       badgeColor: "bg-indigo-950/80 text-indigo-300 border-indigo-800/80",
       color: "text-indigo-400",
+      iconColorHex: "#a855f7",
       bgColor: "bg-indigo-500/15",
       borderColor: "border-indigo-500/30",
     },
@@ -151,6 +164,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: "Gemini AI",
       badgeColor: "bg-violet-950/80 text-violet-300 border-violet-800/80",
       color: "text-violet-400",
+      iconColorHex: "#c084fc",
       bgColor: "bg-violet-500/15",
       borderColor: "border-violet-500/30",
     },
@@ -162,6 +176,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: "Simplified",
       badgeColor: "bg-sky-950/80 text-sky-300 border-sky-800/80",
       color: "text-sky-400",
+      iconColorHex: "#38bdf8",
       bgColor: "bg-sky-500/15",
       borderColor: "border-sky-500/30",
     },
@@ -176,6 +191,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: "حماية",
       badgeColor: "bg-teal-950/80 text-teal-300 border-teal-800/80",
       color: "text-teal-400",
+      iconColorHex: "#14b8a6",
       bgColor: "bg-teal-500/15",
       borderColor: "border-teal-500/30",
     },
@@ -196,16 +212,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onClick={() => handleSelectTab(item.id)}
         className={`w-full min-h-[46px] flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-all active:scale-[0.98] ${
           isActive
-            ? "bg-slate-800/90 text-white border border-slate-700 shadow-md"
+            ? "bg-slate-800/95 text-white border border-slate-700 shadow-md ring-1 ring-purple-500/30"
             : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
         }`}
       >
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          {/* Prominent, guaranteed visible icon container with fixed dimensions and shrink-0 */}
+          {/* Guaranteed visible icon container with fixed 32x32px and shrink-0 */}
           <div
             className={`w-8 h-8 min-w-[32px] min-h-[32px] rounded-lg flex items-center justify-center shrink-0 border transition-transform ${item.bgColor} ${item.borderColor}`}
           >
-            <IconComponent className={`w-4 h-4 shrink-0 ${item.color}`} size={16} />
+            {/* FontAwesome class matching AdvancedFunctionsHub with Lucide fallback */}
+            <i
+              className={`${item.faIcon} text-sm shrink-0`}
+              style={{ color: item.iconColorHex }}
+              aria-hidden="true"
+            />
           </div>
           <div className="text-right min-w-0 flex-1">
             <span className="truncate block font-semibold text-xs text-slate-100">
@@ -225,10 +246,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const sidebarContent = (
-    <>
-      <div className="p-4">
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Scrollable Navigation Body */}
+      <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
         {/* Brand Header */}
-        <div className="flex items-center justify-between px-2 py-3 mb-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
+        <div className="flex items-center justify-between px-2.5 py-3 rounded-xl bg-slate-950/70 border border-slate-800/90 shadow-sm">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/20 shrink-0">
               <Send className="w-5 h-5 -rotate-45" />
@@ -248,7 +270,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {onCloseMobile && (
             <button
               onClick={onCloseMobile}
-              className="lg:hidden w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:text-white active:scale-90 transition-transform"
+              className="md:hidden w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:text-white active:scale-90 transition-transform"
               aria-label="إغلاق القائمة"
             >
               <X className="w-5 h-5" />
@@ -270,7 +292,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <div className="w-8 h-8 min-w-[32px] min-h-[32px] rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center shrink-0 text-blue-400">
-                <LayoutDashboard className="w-4 h-4 shrink-0" size={16} />
+                <i className="fas fa-th-large text-sm shrink-0 text-blue-400" aria-hidden="true" />
               </div>
               <span className="truncate block font-semibold text-xs text-slate-100">
                 لوحة التحكم الشاملة
@@ -305,11 +327,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Account / Session Card in Sidebar Footer */}
-      <div className="p-4 border-t border-slate-800/80 bg-slate-950/40">
-        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800/90 flex items-center justify-between">
+      <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/50 shrink-0">
+        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800/90 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 min-w-[32px] min-h-[32px] rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs shrink-0">
-              <ShieldCheck className="w-4 h-4 shrink-0" size={16} />
+              <i className="fas fa-shield-alt text-xs" />
             </div>
             <div className="text-right">
               <div className="text-xs font-semibold text-slate-200">MTProto Daemon</div>
@@ -321,14 +343,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               openModal("monitoring");
               onCloseMobile?.();
             }}
-            className="min-w-[40px] min-h-[40px] flex items-center justify-center text-xs text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 active:scale-95 transition-transform"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center text-xs text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 active:scale-95 transition-transform"
             title="الإعدادات"
           >
             <Sliders className="w-4 h-4 shrink-0" size={16} />
           </button>
         </div>
       </div>
-    </>
+    </div>
   );
 
   return (
@@ -336,7 +358,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Mobile Drawer Overlay */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300"
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300"
           onClick={onCloseMobile}
         />
       )}
@@ -344,17 +366,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Mobile Sidebar (Drawer) */}
       <aside
         id="mobile-sidebar"
-        className={`fixed inset-y-0 right-0 z-50 w-72 bg-slate-900 border-l border-slate-800 flex flex-col justify-between select-none overflow-y-auto transform transition-transform duration-300 ease-in-out lg:hidden ${
+        className={`fixed inset-y-0 right-0 z-50 w-72 bg-slate-900 border-l border-slate-800 flex flex-col justify-between select-none overflow-hidden transform transition-transform duration-300 ease-in-out md:hidden ${
           mobileOpen ? "translate-x-0 shadow-2xl" : "translate-x-full"
         }`}
       >
         {sidebarContent}
       </aside>
 
-      {/* Desktop Persistent Sidebar */}
+      {/* Desktop Persistent Sidebar: Visible on md: (768px+) and larger */}
       <aside
         id="main-sidebar"
-        className="hidden lg:flex lg:w-72 bg-slate-900/95 border-l border-slate-800 flex-col justify-between shrink-0 h-screen sticky top-0 z-30 select-none overflow-y-auto"
+        className="hidden md:flex md:w-64 lg:w-72 bg-slate-900/95 border-l border-slate-800 flex-col justify-between shrink-0 h-screen sticky top-0 z-30 select-none overflow-hidden"
       >
         {sidebarContent}
       </aside>

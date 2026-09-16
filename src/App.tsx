@@ -445,7 +445,7 @@ export default function App() {
       {/* Mobile Sticky Bottom Navigation Bar (شريط التحكم اللمسي السفلي للجوال) */}
       <nav
         id="mobile-bottom-nav"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-3 py-1.5 flex items-center justify-around shadow-2xl safe-area-pb"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-3 py-1.5 flex items-center justify-around shadow-2xl safe-area-pb"
       >
         <button
           onClick={() => {
