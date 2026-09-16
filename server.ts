@@ -412,8 +412,113 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 // -------------------------------------------------------------------
-// REST API ENDPOINTS
+// REST API ENDPOINTS & REAL-TIME EVENT STREAM
 // -------------------------------------------------------------------
+
+interface LiveEventItem {
+  id: string;
+  type: "success" | "warning" | "info";
+  title: string;
+  message: string;
+  category?: string;
+  timestamp: string;
+}
+
+const sseClients = new Set<express.Response>();
+let systemEventsBuffer: LiveEventItem[] = [
+  {
+    id: "evt-init-1",
+    type: "success",
+    title: "🚀 تشغيل النظام المتكامل",
+    message: "تم بدء اتصال MTProto Daemon والخدمات الهجينة بنجاح",
+    category: "system",
+    timestamp: new Date().toLocaleTimeString("ar-SA"),
+  },
+  {
+    id: "evt-init-2",
+    type: "info",
+    title: "🛡️ مراقب الحماية والفاصل الزمني",
+    message: "نظام الفاصل الزمني (60s Gap) مفعل لتفادي قيود FloodWait",
+    category: "monitoring",
+    timestamp: new Date().toLocaleTimeString("ar-SA"),
+  },
+];
+
+function broadcastEvent(data: {
+  type: "success" | "warning" | "info";
+  title: string;
+  message: string;
+  category?: string;
+}) {
+  const eventItem: LiveEventItem = {
+    id: "evt-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+    timestamp: new Date().toLocaleTimeString("ar-SA"),
+    ...data,
+  };
+  systemEventsBuffer.unshift(eventItem);
+  if (systemEventsBuffer.length > 60) systemEventsBuffer.pop();
+
+  const msg = `data: ${JSON.stringify(eventItem)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(msg);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// Event stream & polling endpoints for real-time live synchronization
+app.get("/api/events/latest", (req, res) => {
+  res.json({
+    success: true,
+    events: systemEventsBuffer,
+    count: systemEventsBuffer.length,
+  });
+});
+
+app.get("/api/events/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  // Send handshake message
+  res.write(
+    `data: ${JSON.stringify({
+      id: "conn-" + Date.now(),
+      type: "info",
+      title: "📡 اتصال المزامنة الفورية",
+      message: "تم الربط بقناة الإشعارات والأحداث اللحظية بنجاح",
+      timestamp: new Date().toLocaleTimeString("ar-SA"),
+    })}\n\n`
+  );
+
+  sseClients.add(res);
+
+  req.on("close", () => {
+    sseClients.delete(res);
+  });
+});
+
+app.post("/api/events/push", (req, res) => {
+  const { type, title, message, category } = req.body;
+  if (!title || !message) {
+    return res.status(400).json({ success: false, message: "العنوان والرسالة مطلوبان" });
+  }
+  broadcastEvent({
+    type: type || "info",
+    title,
+    message,
+    category,
+  });
+  res.json({ success: true });
+});
+
+app.post("/api/events/clear", (req, res) => {
+  systemEventsBuffer = [];
+  res.json({ success: true, message: "تم مسح سجل الأحداث" });
+});
 
 // 1. Learning System Endpoints
 app.get("/api/learning/status", (req, res) => {
@@ -452,6 +557,12 @@ app.post("/api/learning/add_service", (req, res) => {
     createdAt: new Date().toLocaleString("ar-SA"),
   };
   learningServices.unshift(newService);
+  broadcastEvent({
+    type: "success",
+    title: "💼 إضافة خدمة جديدة",
+    message: `تمت إضافة الخدمة "${name}" إلى محرك الردود الذكية`,
+    category: "learning",
+  });
   res.json({ success: true, message: `تم إضافة الخدمة "${name}" بنجاح`, service: newService });
 });
 
@@ -518,11 +629,23 @@ app.post("/api/rotating/start", (req, res) => {
     messagePreview: (rotatingSettings.messages[0] || "").slice(0, 40) + "...",
     info: "تم بدء الإرسال المتسلسل بنجاح",
   });
+  broadcastEvent({
+    type: "success",
+    title: "🔄 بدء النشر الدوري المتسلسل",
+    message: `تم إطلاق دورة النشر على ${rotatingSettings.groups.length} مجموعة بفاصل ${rotatingSettings.interval} دقائق`,
+    category: "rotating",
+  });
   res.json({ success: true, message: "تم بدء الإرسال المتسلسل في الخلفية" });
 });
 
 app.post("/api/rotating/stop", (req, res) => {
   rotatingSettings.isRunning = false;
+  broadcastEvent({
+    type: "warning",
+    title: "⏸️ إيقاف النشر الدوري",
+    message: "تم إيقاف عملية النشر الدوري المتسلسل مؤقتاً",
+    category: "rotating",
+  });
   res.json({ success: true, message: "تم إيقاف النشر الدوري" });
 });
 
@@ -601,6 +724,13 @@ app.post("/api/telegram_quick_join", (req, res) => {
   advancedJoinState.stats.success += 1;
   advancedJoinState.stats.total += 1;
 
+  broadcastEvent({
+    type: "success",
+    title: "⚡ انضمام فوري ناجح",
+    message: `تم الانضمام إلى "${title || url}" وتثبيته في الرسائل المحفوظة`,
+    category: "join",
+  });
+
   res.json({
     success: true,
     message: `تم الانضمام الفوري بنجاح إلى "${title || url}" وإضافته للمفضلة والرسائل المحفوظة`,
@@ -658,6 +788,14 @@ app.get("/api/direct_join/status", (req, res) => {
 app.post("/api/direct_join/toggle", (req, res) => {
   const { enabled } = req.body;
   directJoinServiceState.enabled = typeof enabled === "boolean" ? enabled : !directJoinServiceState.enabled;
+  broadcastEvent({
+    type: directJoinServiceState.enabled ? "success" : "warning",
+    title: "📡 مراقب الروابط الدائم",
+    message: directJoinServiceState.enabled
+      ? "تم تفعيل خدمة الانضمام المباشر الدائم (فاصل 60 ثانية آمن)"
+      : "تم إيقاف خدمة الانضمام المباشر الدائم",
+    category: "direct_join",
+  });
   res.json({
     success: true,
     enabled: directJoinServiceState.enabled,
@@ -804,6 +942,13 @@ app.post("/api/monitoring/send", (req, res) => {
 • الانضمام الذكي والجدولة: تم الانضمام فوراً إلى (${newlyJoinedQueued.length}) رابط غير منضم، وتأجيل الإرسال إليها للدورة القادمة لحماية الحساب وتفادي تأخير بقية المجموعات.
 • نمط الحماية المطبق: [${activeSanitize}] | وضع الإرسال: [${activeMode}]`;
 
+  broadcastEvent({
+    type: "success",
+    title: "🛡️ دورة مراقبة وإرسال ذكية",
+    message: `إرسال فوري لـ (${sentNow.length}) مجموعة، وانضمام آلي لـ (${newlyJoinedQueued.length}) مجموعة مع جدولة الإرسال للدورة القادمة`,
+    category: "monitoring",
+  });
+
   res.json({
     success: true,
     message: summaryMsg,
@@ -927,6 +1072,13 @@ app.post("/api/academic/format_document", (req, res) => {
     includePageNumbers = true,
     universityStandard = "king_saud",
   } = req.body;
+
+  broadcastEvent({
+    type: "success",
+    title: "📄 تنسيق مستند أكاديمي",
+    message: `تم تطبيق معايير جامعة (${universityStandard}) والخط (${fontFamily}) بنجاح`,
+    category: "academic",
+  });
 
   res.json({
     success: true,

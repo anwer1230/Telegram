@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Send,
   Sparkles,
+  X,
 } from "lucide-react";
 
 export type TabType =
@@ -37,6 +38,8 @@ interface SidebarProps {
     activeJoins: number;
     directJoinsToday: number;
   };
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -44,6 +47,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   openModal,
   badges,
+  mobileOpen = false,
+  onCloseMobile,
 }) => {
   const navItems = [
     {
@@ -137,26 +142,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
-  return (
-    <aside
-      id="main-sidebar"
-      className="w-72 bg-slate-900/95 border-l border-slate-800 flex flex-col justify-between shrink-0 h-screen sticky top-0 z-30 select-none overflow-y-auto"
-    >
+  const handleSelectTab = (tab: TabType) => {
+    setActiveTab(tab);
+    onCloseMobile?.();
+  };
+
+  const sidebarContent = (
+    <>
       <div className="p-4">
         {/* Brand Header */}
-        <div className="flex items-center gap-3 px-2 py-3 mb-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/20">
-            <Send className="w-5 h-5 -rotate-45" />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-white flex items-center gap-1.5">
-              <span>تيليجرام برو</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono border border-purple-500/30">
-                v2026.9
-              </span>
+        <div className="flex items-center justify-between px-2 py-3 mb-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/20">
+              <Send className="w-5 h-5 -rotate-45" />
             </div>
-            <p className="text-xs text-slate-400 font-normal">النظام المتكامل للأتمتة والتعلم</p>
+            <div>
+              <div className="text-sm font-bold text-white flex items-center gap-1.5">
+                <span>تيليجرام برو</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono border border-purple-500/30">
+                  v2026.9
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-normal">النظام المتكامل للأتمتة والتعلم</p>
+            </div>
           </div>
+
+          {/* Mobile Close Button */}
+          {onCloseMobile && (
+            <button
+              onClick={onCloseMobile}
+              className="lg:hidden w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:text-white active:scale-90 transition-transform"
+              aria-label="إغلاق القائمة"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Navigation Section */}
@@ -164,8 +184,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Main Dashboard Link */}
           <button
             id="nav-overview"
-            onClick={() => setActiveTab("overview")}
-            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+            onClick={() => handleSelectTab("overview")}
+            className={`w-full min-h-[44px] flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-[0.98] ${
               activeTab === "overview"
                 ? "bg-purple-600/20 text-purple-300 border border-purple-500/40 shadow-sm"
                 : "text-slate-300 hover:bg-slate-800/70 hover:text-white"
@@ -193,8 +213,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <button
                     key={item.id}
                     id={`nav-${item.id}`}
-                    onClick={() => setActiveTab(item.id)}
-                    className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-sm font-medium transition-all ${
+                    onClick={() => handleSelectTab(item.id)}
+                    className={`w-full min-h-[44px] flex items-center justify-between px-3.5 py-2 rounded-xl text-sm font-medium transition-all active:scale-[0.98] ${
                       isActive
                         ? "bg-slate-800 text-white border border-slate-700 shadow-sm"
                         : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
@@ -230,8 +250,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <button
                     key={item.id}
                     id={`nav-${item.id}`}
-                    onClick={() => setActiveTab(item.id)}
-                    className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-sm font-medium transition-all ${
+                    onClick={() => handleSelectTab(item.id)}
+                    className={`w-full min-h-[44px] flex items-center justify-between px-3.5 py-2 rounded-xl text-sm font-medium transition-all active:scale-[0.98] ${
                       isActive
                         ? "bg-slate-800 text-white border border-slate-700"
                         : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
@@ -267,14 +287,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
           <button
-            onClick={() => openModal("monitoring")}
-            className="text-xs text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800"
+            onClick={() => {
+              openModal("monitoring");
+              onCloseMobile?.();
+            }}
+            className="min-w-[40px] min-h-[40px] flex items-center justify-center text-xs text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 active:scale-95 transition-transform"
             title="الإعدادات"
           >
             <Sliders className="w-4 h-4" />
           </button>
         </div>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile Drawer Overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300"
+          onClick={onCloseMobile}
+        />
+      )}
+
+      {/* Mobile Sidebar (Drawer) */}
+      <aside
+        id="mobile-sidebar"
+        className={`fixed inset-y-0 right-0 z-50 w-72 bg-slate-900 border-l border-slate-800 flex flex-col justify-between select-none overflow-y-auto transform transition-transform duration-300 ease-in-out lg:hidden ${
+          mobileOpen ? "translate-x-0 shadow-2xl" : "translate-x-full"
+        }`}
+      >
+        {sidebarContent}
+      </aside>
+
+      {/* Desktop Persistent Sidebar */}
+      <aside
+        id="main-sidebar"
+        className="hidden lg:flex lg:w-72 bg-slate-900/95 border-l border-slate-800 flex-col justify-between shrink-0 h-screen sticky top-0 z-30 select-none overflow-y-auto"
+      >
+        {sidebarContent}
+      </aside>
+    </>
   );
 };

@@ -10,6 +10,7 @@ import {
   Bell,
   RefreshCw,
   Zap,
+  Menu,
 } from "lucide-react";
 import { LiveEventNotification } from "../hooks/useTelegramEvents";
 
@@ -18,6 +19,7 @@ interface HeaderProps {
   notifications: LiveEventNotification[];
   clearNotifications: () => void;
   onQuickJoin: () => void;
+  onToggleMobileMenu?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -25,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   notifications,
   clearNotifications,
   onQuickJoin,
+  onToggleMobileMenu,
 }) => {
   const [academicDropdownOpen, setAcademicDropdownOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -47,13 +50,24 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header
       id="main-header"
-      className="h-16 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-6 flex items-center justify-between sticky top-0 z-20"
+      className="h-16 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-20"
     >
-      {/* Right side (RTL): Status & Quick Info */}
-      <div className="flex items-center gap-4">
+      {/* Right side (RTL): Mobile Hamburger & Status */}
+      <div className="flex items-center gap-3">
+        {onToggleMobileMenu && (
+          <button
+            onClick={onToggleMobileMenu}
+            className="lg:hidden w-11 h-11 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:text-white border border-slate-700 active:scale-95 transition-transform"
+            aria-label="فتح القائمة الجانبية"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-          <span>خادم تيليجرام: متصل بنشاط</span>
+          <span className="hidden xs:inline">خادم تيليجرام:</span>
+          <span>متصل بنشاط</span>
         </div>
         <div className="hidden md:flex items-center gap-2 text-xs text-slate-400">
           <span>الحساب:</span>
@@ -62,16 +76,16 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Left side (RTL): Actions & Academic Tools Dropdown */}
-      <div className="flex items-center gap-3">
-        {/* Academic Tools Dropdown (قائمة منسدلة فخمة في الواجهة الرئيسية) */}
+      <div className="flex items-center gap-2 sm:gap-3">
+        {/* Academic Tools Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             id="btn-academic-dropdown"
             onClick={() => setAcademicDropdownOpen(!academicDropdownOpen)}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-900/40 to-indigo-900/40 hover:from-purple-800/50 hover:to-indigo-800/50 text-purple-200 text-xs font-medium border border-purple-700/50 transition-all shadow-sm"
+            className="min-h-[44px] flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-900/40 to-indigo-900/40 hover:from-purple-800/50 hover:to-indigo-800/50 text-purple-200 text-xs font-medium border border-purple-700/50 transition-all shadow-sm active:scale-95"
           >
             <GraduationCap className="w-4 h-4 text-purple-400" />
-            <span className="font-semibold">الأدوات الأكاديمية والتحليلية</span>
+            <span className="font-semibold hidden sm:inline">الأدوات الأكاديمية</span>
             <ChevronDown className={`w-3.5 h-3.5 transition-transform ${academicDropdownOpen ? "rotate-180" : ""}`} />
           </button>
 
@@ -154,9 +168,9 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Quick Join Trigger Button */}
         <button
           onClick={onQuickJoin}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-colors"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-all active:scale-95"
         >
-          <Zap className="w-3.5 h-3.5 text-amber-400" />
+          <Zap className="w-4 h-4 text-amber-400" />
           <span className="hidden sm:inline">انضمام فوري</span>
         </button>
 
@@ -165,12 +179,12 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="btn-notifications"
             onClick={() => setNotificationsOpen(!notificationsOpen)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700 transition-colors relative"
+            className="w-11 h-11 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700 transition-all active:scale-95 relative"
             title="الإشعارات الحية"
           >
             <Bell className="w-4 h-4" />
             {notifications.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">
+              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold shadow-lg animate-pulse">
                 {notifications.length}
               </span>
             )}

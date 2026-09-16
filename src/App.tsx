@@ -29,11 +29,14 @@ import {
   Clock,
   ArrowUpRight,
   Bookmark,
+  LayoutDashboard,
+  Menu,
 } from "lucide-react";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Cross-modal data transfer
   const [transferredUrls, setTransferredUrls] = useState<string[]>([]);
@@ -145,6 +148,8 @@ export default function App() {
           activeJoins: 5,
           directJoinsToday: 14,
         }}
+        mobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
       />
 
       {/* Main Content Area */}
@@ -155,10 +160,11 @@ export default function App() {
           notifications={notifications}
           clearNotifications={clearNotifications}
           onQuickJoin={() => handleOpenModal("globalSearchModal")}
+          onToggleMobileMenu={() => setMobileMenuOpen((prev) => !prev)}
         />
 
         {/* Dashboard Scrollable Body */}
-        <main className="flex-1 p-4 md:p-6 lg:p-8 space-y-6 overflow-y-auto">
+        <main className="flex-1 p-4 md:p-6 lg:p-8 space-y-6 overflow-y-auto pb-24 lg:pb-8">
           {/* Top Performance & Telethon Account Summary Banner */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between shadow-sm">
@@ -435,6 +441,76 @@ export default function App() {
         isOpen={activeModal === "documentFormatter"}
         onClose={() => setActiveModal(null)}
       />
+
+      {/* Mobile Sticky Bottom Navigation Bar (شريط التحكم اللمسي السفلي للجوال) */}
+      <nav
+        id="mobile-bottom-nav"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-3 py-1.5 flex items-center justify-around shadow-2xl safe-area-pb"
+      >
+        <button
+          onClick={() => {
+            setActiveTab("overview");
+            setActiveModal(null);
+            setMobileMenuOpen(false);
+          }}
+          className={`min-h-[48px] flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all active:scale-95 ${
+            activeTab === "overview" && !activeModal && !mobileMenuOpen
+              ? "text-purple-400 font-semibold"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <LayoutDashboard className="w-5 h-5" />
+          <span className="text-[10px]">الرئيسية</span>
+        </button>
+
+        <button
+          onClick={() => handleOpenModal("rotatingModal")}
+          className={`min-h-[48px] flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all active:scale-95 ${
+            activeModal === "rotatingModal"
+              ? "text-emerald-400 font-semibold"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <Repeat className="w-5 h-5" />
+          <span className="text-[10px]">النشر الدوري</span>
+        </button>
+
+        <button
+          onClick={() => handleOpenModal("globalSearchModal")}
+          className={`min-h-[48px] flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all active:scale-95 ${
+            activeModal === "globalSearchModal"
+              ? "text-blue-400 font-semibold"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <Search className="w-5 h-5" />
+          <span className="text-[10px]">بحث تليجرام</span>
+        </button>
+
+        <button
+          onClick={() => handleOpenModal("learningModal")}
+          className={`min-h-[48px] flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all active:scale-95 ${
+            activeModal === "learningModal"
+              ? "text-purple-400 font-semibold"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <Brain className="w-5 h-5" />
+          <span className="text-[10px]">عقل البوت</span>
+        </button>
+
+        <button
+          onClick={() => setMobileMenuOpen((prev) => !prev)}
+          className={`min-h-[48px] flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all active:scale-95 ${
+            mobileMenuOpen
+              ? "text-amber-400 font-semibold"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <Menu className="w-5 h-5" />
+          <span className="text-[10px]">القائمة</span>
+        </button>
+      </nav>
     </div>
   );
 }

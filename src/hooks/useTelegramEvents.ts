@@ -94,35 +94,115 @@ export function useTelegramEvents() {
     setLiveLogs((prev) => [log, ...prev.slice(0, 49)]);
   }, []);
 
-  // Periodic heartbeat / simulated background daemon events
+  // Connect to SSE real-time stream with automatic poll fallback
   useEffect(() => {
-    const interval = setInterval(() => {
-      const chance = Math.random();
-      if (chance > 0.7) {
-        const timeStr = new Date().toLocaleTimeString("ar-SA");
-        pushNotification(
-          "direct_join",
-          "الانضمام المباشر (DirectLinkJoinService)",
-          "رصد رابط t.me جديد في محادثة عامة والتحقق من صلاحيته عبر MTProto..."
-        );
-        setRecentEvents((prev) => [
-          {
-            id: "act-" + Date.now(),
-            type: "info",
-            title: "📡 [مراقب الروابط] تدفق لحظي",
-            message: "التحقق من رابط جديد ورصد الفاصل الزمني للأمان",
-            time: timeStr,
-          },
-          ...prev.slice(0, 15),
-        ]);
+    let eventSource: EventSource | null = null;
+    let fallbackPollTimer: any = null;
+
+    const setupSSE = () => {
+      try {
+        eventSource = new EventSource("/api/events/stream");
+
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (!data || !data.title) return;
+
+            // Trigger subtle tactile feedback on mobile if supported
+            if (typeof window !== "undefined" && "vibrate" in navigator) {
+              try {
+                navigator.vibrate(30);
+              } catch {
+                // ignore
+              }
+            }
+
+            const notif: LiveEventNotification = {
+              id: data.id || "sse-" + Date.now(),
+              type: data.category || "direct_join",
+              title: data.title,
+              message: data.message,
+              timestamp: data.timestamp || new Date().toLocaleTimeString("ar-SA"),
+            };
+
+            setNotifications((prev) => {
+              if (prev.some((p) => p.id === notif.id)) return prev;
+              return [notif, ...prev.slice(0, 24)];
+            });
+
+            const actType = data.type === "warning" ? "warning" : data.type === "info" ? "info" : "success";
+            const activity: ActivityEvent = {
+              id: "act-" + (data.id || Date.now()),
+              type: actType,
+              title: data.title,
+              message: data.message,
+              time: data.timestamp || new Date().toLocaleTimeString("ar-SA"),
+            };
+
+            setRecentEvents((prev) => {
+              if (prev.some((p) => p.id === activity.id)) return prev;
+              return [activity, ...prev.slice(0, 19)];
+            });
+          } catch (e) {
+            console.warn("SSE parse error", e);
+          }
+        };
+
+        eventSource.onerror = () => {
+          eventSource?.close();
+          // Switch to polling if SSE encounters an error
+          if (!fallbackPollTimer) {
+            fallbackPollTimer = setInterval(pollLatest, 6000);
+          }
+        };
+      } catch (e) {
+        if (!fallbackPollTimer) {
+          fallbackPollTimer = setInterval(pollLatest, 6000);
+        }
       }
-    }, 25000);
+    };
 
-    return () => clearInterval(interval);
-  }, [pushNotification]);
+    const pollLatest = async () => {
+      try {
+        const res = await fetch("/api/events/latest");
+        const json = await res.json();
+        if (json.success && Array.isArray(json.events) && json.events.length > 0) {
+          const latestItems: LiveEventNotification[] = json.events.slice(0, 15).map((e: any) => ({
+            id: e.id,
+            type: e.category || "direct_join",
+            title: e.title,
+            message: e.message,
+            timestamp: e.timestamp,
+          }));
+          setNotifications((prev) => {
+            const existingIds = new Set(prev.map((p) => p.id));
+            const newOnes = latestItems.filter((item) => !existingIds.has(item.id));
+            if (newOnes.length === 0) return prev;
+            return [...newOnes, ...prev].slice(0, 25);
+          });
+        }
+      } catch (e) {
+        // silent fallback
+      }
+    };
 
-  const clearNotifications = useCallback(() => {
+    // Initial fetch of latest events
+    pollLatest();
+    setupSSE();
+
+    return () => {
+      if (eventSource) eventSource.close();
+      if (fallbackPollTimer) clearInterval(fallbackPollTimer);
+    };
+  }, []);
+
+  const clearNotifications = useCallback(async () => {
     setNotifications([]);
+    try {
+      await fetch("/api/events/clear", { method: "POST" });
+    } catch {
+      // ignore
+    }
   }, []);
 
   return {
