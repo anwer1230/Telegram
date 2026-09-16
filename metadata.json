@@ -1,0 +1,6 @@
+{
+  "name": "Telegram Advanced Hub & Automation Suite",
+  "description": "منصة إدارة تليجرام الشاملة: نظام التعلم الذكي، النشر الدوري المتسلسل، البحث في الروابط، الانضمام المتقدم والمباشر، الردود التلقائية، والأدوات الأكاديمية.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
