@@ -274,7 +274,7 @@ export const MonitoringSettingsModal: React.FC<MonitoringSettingsModalProps> = (
                 />
                 <div>
                   <div className="text-xs font-bold">مجموعات محددة فقط (Target Groups)</div>
-                  <div className="text-[11px] text-slate-400">الإرسال للقائمة المحددة بالاسم</div>
+                  <div className="text-[11px] text-slate-400">الإرسال للقائمة المحددة بالاسم والروابط</div>
                 </div>
               </label>
 
@@ -298,6 +298,33 @@ export const MonitoringSettingsModal: React.FC<MonitoringSettingsModalProps> = (
                 </div>
               </label>
             </div>
+
+            {/* Target Groups List Editor when selected */}
+            {settings.sendMode === "selected" && (
+              <div className="pt-2">
+                <label className="block text-[11px] font-semibold text-teal-400 mb-1">
+                  قائمة الروابط المستهدفة (رابط في كل سطر - يتم فحصها والانضمام الفوري للروابط الجديدة دون تأخير):
+                </label>
+                <textarea
+                  rows={3}
+                  value={settings.selectedGroups.join("\n")}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      selectedGroups: e.target.value
+                        .split("\n")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  placeholder="https://t.me/example_group"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-teal-500"
+                />
+                <div className="text-[11px] text-slate-500 mt-1">
+                  ⚡ ميزة ذكية: المجموعات المنضمة مسبقاً يتم إرسال الإعلان لها فوراً. والروابط غير المنضمة ينضم لها البوت ويؤجل إرسالها للدورة التالية دون إيقاف باقي المجموعات.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Sanitize Mode in Guarded Groups (وضع الحماية والتنقية الذكية) */}
