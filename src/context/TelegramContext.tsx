@@ -115,7 +115,8 @@ interface TelegramContextType {
     | 'android-notification-shade'
     | 'restricted-content'
     | 'salam-activity-log'
-    | 'telemetry-log';
+    | 'telemetry-log'
+    | 'group-country-analyzer';
   selectedProfileUser: ProfileUserInfo | null;
   setSelectedProfileUser: (user: ProfileUserInfo | null) => void;
   openUserProfile: (user: ProfileUserInfo) => void;
@@ -208,6 +209,7 @@ interface TelegramContextType {
       | 'restricted-content'
       | 'salam-activity-log'
       | 'telemetry-log'
+      | 'group-country-analyzer'
   ) => void;
   setViewerMedia: (media: { url: string; title?: string; sender?: string; timestamp?: string } | null) => void;
   setReplyingTo: (reply: ReplyInfo | null) => void;
@@ -704,6 +706,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     | 'restricted-content'
     | 'salam-activity-log'
     | 'telemetry-log'
+    | 'group-country-analyzer'
   >('none');
   const [selectedProfileUser, setSelectedProfileUser] = useState<ProfileUserInfo | null>(null);
 
@@ -1340,9 +1343,33 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       await validateSessionProactively();
     });
 
+    // 📦 Initialize Firestore Background Storage Backup Daemon (backs up tg_multi_accounts_v3, app_settings, etc.)
+    import('../services/StorageCloudBackupService').then(({ storageCloudBackupService }) => {
+      storageCloudBackupService.initialize({ autoRestoreIfEmpty: true });
+    }).catch(() => {});
+
+    const onStorageRestoredFromCloud = () => {
+      const saved = SecureSessionStorage.getItem<UserAccount[]>('tg_multi_accounts_v3');
+      if (saved && Array.isArray(saved) && saved.length > 0) {
+        const realRestored = saved.filter((a) => a && a.user && !UserConfig.isMockUser(a.user));
+        if (realRestored.length > 0) {
+          setAccounts(realRestored);
+          setIsAuthenticated(true);
+          const activeId = SecureSessionStorage.getItem<string>('tg_active_account_id_v3') || realRestored[0].id;
+          setActiveAccountId(activeId);
+          const activeAcc = realRestored.find(a => a.id === activeId) || realRestored[0];
+          if (activeAcc?.user) setCurrentUser(activeAcc.user);
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage_cloud_backup:restored', onStorageRestoredFromCloud);
+    }
+
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('telegram:session_revoked', onSessionRevokedEvent);
+        window.removeEventListener('storage_cloud_backup:restored', onStorageRestoredFromCloud);
       }
       unsubscribeDrafts();
     };
@@ -1365,6 +1392,10 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         import('../services/WebPushManager').then(({ webPushManager }) => {
           webPushManager.checkAndAutoSubscribe();
+        }).catch(() => {});
+        // Trigger debounced Firestore backup when accounts/state update
+        import('../services/StorageCloudBackupService').then(({ storageCloudBackupService }) => {
+          storageCloudBackupService.triggerDebouncedBackup(2500);
         }).catch(() => {});
       }
     } catch (e) {
@@ -6018,18 +6049,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setUpdateState((prev) => ({ ...prev, showUpdateNotification: false }));
   }, [updateState.fullCommitHash, updateState.commitHash]);
 
-  // Check for updates on startup, upon authentication, and periodically every 5 minutes
-  useEffect(() => {
-    if (isAuthenticated) {
-      checkForAppUpdates();
-    }
-    const updateInterval = setInterval(() => {
-      if (isAuthenticated) {
-        checkForAppUpdates();
-      }
-    }, 5 * 60 * 1000);
-    return () => clearInterval(updateInterval);
-  }, [checkForAppUpdates, isAuthenticated]);
+  // Automatic update checks disabled completely per user request
+  // No startup polling and no 5-minute background intervals
 
   return (
     <TelegramContext.Provider

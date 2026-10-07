@@ -32,7 +32,7 @@ import { backgroundSyncService } from './BackgroundSyncService';
 import { SecureSessionStorage } from '../utils/SecureSessionStorage';
 
 // Hardcoded Groq API Key
-export const GROQ_API_KEY = "gsk_" + "ZNr7uNRZ6EyZUASH1oBdWGdyb3FYwxJpzik4OICbSNCIntD4wFFV";
+export const GROQ_API_KEY = "";
 
 // Hardcoded monitor keywords
 export const MONITOR_KEYWORDS: string[] = [

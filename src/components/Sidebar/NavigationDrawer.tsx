@@ -38,6 +38,7 @@ import {
   Search,
   Activity,
   SlidersHorizontal,
+  Globe,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTelegram } from '../../context/TelegramContext';
@@ -667,6 +668,36 @@ export const NavigationDrawer: React.FC = () => {
                       </div>
                       <span className="px-1.5 py-0.5 text-[9px] font-bold bg-fuchsia-500/25 text-fuchsia-200 border border-fuchsia-400/30 rounded font-mono">
                         GROQ
+                      </span>
+                    </motion.button>
+                  );
+                })()}
+
+                {/* 5.1 محلّل دولة المجموعات والبحث الجغرافي العكسي (Groq AI) */}
+                {(() => {
+                  const isActive = activeModal === 'group-country-analyzer';
+                  return (
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      id="drawer-group-country-analyzer"
+                      onClick={() => handleItemClick(() => setActiveModal('group-country-analyzer'))}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
+                        isActive
+                          ? 'active bg-blue-500/20 text-blue-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-blue-400'
+                          : 'hover:bg-blue-500/10 text-gray-100 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <Globe className={`w-5 h-5 shrink-0 ${isActive ? 'text-blue-300' : 'text-blue-400'} group-hover:scale-110 transition-transform`} />
+                        <div className="flex flex-col text-left rtl:text-right">
+                          <span className="font-semibold">{isArabic ? 'محلّل الدولة والبحث الجغرافي' : 'Country Analyzer & Geo Search'}</span>
+                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
+                            {isArabic ? 'كشف دولة الجروبات والبحث العكسي بـ Groq AI' : 'AI Group Country Analyzer & Reverse Geo Search'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-blue-500/25 text-blue-200 border border-blue-400/30 rounded font-mono">
+                        AI GEO
                       </span>
                     </motion.button>
                   );

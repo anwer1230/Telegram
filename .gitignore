@@ -21,3 +21,9 @@ data/*.sqlite-journal
 !data/.gitkeep
 
 
+
+# Additional logs and local data
+telemetry_logs.json
+.backups/
+data/*.db
+data/client_storage_backup.json

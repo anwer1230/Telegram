@@ -61,6 +61,18 @@ import {
   csrfProtection,
 } from './server/security/middleware';
 import { setupWebSocketSecurity } from './server/security/wsAuth';
+import { registerGroupCountryRoutes } from './server/groupCountryAnalyzer';
+import {
+  saveCloudSession,
+  loadAllCloudSessions,
+  deleteCloudSession,
+  getCloudStorageStatus,
+} from './server/cloudSessionStore';
+import {
+  saveClientStorageBackup,
+  getClientStorageBackup,
+  getClientStorageBackupStatus,
+} from './server/clientStorageBackupStore';
 
 export { sqliteDatabase, redisCache };
 
@@ -75,7 +87,7 @@ const TDLIB_API_HASH = process.env.TDLIB_API_HASH || TELEGRAM_API_HASH;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'tg_session_anwer_foud_secure_key_2026';
 // NOTE: Telegram sessions are strictly isolated in sessions/account_{index}.json and NEVER stored in .env or global variables.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-export const GROQ_API_KEY = process.env.GROQ_API_KEY || ('gsk_' + 'ZNr7uNRZ6EyZUASH1oBdWGdyb3FYwxJpzik4OICbSNCIntD4wFFV');
+export const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 
 // ==========================================
 // KEYWORD MONITORING SYSTEM (HARDCODED)
@@ -271,6 +283,12 @@ export function saveAccountSession(
       updatedAt: new Date().toISOString(),
     };
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+
+    // 🗄️ Asynchronously persist encrypted session to Cloud Database (Firestore / Redis)
+    saveCloudSession(index, payload).catch((cloudErr) => {
+      console.warn(`[SessionEngine] Background cloud sync notice for account ${index}:`, cloudErr?.message || cloudErr);
+    });
+
     console.log(`[SessionEngine] Successfully saved isolated session for account ${index} (PTS: ${payload.pts ?? 'none'}) -> ${filePath}`);
     return true;
   } catch (error) {
@@ -327,10 +345,15 @@ export function loadAllAccountSessionsFromDisk(): Map<number, StoredAccountSessi
 }
 
 /**
- * Deletes an account session file from disk upon logout
+ * Deletes an account session file from disk and persistent cloud database upon logout
  */
-export function deleteAccountSessionFromDisk(index: number): boolean {
+export function deleteAccountSessionFromDisk(index: number, phone?: string, userId?: string): boolean {
   try {
+    // 🗄️ Remove from Persistent Cloud Storage (Firestore / Redis)
+    deleteCloudSession(index, phone, userId).catch((err) => {
+      console.warn(`[SessionEngine] Background cloud delete notice for account ${index}:`, err?.message || err);
+    });
+
     const filePath = getSessionFilePath(index);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
@@ -362,6 +385,17 @@ export interface AccountInstanceData {
 
 export const USERS: Map<number, any> = new Map();
 export const accountInstances: Map<number, AccountInstanceData> = new Map();
+
+/**
+ * 🗄️ initTelegramService() - Persistent Cloud Database Session Recovery
+ * Replaces local disk reliance with Persistent Cloud Storage (Firestore / Redis).
+ * Automatically hydrates and reconnects all registered Telegram accounts across container redeployments.
+ */
+export let initTelegramService: () => Promise<{ success: boolean; accountsLoaded: number; activeAccount: number }> = async () => ({
+  success: true,
+  accountsLoaded: 0,
+  activeAccount: 0,
+});
 
 export class AccountInstance {
   private static instances = new Map<number, AccountInstance>();
@@ -9892,6 +9926,215 @@ Please provide the concise summary.`;
     });
   });
 
+  // =========================================================================
+  // 🗄️ PERSISTENT CLOUD SESSIONS & DATABASE ENDPOINTS (Firestore / Redis)
+  // Ensures background broadcasts, bots & schedules survive container redeployments
+  // =========================================================================
+
+  // Diagnostic Status of Persistent Cloud Database Storage
+  app.get('/api/cloud_sessions/status', async (req, res) => {
+    try {
+      const status = await getCloudStorageStatus();
+      res.json({
+        success: true,
+        ...status,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: 'STATUS_ERROR',
+        message: err?.message || 'Failed to retrieve cloud storage status',
+      });
+    }
+  });
+
+  // Force Manual Synchronize between local and cloud storage
+  app.post('/api/cloud_sessions/sync', async (req, res) => {
+    try {
+      const diskSessions = loadAllAccountSessionsFromDisk();
+      let syncedCount = 0;
+      for (const [idx, item] of diskSessions.entries()) {
+        const ok = await saveCloudSession(idx, item);
+        if (ok) syncedCount++;
+      }
+      const status = await getCloudStorageStatus();
+      res.json({
+        success: true,
+        message: `تمت مزامنة ${syncedCount} حساب بنجاح مع قاعدة البيانات السحابية المشفرة.`,
+        syncedCount,
+        status,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: 'SYNC_FAILED',
+        message: err?.message || 'فشلت مزامنة الجلسات مع السحابة',
+      });
+    }
+  });
+
+  // Encrypted Cloud Snapshot Backup
+  app.post('/api/cloud_sessions/backup', async (req, res) => {
+    try {
+      let backedUp = 0;
+      for (const [idx, acc] of accountInstances.entries()) {
+        if (acc.sessionString) {
+          const stored = readAccountSession(idx);
+          if (stored) {
+            const ok = await saveCloudSession(idx, stored);
+            if (ok) backedUp++;
+          }
+        }
+      }
+      res.json({
+        success: true,
+        message: `تم إنشاء نسخة احتياطية مشفرة لـ ${backedUp} حساب في قاعدة البيانات السحابية بنجاح.`,
+        backedUp,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: 'BACKUP_FAILED',
+        message: err?.message || 'فشل النسخ الاحتياطي في السحابة',
+      });
+    }
+  });
+
+  // Re-hydrate All Accounts from Cloud & Restore Telegram Clients Service
+  app.post(['/api/cloud_sessions/restore', '/api/telegram/init_service'], async (req, res) => {
+    try {
+      const result = await initTelegramService();
+      res.json({
+        success: true,
+        message: `تم استرجاع الحسابات المسجلة من قاعدة البيانات السحابية مباشرة وإعادة تشغيل الخدمة بنجاح (${result.accountsLoaded} حساب).`,
+        ...result,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: 'RESTORE_FAILED',
+        message: err?.message || 'فشل استرجاع الحسابات من السحابة',
+      });
+    }
+  });
+
+  // Delete Encrypted Cloud Session Document by Account Index or ID
+  app.delete('/api/cloud_sessions/:id', async (req, res) => {
+    try {
+      const targetParam = req.params.id;
+      let targetIndex = parseInt(targetParam.replace(/\D/g, ''), 10);
+      if (isNaN(targetIndex)) targetIndex = 0;
+
+      const client = accountInstances.get(targetIndex)?.client;
+      if (client) {
+        try { await client.disconnect(); } catch (_) {}
+      }
+      await deleteCloudSession(targetIndex);
+      deleteAccountSessionFromDisk(targetIndex);
+      accountInstances.delete(targetIndex);
+      USERS.delete(targetIndex);
+
+      res.json({
+        success: true,
+        message: `تم حذف وثيقة الجلسة المشفرة للحساب [${targetIndex}] من السحابة والقرص بنجاح.`,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: 'DELETE_FAILED',
+        message: err?.message || 'فشل حذف الجلسة السحابية',
+      });
+    }
+  });
+
+  // =========================================================================
+  // 📦 PERIODIC LOCAL STORAGE BACKUP & HYDRATION (Firestore collection: client_storage_backups)
+  // Backs up tg_multi_accounts_v3, app_settings, etc. to prevent data loss across cache clears / device changes
+  // =========================================================================
+
+  // Save/Upload Client Storage Backup
+  app.post('/api/backup/client_storage', async (req, res) => {
+    try {
+      const { data, userId, phone, clientVersion, timestamp } = req.body;
+      if (!data || typeof data !== 'object') {
+        return res.status(400).json({
+          success: false,
+          error: 'INVALID_DATA',
+          message: 'Expected "data" object containing storage keys to backup',
+        });
+      }
+
+      await saveClientStorageBackup({
+        userId,
+        phone,
+        data,
+        clientVersion,
+        timestamp,
+      });
+
+      res.json({
+        success: true,
+        message: 'تم حفظ النسخة الاحتياطية لمفاتيح التخزين بنجاح في قاعدة بيانات Firestore السحابية.',
+        backedUpKeys: Object.keys(data),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error('[API] /api/backup/client_storage error:', err);
+      res.status(500).json({
+        success: false,
+        error: 'BACKUP_FAILED',
+        message: err?.message || 'فشل حفظ النسخة الاحتياطية في السحابة',
+      });
+    }
+  });
+
+  // Retrieve/Restore Client Storage Backup
+  app.get('/api/backup/client_storage', async (req, res) => {
+    try {
+      const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+      const phone = typeof req.query.phone === 'string' ? req.query.phone : undefined;
+
+      const backup = await getClientStorageBackup({ userId, phone });
+      if (!backup) {
+        return res.json({
+          success: false,
+          notFound: true,
+          message: 'لا توجد نسخة احتياطية سحابية محفوظة حتى الآن.',
+        });
+      }
+
+      res.json({
+        success: true,
+        backup,
+      });
+    } catch (err: any) {
+      console.error('[API] /api/backup/client_storage read error:', err);
+      res.status(500).json({
+        success: false,
+        error: 'RESTORE_FETCH_FAILED',
+        message: err?.message || 'فشل استرجاع النسخة الاحتياطية من السحابة',
+      });
+    }
+  });
+
+  // Diagnostic Status of Client Storage Backup Service
+  app.get('/api/backup/client_storage/status', async (req, res) => {
+    try {
+      const status = await getClientStorageBackupStatus();
+      res.json({
+        success: true,
+        ...status,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: 'STATUS_ERROR',
+        message: err?.message || 'فشل جلب حالة خدمة النسخ الاحتياطي',
+      });
+    }
+  });
+
   // 6. Telegram TL Schema Inspector (schema documentation endpoint)
   app.get('/api/telegram/schema', (req, res) => {
     res.json({
@@ -13598,6 +13841,26 @@ Please provide the concise summary.`;
   });
 
   // ==========================================
+  // GROUP COUNTRY ANALYZER & GEO REVERSE SEARCH (GROQ AI)
+  // ==========================================
+  registerGroupCountryRoutes(app, io, () => {
+    for (const inst of accountInstances.values()) {
+      if (inst.client && inst.client.connected) {
+        return inst.client;
+      }
+    }
+    if (mainTelegramClient && mainTelegramClient.connected) {
+      return mainTelegramClient;
+    }
+    for (const cl of authenticatedTelegramClients.values()) {
+      if (cl && cl.connected) {
+        return cl;
+      }
+    }
+    return null;
+  });
+
+  // ==========================================
   // VITE MIDDLEWARE & STATIC ASSET HANDLING
   // ==========================================
 
@@ -13642,22 +13905,24 @@ Please provide the concise summary.`;
     console.log(`Telegram API_ID: ${TELEGRAM_API_ID} | MTProto 2.0 Layer 184`);
 
   // =========================================================================
-  // BOOT INITIALIZATION: Load all account sessions from sessions/ directory
+  // 🗄️ PERSISTENT CLOUD DATABASE SERVICE INITIALIZATION: initTelegramService()
+  // Queries Persistent Cloud Database (Firestore / Redis) directly instead of ephemeral local disk
+  // Restores all registered accounts automatically across container redeployments
   // =========================================================================
-  const initializeSessionsOnBoot = async (): Promise<void> => {
-    console.log('[SessionEngine] Initializing isolated accounts from sessions/ directory...');
-    const diskSessions = loadAllAccountSessionsFromDisk();
+  initTelegramService = async (): Promise<{ success: boolean; accountsLoaded: number; activeAccount: number }> => {
+    console.log('🚀 [initTelegramService] Querying Persistent Cloud Database (Firestore / Redis) directly for accounts...');
+    const cloudSessions = await loadAllCloudSessions();
 
-    if (diskSessions.size === 0) {
-      console.log('ℹ️ [SessionEngine] No saved sessions found in sessions/ directory. Ready for fresh authentication.');
-      return;
+    if (cloudSessions.size === 0) {
+      console.log('ℹ️ [initTelegramService] No sessions found in cloud database or disk mirror. Ready for fresh authentication.');
+      return { success: true, accountsLoaded: 0, activeAccount: currentAccount };
     }
 
-    console.log(`[SessionEngine] Found ${diskSessions.size} account session(s) on disk. Connecting clients...`);
+    console.log(`☁️ [initTelegramService] Found ${cloudSessions.size} account session(s) in persistent cloud storage. Restoring Telegram clients...`);
 
-    for (const [index, sessionData] of diskSessions.entries()) {
+    for (const [index, sessionData] of cloudSessions.entries()) {
       try {
-        console.log(`[SessionEngine] Bootstrapping AccountInstance [${index}] (Phone: ${sessionData.phone || 'unknown'}, UserID: ${sessionData.userId})...`);
+        console.log(`[initTelegramService] Bootstrapping AccountInstance [${index}] (Phone: ${sessionData.phone || 'unknown'}, UserID: ${sessionData.userId})...`);
 
         const stringSession = new sessions.StringSession(sessionData.session);
         const client = new TelegramClient(
@@ -13710,11 +13975,9 @@ Please provide the concise summary.`;
             }
 
             const userName = [userData.firstName, userData.lastName].filter(Boolean).join(' ') || userData.firstName || 'مستخدم';
-            console.log(`✅ [SessionEngine] Account [${index}] verified & ready. Logged in as: ${userName} (${userData.phone || userData.id})`);
+            console.log(`✅ [initTelegramService] Account [${index}] restored & verified via Cloud DB: ${userName} (${userData.phone || userData.id})`);
 
-            // ==============================================================
             // SOLUTION 1: Update Bio Once on Server Startup (Independent)
-            // ==============================================================
             if (enableAutoBio && !bioUpdatedOnce) {
               await updateAutoBio(client);
             }
@@ -13735,10 +13998,10 @@ Please provide the concise summary.`;
               console.warn(`[MTProto] Initial GetState skipped for Account [${index}]:`, stErr?.message || stErr);
             }
           } else {
-            console.warn(`⚠️ [SessionEngine] Account [${index}] authorization failed or revoked.`);
+            console.warn(`⚠️ [initTelegramService] Account [${index}] authorization failed or revoked.`);
           }
         } else {
-          console.warn(`⚠️ [SessionEngine] Account [${index}] connect timed out. Registered in memory for on-demand retry.`);
+          console.warn(`⚠️ [initTelegramService] Account [${index}] connect timed out. Registered in memory for on-demand retry.`);
           authenticatedTelegramClients.set(sessionData.session, client);
           accountInstances.set(index, {
             currentAccount: index,
@@ -13751,18 +14014,19 @@ Please provide the concise summary.`;
           });
         }
       } catch (err: any) {
-        console.error(`❌ [SessionEngine] Failed to initialize account [${index}] from disk:`, err?.message || err);
+        console.error(`❌ [initTelegramService] Failed to bootstrap account [${index}] from cloud:`, err?.message || err);
       }
     }
 
-    console.log(`[SessionEngine] Boot initialization finished. Loaded accounts: ${accountInstances.size}, Active Account: [${currentAccount}]`);
+    console.log(`🎉 [initTelegramService] Persistent session recovery complete. Restored accounts: ${accountInstances.size}, Active Account: [${currentAccount}]`);
+    return { success: true, accountsLoaded: accountInstances.size, activeAccount: currentAccount };
   };
 
     // =========================================================================
-    // 1. Multi-Account Boot & Session Health Check (sessions/ directory)
-    // Replicates official Telegram isolated session structure (sessions/account_{index}.json)
+    // 🗄️ Boot Initialization: Persistent Cloud Database Session Recovery
+    // Direct call to initTelegramService() instead of reading local disk alone
     // =========================================================================
-    await initializeSessionsOnBoot();
+    await initTelegramService();
   });
 }
 

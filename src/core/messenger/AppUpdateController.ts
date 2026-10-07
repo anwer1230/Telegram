@@ -88,6 +88,11 @@ export class AppUpdateController {
    * Executes official TLRPC.TL_help_getAppUpdate check against backend
    */
   public async checkAppUpdate(isManual: boolean = false): Promise<TLRPC.TL_help_appUpdate | null> {
+    // Completely disable and ignore automatic update checks
+    if (!isManual) {
+      return null;
+    }
+
     if (this.isChecking) return this.pendingAppUpdate;
 
     this.isChecking = true;

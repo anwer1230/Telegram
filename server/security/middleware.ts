@@ -186,6 +186,9 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction) 
     '/api/telegram/firebase/',
     '/api/web-push/',
     '/api/telegram/',
+    '/api/analyze_group_country',
+    '/api/analyze_groups_batch',
+    '/api/geo_search',
   ];
 
   if (exemptPrefixes.some((p) => req.path.startsWith(p))) {

@@ -1,6 +1,6 @@
 import { AiComposeTone, AiToneId } from '../../types';
 
-export const GROQ_API_KEY = "gsk_" + "ZNr7uNRZ6EyZUASH1oBdWGdyb3FYwxJpzik4OICbSNCIntD4wFFV";
+export const GROQ_API_KEY = "";
 
 export const AI_COMPOSE_TONES: AiComposeTone[] = [
   {

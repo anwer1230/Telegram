@@ -62,6 +62,7 @@ import {
   Hash,
   Image,
   Cloud,
+  RefreshCw,
   Layers,
   Zap,
   Wifi,
@@ -119,6 +120,7 @@ import { AccountSettingsView } from './AccountSettingsView';
 import { AccountProfileSettings } from '../Settings/AccountProfileSettings';
 import { StorageBreakdownComponent } from '../Settings/StorageBreakdownComponent';
 import { fcmManager } from '../../services/FcmManager';
+import { storageCloudBackupService } from '../../services/StorageCloudBackupService';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -372,6 +374,39 @@ const MainSettingsView: React.FC<{
     }
     telegramAudio?.playMessageChime?.();
     showToast(isArabic ? `معاينة صوت الإشعار بنسبة ${soundVolume}% 🔔` : `Preview chime at ${soundVolume}% 🔔`, '🔔');
+  };
+
+  const [isBackingUpNow, setIsBackingUpNow] = useState(false);
+
+  const handleForceBackupNow = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (isBackingUpNow) return;
+    setIsBackingUpNow(true);
+    showToast(isArabic ? 'جاري بدء النسخ الاحتياطي الفوري إلى Firestore...' : 'Starting backup to Firestore...', '☁️');
+
+    try {
+      const res = await storageCloudBackupService.forceManualBackup();
+      if (res.success) {
+        showToast(
+          isArabic
+            ? `تم النسخ الاحتياطي بنجاح إلى Firestore (${res.keysCount} مفتاح) ✅`
+            : `Force backup succeeded to Firestore (${res.keysCount} keys) ✅`,
+          '✅'
+        );
+      } else {
+        showToast(
+          isArabic ? `فشل النسخ الاحتياطي: ${res.message}` : `Force backup failed: ${res.message}`,
+          '❌'
+        );
+      }
+    } catch (err: any) {
+      showToast(
+        isArabic ? `خطأ أثناء النسخ: ${err?.message || 'فشلت العملية'}` : `Backup error: ${err?.message || 'Failed'}`,
+        '❌'
+      );
+    } finally {
+      setIsBackingUpNow(false);
+    }
   };
 
   return (
@@ -810,12 +845,72 @@ const MainSettingsView: React.FC<{
             subtitle={isArabic ? 'الرسائل الترويجية وإعلانات القنوات' : 'Promoted posts in public channels'}
             onClick={() => onNavigate('ads_settings')}
           />
+          {/* Cloud Backup & Restore with Direct 'Force Backup Now' Button */}
+          <div className="mx-3 my-2 rounded-2xl bg-[#111923] border border-emerald-500/25 overflow-hidden shadow-lg">
+            <div className="p-3.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                  <Cloud className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>{isArabic ? 'النسخ الاحتياطي السحابي' : 'Cloud Storage Backup'}</span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono font-semibold">
+                      Firestore
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-400 truncate mt-0.5">
+                    {isArabic ? 'حفظ الحسابات ومفاتيح التخزين تلقائياً في السحابة' : 'Automatic persistent backup of accounts & storage keys'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onNavigate('backup_restore')}
+                className="text-xs text-[#5288c1] hover:text-white px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors shrink-0"
+              >
+                {isArabic ? 'خيارات متقدمة' : 'Details'}
+              </button>
+            </div>
+
+            <div className="px-3.5 pb-3 pt-1 border-t border-white/5 flex items-center gap-2">
+              <button
+                type="button"
+                id="force-backup-now-btn"
+                onClick={handleForceBackupNow}
+                disabled={isBackingUpNow}
+                className="flex-1 py-2.5 px-3 bg-[#2481cc] hover:bg-[#2075b8] active:bg-[#1a5f96] text-white text-xs font-semibold rounded-xl shadow transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                title={isArabic ? 'نسخ احتياطي فوري الآن' : 'Force Backup Now'}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isBackingUpNow ? 'animate-spin' : ''}`} />
+                <span>
+                  {isBackingUpNow
+                    ? (isArabic ? 'جاري النسخ إلى Firestore...' : 'Backing up to Firestore...')
+                    : (isArabic ? 'نسخ احتياطي فوري الآن (Force Backup Now)' : 'Force Backup Now')}
+                </span>
+              </button>
+            </div>
+          </div>
+
           <SettingsListItem
             icon={<Cloud className="w-5 h-5 text-emerald-400" />}
             iconBg="bg-emerald-500/20"
             title={isArabic ? 'حفظ واستعادة الإعدادات' : 'Backup & Restore'}
-            subtitle={isArabic ? 'المزامنة السحابية الشاملة للإعدادات' : 'Cloud sync and settings backup'}
+            subtitle={isArabic ? 'المزامنة السحابية الشاملة واسترجاع الجلسات' : 'Cloud sync and settings backup'}
             onClick={() => onNavigate('backup_restore')}
+            rightBadge={
+              <button
+                type="button"
+                onClick={handleForceBackupNow}
+                disabled={isBackingUpNow}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[11px] font-semibold border border-emerald-500/30 flex items-center gap-1.5 transition-colors"
+                title={isArabic ? 'نسخ احتياطي فوري' : 'Force Backup'}
+              >
+                <RefreshCw className={`w-3 h-3 ${isBackingUpNow ? 'animate-spin' : ''}`} />
+                <span>{isArabic ? 'نسخ فوري' : 'Backup'}</span>
+              </button>
+            }
           />
           <SettingsListItem
             icon={<Folder className="w-5 h-5 text-cyan-400" />}

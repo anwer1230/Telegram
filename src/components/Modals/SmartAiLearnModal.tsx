@@ -19,7 +19,7 @@ import { useTelegram } from '../../context/TelegramContext';
 import { notificationsService } from '../../core/NotificationsService';
 import { SmartAiService, SmartAiPattern } from '../../types';
 
-export const GROQ_API_KEY = "gsk_" + "ZNr7uNRZ6EyZUASH1oBdWGdyb3FYwxJpzik4OICbSNCIntD4wFFV";
+export const GROQ_API_KEY = "";
 
 export const SmartAiLearnModal: React.FC = () => {
   const { activeModal, setActiveModal, showToast } = useTelegram();

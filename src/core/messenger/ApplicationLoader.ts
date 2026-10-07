@@ -31,8 +31,11 @@ export class ApplicationLoader {
 
     console.log(`[ApplicationLoader] Booting Telegram v${BuildVars.BUILD_VERSION_STRING} (Build ${BuildVars.BUILD_VERSION})...`);
 
-    // Schedule automatic update checks
-    this.scheduleAppUpdateCheck();
+    // Automatic updates disabled completely per user request
+    if (this.updateTimer) {
+      clearInterval(this.updateTimer);
+      this.updateTimer = null;
+    }
   }
 
   public static getGcmToken(): string {
@@ -44,22 +47,13 @@ export class ApplicationLoader {
   }
 
   /**
-   * Schedules background periodic update checks without interrupting user experience
+   * Automatic update checks disabled completely
    */
   public static scheduleAppUpdateCheck(): void {
     if (this.updateTimer) {
       clearInterval(this.updateTimer);
+      this.updateTimer = null;
     }
-
-    // Perform initial check shortly after app boot (1.5s delay to let UI render)
-    setTimeout(() => {
-      appUpdateController.checkAppUpdate(false);
-    }, 1500);
-
-    // Periodic check every 24 hours (or configured interval)
-    this.updateTimer = setInterval(() => {
-      appUpdateController.checkAppUpdate(false);
-    }, BuildVars.UPDATE_CHECK_INTERVAL_MS);
   }
 
   /**

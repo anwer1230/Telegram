@@ -1,0 +1,21 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    match /telegram_sessions/{sessionId} {
+      allow read, write: if false; // Restricted to server-side Admin SDK
+    }
+
+    match /client_storage_backups/{backupId} {
+      allow read, write: if false; // Managed securely via Server-Side Admin SDK proxy
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

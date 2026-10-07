@@ -13,28 +13,18 @@ window.addEventListener('error', (event) => {
   }
 });
 
-// PWA Service Worker Registration with automatic update checks (Google AI Studio pattern)
+// PWA Service Worker Registration (automatic update reload and periodic polling disabled per user request)
 if ('serviceWorker' in navigator) {
   const updateSW = registerSW({
-    immediate: true,
+    immediate: false,
     onNeedRefresh() {
-      console.log('[PWA] New content available. Automatically reloading to apply updates...');
-      // Safe reload: localStorage and IndexedDB user sessions/chats are fully preserved
-      window.location.reload();
+      console.log('[PWA] New content available. Automatic reload disabled.');
     },
     onOfflineReady() {
       console.log('[PWA] App is ready to work offline.');
     },
     onRegistered(registration) {
       console.log('[PWA] Service Worker registered successfully:', registration?.scope);
-      // Periodically check for SW updates every 30 minutes
-      if (registration) {
-        setInterval(() => {
-          registration.update().catch((err) => {
-            console.warn('[PWA] Error checking for SW update:', err);
-          });
-        }, 30 * 60 * 1000);
-      }
     },
     onRegisterError(error) {
       console.warn('[PWA] Service Worker registration failed:', error);

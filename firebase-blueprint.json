@@ -1,0 +1,120 @@
+{
+  "entities": {
+    "TelegramSession": {
+      "title": "TelegramSession",
+      "description": "Encrypted Telegram session and account credentials stored at rest for persistent cross-container restoration.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID, e.g. account_0 or phone_xxx"
+        },
+        "accountIndex": {
+          "type": "number",
+          "description": "The slot index of the account (0-3)"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Associated phone number"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Telegram user ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Telegram user display name"
+        },
+        "username": {
+          "type": "string",
+          "description": "Telegram handle"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Avatar base64 or URL"
+        },
+        "isPremium": {
+          "type": "boolean",
+          "description": "Whether user has Telegram Premium"
+        },
+        "encryptedPayload": {
+          "type": "string",
+          "description": "AES-256-GCM encrypted session string and tokens"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp in ISO format"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp in ISO format"
+        },
+        "version": {
+          "type": "number",
+          "description": "Schema version"
+        }
+      },
+      "required": [
+        "id",
+        "accountIndex",
+        "encryptedPayload",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ClientStorageBackup": {
+      "title": "ClientStorageBackup",
+      "description": "Periodically backed up client localStorage state including tg_multi_accounts_v3, app_settings, and account preferences.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Backup document identifier (e.g. default_backup or userId)"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Associated Telegram user ID"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Associated phone number"
+        },
+        "storageData": {
+          "type": "string",
+          "description": "JSON-serialized map of critical local storage keys including tg_multi_accounts_v3 and app_settings"
+        },
+        "keysSummary": {
+          "type": "string",
+          "description": "Comma-separated list of keys included in the backup"
+        },
+        "backupTimestamp": {
+          "type": "string",
+          "description": "ISO timestamp of when the backup was produced"
+        },
+        "clientVersion": {
+          "type": "string",
+          "description": "Client app version or user agent"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last Firestore update"
+        }
+      },
+      "required": [
+        "id",
+        "storageData",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/telegram_sessions/{sessionId}": {
+      "schema": "TelegramSession",
+      "description": "Stores encrypted credentials and session strings for active Telegram accounts."
+    },
+    "/client_storage_backups/{backupId}": {
+      "schema": "ClientStorageBackup",
+      "description": "Stores periodic snapshots of client localStorage keys (tg_multi_accounts_v3, app_settings) to prevent data loss on browser clear or device change."
+    }
+  }
+}

@@ -39,6 +39,7 @@ import { LiveLinkDiscoverModal } from './components/Modals/LiveLinkDiscoverModal
 import { UserProfileModal } from './components/Modals/UserProfileModal';
 import { SalamActivityLog } from './components/SalamActivityLog';
 import { TelemetryLogModal } from './components/Modals/TelemetryLogModal';
+import { GroupCountryAnalyzerModal } from './components/Modals/GroupCountryAnalyzerModal';
 import { logTelemetry, isTelemetryEnabled } from './utils/telemetry';
 import { ForwardModal } from './components/Interactions/ForwardModal';
 import { ChatContextMenuView } from './components/Interactions/ChatContextMenu';
@@ -139,9 +140,8 @@ const TelegramAppContent: React.FC = () => {
         if (id === NotificationCenter.appUpdateAvailable) {
           const update = args[0];
           const isManual = args[1];
-          // Check if previously dismissed
-          const dismissedVer = localStorage.getItem('tg_dismissed_update_version');
-          if (isManual || !dismissedVer || dismissedVer !== update?.version) {
+          // Automatic update prompt disabled - only show if manual
+          if (isManual) {
             setShowUpdateDialog(true);
           }
         } else if (id === NotificationCenter.appUpdateNotModified) {
@@ -306,6 +306,12 @@ const TelegramAppContent: React.FC = () => {
       {/* Telemetry Diagnostics & Latency Log Modal */}
       <TelemetryLogModal
         isOpen={activeModal === 'telemetry-log'}
+        onClose={() => setActiveModal('none')}
+      />
+
+      {/* Group Country Analyzer & Geo Search Modal (Groq Llama 3.3) */}
+      <GroupCountryAnalyzerModal
+        isOpen={activeModal === 'group-country-analyzer'}
         onClose={() => setActiveModal('none')}
       />
 
