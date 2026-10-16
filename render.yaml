@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: telegram-marketing-pro
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install --legacy-peer-deps && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=460
+      - key: TELEGRAM_API_ID
+        value: "22043994"
+      - key: TELEGRAM_API_HASH
+        value: "56f64582b363d367280db96586b97801"
+      - key: SESSION_SECRET
+        generateValue: true

@@ -1,0 +1,45 @@
+{
+  "id": "/",
+  "name": "Telegram Web Pro",
+  "short_name": "Telegram",
+  "description": "منصة تيليجرام المتكاملة للدردشة وإدارة الخدمات والحسابات",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#18222d",
+  "theme_color": "#2481cc",
+  "orientation": "portrait-primary",
+  "categories": ["social", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/app-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

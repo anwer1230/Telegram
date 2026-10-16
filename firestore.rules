@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isValidSession(data) {
+      return data.keys().hasAll(['phone', 'sessionString', 'savedAt'])
+        && data.phone is string
+        && data.phone.size() > 0
+        && data.phone.size() <= 32
+        && data.sessionString is string
+        && data.sessionString.size() > 0
+        && data.sessionString.size() <= 2048
+        && data.savedAt is string
+        && data.savedAt.size() <= 64;
+    }
+
+    match /telegram_sessions/{phone} {
+      allow get, delete: if isValidId(phone);
+      allow list: if true;
+      allow create, update: if isValidId(phone) && isValidSession(request.resource.data);
+    }
+
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

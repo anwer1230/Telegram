@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Storage Snapshot Manager</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #0f141c; color: #e1e7ec; }
+    h1 { color: #50a2e9; font-size: 24px; }
+    .card { background: #18222d; border: 1px solid #24303f; border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+    button { background: #2f8cc8; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
+    button:hover { background: #3fa1e0; }
+    button.danger { background: #d9534f; margin-left: 8px; }
+    button.danger:hover { background: #e0635f; }
+    input[type="text"] { background: #0e1621; border: 1px solid #24303f; color: #fff; padding: 10px 14px; border-radius: 6px; width: 60%; margin-right: 10px; }
+    ul { list-style: none; padding: 0; }
+    li { background: #1e2c3a; border: 1px solid #283747; border-radius: 6px; padding: 12px 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .badge { font-size: 12px; color: #8292a1; }
+    #status { margin-top: 10px; font-size: 14px; color: #4fa94d; }
+  </style>
+</head>
+<body>
+  <h1>Storage Snapshot Manager</h1>
+  <div class="card">
+    <h3>Take Snapshot (LocalStorage + IndexedDB)</h3>
+    <div style="display: flex; align-items: center;">
+      <input type="text" id="comment" placeholder="Optional snapshot comment / note">
+      <button onclick="takeSnapshot()">Take Snapshot</button>
+    </div>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <h3>Saved Snapshots</h3>
+      <button onclick="loadList()">Refresh</button>
+    </div>
+    <ul id="snapshot-list">
+      <li>Loading snapshots...</li>
+    </ul>
+  </div>
+
+  <script>
+    async function loadList() {
+      const res = await fetch('/api/snapshots');
+      const list = await res.json();
+      const el = document.getElementById('snapshot-list');
+      if (!list.length) {
+        el.innerHTML = '<li style="color:#8292a1">No snapshots found.</li>';
+        return;
+      }
+      el.innerHTML = list.map(item => `
+        <li>
+          <div>
+            <strong>${item.name}</strong>
+            ${item.comment ? ` - <em>"${item.comment}"</em>` : ''}
+            <div class="badge">${new Date(item.timestamp).toLocaleString()}</div>
+          </div>
+          <div>
+            <button onclick="restoreSnapshot('${item.name}')">Restore</button>
+            <button class="danger" onclick="deleteSnapshot('${item.name}')">Delete</button>
+          </div>
+        </li>
+      `).join('');
+    }
+
+    async function takeSnapshot() {
+      const comment = document.getElementById('comment').value;
+      const status = document.getElementById('status');
+      status.innerText = 'Creating snapshot...';
+      const payload = {
+        comment,
+        timestamp: Date.now(),
+        localStorage: { ...localStorage }
+      };
+      const res = await fetch('/api/snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        status.innerText = 'Snapshot saved: ' + data.filename;
+        loadList();
+      } else {
+        status.innerText = 'Error saving snapshot';
+      }
+    }
+
+    async function restoreSnapshot(filename) {
+      if (!confirm('Restore this snapshot? It will replace your current local storage.')) return;
+      const res = await fetch('/api/snapshots/' + filename);
+      const data = await res.json();
+      if (data.localStorage) {
+        localStorage.clear();
+        for (const [k, v] of Object.entries(data.localStorage)) {
+          localStorage.setItem(k, v);
+        }
+        alert('Snapshot restored into localStorage!');
+      }
+    }
+
+    async function deleteSnapshot(filename) {
+      if (!confirm('Delete snapshot ' + filename + '?')) return;
+      await fetch('/api/snapshots/' + filename, { method: 'DELETE' });
+      loadList();
+    }
+
+    loadList();
+  </script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "TelegramSession": {
+      "title": "Telegram Session",
+      "description": "A persistent Telegram MTProto user session with credentials and account metadata",
+      "type": "object",
+      "properties": {
+        "phone": {
+          "type": "string",
+          "description": "Normalized international phone number of the Telegram account"
+        },
+        "sessionString": {
+          "type": "string",
+          "description": "GramJS/Telethon StringSession authorization key data"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name or first name of the user"
+        },
+        "username": {
+          "type": "string",
+          "description": "Optional Telegram username handle"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Telegram numeric user ID"
+        },
+        "savedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp of when the session was created or last updated"
+        }
+      },
+      "required": ["phone", "sessionString", "savedAt"]
+    }
+  },
+  "firestore": {
+    "/telegram_sessions/{phone}": {
+      "schema": "TelegramSession",
+      "description": "Collection of active and saved Telegram user sessions indexed by phone number"
+    }
+  }
+}

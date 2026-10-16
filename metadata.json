@@ -1,0 +1,6 @@
+{
+  "name": "Abu Malik Telegram Services",
+  "description": "منصة خدمات تيليجرام المتكاملة وإدارة الحسابات ومركز الخدمات الأكاديمية والتحويل",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

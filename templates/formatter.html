@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>منسّق المستندات الاحترافي</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+/* ── Reset & Base ── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#f1f5f9;
+  font-family:'Cairo','Segoe UI',sans-serif;
+  direction:rtl;
+  min-height:100vh;
+  color:#1e293b;
+}
+
+/* ── CSS Variables (Programanwer blue theme) ── */
+:root{
+  --primary:     #3b82f6;
+  --primary-dark:#2563eb;
+  --primary-fg:  #ffffff;
+  --background:  #f1f5f9;
+  --card:        #ffffff;
+  --border:      #e2e8f0;
+  --muted:       #f8fafc;
+  --muted-fg:    #64748b;
+  --foreground:  #1e293b;
+  --emerald:     #10b981;
+  --emerald-dark:#059669;
+  --red:         #ef4444;
+  --red-dark:    #dc2626;
+  --amber:       #f59e0b;
+  --radius:      0.75rem;
+  --shadow-sm:   0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:   0 4px 12px rgba(0,0,0,.08),0 2px 6px rgba(0,0,0,.04);
+}
+
+/* ── Header ── */
+.app-header{
+  background:linear-gradient(135deg,#1d4ed8 0%,#3b82f6 60%,#60a5fa 100%);
+  color:#fff;
+  padding:14px 20px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  box-shadow:0 3px 12px rgba(59,130,246,.35);
+  position:sticky;top:0;z-index:50;
+}
+.header-icon{
+  width:40px;height:40px;
+  background:rgba(255,255,255,.2);
+  border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.1rem;
+  backdrop-filter:blur(4px);
+}
+.header-title{font-size:1.05rem;font-weight:700;line-height:1.2}
+.header-sub{font-size:.72rem;opacity:.8;margin-top:1px}
+
+/* ── Tab Nav ── */
+.tab-wrap{max-width:900px;margin:20px auto 0;padding:0 16px}
+.tab-nav{
+  display:flex;gap:4px;
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:calc(var(--radius) + 4px);
+  padding:4px;
+  box-shadow:var(--shadow-sm);
+}
+.tab-btn{
+  flex:1;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  padding:9px 8px;
+  border:none;background:transparent;
+  border-radius:var(--radius);
+  font-size:.8rem;font-weight:600;
+  font-family:'Cairo',sans-serif;
+  color:var(--muted-fg);
+  cursor:pointer;
+  transition:all .18s;
+  white-space:nowrap;
+}
+.tab-btn:hover{background:var(--muted);color:var(--foreground)}
+.tab-btn.active{
+  background:var(--primary);
+  color:#fff;
+  box-shadow:0 2px 8px rgba(59,130,246,.4);
+}
+
+/* ── Main ── */
+.app-main{max-width:900px;margin:20px auto 40px;padding:0 16px}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* ── Cards ── */
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:calc(var(--radius) + 2px);
+  box-shadow:var(--shadow-sm);
+  margin-bottom:16px;
+  overflow:hidden;
+}
+.card-head{
+  padding:14px 18px;
+  display:flex;align-items:center;gap:10px;
+  border-bottom:1px solid var(--border);
+}
+.card-head-icon{
+  width:34px;height:34px;
+  border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:.9rem;flex-shrink:0;
+}
+.card-head-title{font-size:.9rem;font-weight:700;color:var(--foreground)}
+.card-head-sub{font-size:.72rem;color:var(--muted-fg);margin-top:1px}
+.card-body{padding:18px}
+
+/* ── Drop Zone ── */
+.drop-zone{
+  border:2px dashed #cbd5e1;
+  border-radius:var(--radius);
+  padding:32px 20px;
+  text-align:center;
+  cursor:pointer;
+  transition:all .2s;
+  background:var(--muted);
+  position:relative;
+  user-select:none;
+}
+.drop-zone:hover,.drop-zone.drag-over{
+  border-color:var(--primary);
+  background:#eff6ff;
+}
+.drop-zone input[type="file"]{
+  position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;
+}
+.drop-zone.ready{border-color:var(--emerald);background:#f0fdf4}
+.drop-zone.err{border-color:var(--red);background:#fef2f2}
+.dz-icons{display:flex;gap:12px;justify-content:center;margin-bottom:10px}
+.dz-icon-box{
+  width:44px;height:44px;border-radius:12px;
+  display:flex;align-items:center;justify-content:center;font-size:1.3rem;
+}
+.dz-icon-pdf{background:#fef2f2;color:#ef4444}
+.dz-icon-docx{background:#eff6ff;color:#3b82f6}
+.dz-icon-html{background:#f0fdf4;color:#10b981}
+.dz-label{font-weight:700;font-size:.9rem;color:var(--foreground);margin-bottom:4px}
+.dz-sub{font-size:.75rem;color:var(--muted-fg)}
+.dz-sub code{
+  font-family:'Courier New',monospace;font-size:.72rem;
+  background:var(--muted);border-radius:4px;padding:1px 5px;
+  border:1px solid var(--border);
+}
+.drop-zone.ready .dz-label{color:var(--emerald)}
+.drop-zone.err .dz-label{color:var(--red)}
+
+/* File Pill */
+.file-pill{
+  display:inline-flex;align-items:center;gap:8px;
+  background:#eff6ff;border:1px solid #bfdbfe;
+  border-radius:999px;padding:6px 14px;
+  font-size:.8rem;color:#1d4ed8;font-weight:600;margin-top:10px;
+}
+.rm-pill{
+  background:none;border:none;cursor:pointer;
+  color:#64748b;font-size:.75rem;padding:0 2px;
+  transition:color .15s;
+}
+.rm-pill:hover{color:var(--red)}
+
+/* ── Options (checkboxes) ── */
+.options-row{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.opt-check{
+  display:inline-flex;align-items:center;gap:8px;
+  background:var(--muted);
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:7px 14px;
+  cursor:pointer;
+  font-size:.8rem;font-weight:600;
+  color:var(--foreground);
+  transition:all .15s;
+}
+.opt-check:hover{border-color:var(--primary);background:#eff6ff;color:var(--primary)}
+.opt-check input{width:15px;height:15px;accent-color:var(--primary);cursor:pointer}
+
+/* ── Settings Row ── */
+.settings-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin-bottom:14px}
+@media(max-width:520px){.settings-row{grid-template-columns:1fr}}
+.field-label{font-size:.75rem;color:var(--muted-fg);margin-bottom:5px;font-weight:600}
+.field-input{
+  width:100%;border:1px solid var(--border);
+  border-radius:8px;padding:8px 12px;
+  font-size:.85rem;font-family:'Cairo',sans-serif;
+  background:var(--card);color:var(--foreground);
+  outline:none;transition:border-color .15s;
+}
+.field-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+
+/* Export format buttons */
+.fmt-btns{display:flex;gap:6px}
+.fmt-btn{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  gap:2px;padding:8px 4px;
+  border:1.5px solid var(--border);background:#fff;
+  border-radius:8px;cursor:pointer;
+  font-size:.7rem;font-weight:700;font-family:'Cairo',sans-serif;
+  color:var(--muted-fg);transition:all .15s;
+}
+.fmt-btn:hover{border-color:var(--primary);color:var(--primary);background:#eff6ff}
+.fmt-btn.active{
+  border-color:var(--primary);background:var(--primary);
+  color:#fff;box-shadow:0 2px 6px rgba(59,130,246,.35);
+}
+.fmt-btn .fmt-emoji{font-size:1.1rem}
+
+/* ── HTML textarea ── */
+.html-textarea{
+  width:100%;border:1px solid var(--border);border-radius:10px;
+  padding:12px;font-size:.83rem;font-family:'Courier New',monospace;
+  min-height:160px;resize:vertical;direction:ltr;text-align:left;
+  outline:none;transition:border-color .15s;background:#f8fafc;
+}
+.html-textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+
+/* Sub-tabs (inside HTML section) */
+.sub-tabs{display:flex;gap:2px;margin-bottom:14px;border-bottom:2px solid var(--border)}
+.sub-tab{
+  background:none;border:none;cursor:pointer;
+  padding:8px 16px;font-size:.82rem;font-weight:600;
+  font-family:'Cairo',sans-serif;color:var(--muted-fg);
+  border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;
+}
+.sub-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.sub-tab:hover:not(.active){color:var(--foreground)}
+
+/* Info tip */
+.info-tip{
+  display:flex;align-items:flex-start;gap:8px;
+  background:#eff6ff;border:1px solid #bfdbfe;
+  border-radius:8px;padding:10px 14px;
+  font-size:.78rem;color:#1d4ed8;margin-top:12px;
+}
+.info-tip i{margin-top:1px;flex-shrink:0}
+
+/* ── Progress ── */
+.progress-area{display:none;margin-top:16px}
+.prog-step{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 14px;border-radius:8px;margin-bottom:6px;
+  font-size:.82rem;background:var(--muted);
+  border:1px solid var(--border);
+  transition:all .2s;
+}
+.prog-step.active{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.prog-step.done{background:#f0fdf4;border-color:#bbf7d0;color:#065f46}
+.prog-step.err{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+.prog-icon{font-size:1.1rem;flex-shrink:0}
+.spin{animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Result Box ── */
+.result-box{
+  display:none;margin-top:16px;
+  padding:20px;
+  background:#f0fdf4;border:1.5px solid #86efac;
+  border-radius:var(--radius);text-align:center;
+}
+.result-icon{font-size:2.2rem;margin-bottom:8px}
+.result-title{font-size:1rem;font-weight:700;color:#065f46;margin-bottom:4px}
+.result-info{font-size:.78rem;color:#047857;margin-bottom:12px}
+.btn-dl{
+  display:inline-flex;align-items:center;gap:8px;
+  background:linear-gradient(135deg,#10b981,#059669);
+  color:#fff;text-decoration:none;
+  padding:10px 24px;border-radius:999px;
+  font-weight:700;font-size:.85rem;font-family:'Cairo',sans-serif;
+  border:none;cursor:pointer;transition:filter .15s;margin:4px;
+}
+.btn-dl:hover{color:#fff;filter:brightness(1.08)}
+.btn-dl.btn-blue{background:linear-gradient(135deg,#3b82f6,#2563eb)}
+.btn-dl.btn-excel{background:linear-gradient(135deg,#10b981,#047857)}
+
+/* ── Convert Button ── */
+.btn-convert{
+  width:100%;padding:12px 24px;
+  background:linear-gradient(135deg,var(--primary),var(--primary-dark));
+  color:#fff;border:none;border-radius:999px;
+  font-weight:700;font-size:.95rem;font-family:'Cairo',sans-serif;
+  cursor:pointer;transition:all .2s;
+  box-shadow:0 4px 14px rgba(59,130,246,.35);
+  display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.btn-convert:hover:not(:disabled){
+  transform:translateY(-2px);
+  box-shadow:0 6px 20px rgba(59,130,246,.45);
+}
+.btn-convert:disabled{opacity:.55;cursor:not-allowed;transform:none}
+.btn-convert.btn-red{
+  background:linear-gradient(135deg,#ef4444,#dc2626);
+  box-shadow:0 4px 14px rgba(239,68,68,.35);
+}
+.btn-convert.btn-red:hover:not(:disabled){box-shadow:0 6px 20px rgba(239,68,68,.45)}
+.btn-convert.btn-green{
+  background:linear-gradient(135deg,#10b981,#059669);
+  box-shadow:0 4px 14px rgba(16,185,129,.35);
+}
+
+/* Error alert */
+.alert-err{
+  display:none;margin-top:12px;padding:12px 16px;
+  background:#fef2f2;border:1px solid #fecaca;border-radius:8px;
+  color:#991b1b;font-size:.83rem;
+}
+
+/* ── Cards for tool descriptions ── */
+.desc-tip{
+  display:flex;align-items:flex-start;gap:10px;
+  background:var(--muted);border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px;font-size:.78rem;
+  color:var(--muted-fg);margin-bottom:14px;
+}
+</style>
+</head>
+<body>
+
+<!-- ══ Header ══ -->
+<header class="app-header">
+  <div class="header-icon"><i class="fas fa-file-word"></i></div>
+  <div>
+    <div class="header-title">منسّق المستندات الاحترافي</div>
+    <div class="header-sub">تحويل PDF • HTML → Word • Excel • PowerPoint</div>
+  </div>
+</header>
+
+<!-- ══ Tab Navigation ══ -->
+<div class="tab-wrap">
+  <div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('pdf')" id="tabBtnPdf">
+      <i class="fas fa-file-pdf"></i> PDF → وورد
+    </button>
+    <button class="tab-btn" onclick="switchTab('html')" id="tabBtnHtml">
+      <i class="fas fa-code"></i> HTML → وورد
+    </button>
+    <button class="tab-btn" onclick="switchTab('excel')" id="tabBtnExcel">
+      <i class="fas fa-file-excel"></i> HTML → Excel
+    </button>
+    <button class="tab-btn" onclick="switchTab('ppt')" id="tabBtnPpt">
+      <i class="fas fa-file-powerpoint"></i> HTML → PPT
+    </button>
+  </div>
+</div>
+
+<!-- ══ Main Content ══ -->
+<main class="app-main">
+
+  <!-- ═══════════════════════════════════════ -->
+  <!--  تبويب 1: PDF → Word                   -->
+  <!-- ═══════════════════════════════════════ -->
+  <div class="tab-panel active" id="panelPdf" id="cardPdf">
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-icon" style="background:#fef2f2;color:#ef4444">
+          <i class="fas fa-file-pdf"></i>
+        </div>
+        <div>
+          <div class="card-head-title">تحويل ملف PDF إلى وورد</div>
+          <div class="card-head-sub">استخراج النصوص والصور والجداول بتنسيق كامل</div>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <div class="desc-tip">
+          <i class="fas fa-circle-info" style="color:var(--primary);margin-top:1px"></i>
+          <span><strong>الرسم الذكي:</strong> يحلل الذكاء الاصطناعي الأرقام والبيانات في PDF ويُضيف مخططاً بيانياً احترافياً (عمودي، دائري، خطي) تلقائياً.</span>
+        </div>
+
+        <!-- Drop Zone -->
+        <div class="drop-zone" id="pdfDropZone" onclick="document.getElementById('pdfFileInput').click()">
+          <input type="file" id="pdfFileInput" accept=".pdf" onchange="handlePdfFile(this)" style="display:none">
+          <div class="dz-icons">
+            <div class="dz-icon-box dz-icon-pdf"><i class="fas fa-file-pdf"></i></div>
+          </div>
+          <div class="dz-label" id="pdfDzLabel">اسحب ملف PDF هنا أو اضغط للاختيار</div>
+          <div class="dz-sub" id="pdfDzSub">يدعم <code>.pdf</code> • يُستخرج النص والصور والجداول</div>
+        </div>
+
+        <!-- File Pill -->
+        <div id="pdfFilePill" style="display:none;text-align:center;margin-top:10px">
+          <span class="file-pill">
+            <i class="fas fa-file-pdf"></i>
+            <span id="pdfFileName"></span>
+            <button class="rm-pill" onclick="clearPdf()"><i class="fas fa-times"></i></button>
+          </span>
+        </div>
+
+        <!-- Options -->
+        <div class="options-row">
+          <label class="opt-check">
+            <input type="checkbox" id="pdfSmartDraw" checked>
+            <i class="fas fa-chart-bar" style="color:#8b5cf6"></i>
+            رسم ذكي بالذكاء الاصطناعي
+          </label>
+          <label class="opt-check">
+            <input type="checkbox" id="pdfKeepImages" checked>
+            <i class="fas fa-image" style="color:#3b82f6"></i>
+            تضمين الصور
+          </label>
+          <label class="opt-check">
+            <input type="checkbox" id="pdfKeepTables" checked>
+            <i class="fas fa-table" style="color:#10b981"></i>
+            تحويل الجداول
+          </label>
+        </div>
+
+        <!-- Progress -->
+        <div id="pdfProgress" class="progress-area">
+          <div class="prog-step" id="pdfStep1"><div class="prog-icon">⬆️</div><span>رفع الملف وتحليله...</span></div>
+          <div class="prog-step" id="pdfStep2"><div class="prog-icon">📄</div><span>استخراج النصوص بتنسيق كامل...</span></div>
+          <div class="prog-step" id="pdfStep3"><div class="prog-icon">🖼️</div><span>استخراج الصور وتضمينها...</span></div>
+          <div class="prog-step" id="pdfStep4"><div class="prog-icon">📊</div><span>تحويل الجداول إلى تنسيق Word...</span></div>
+          <div class="prog-step" id="pdfStep5"><div class="prog-icon">🤖</div><span>تحليل البيانات ورسم المخططات الذكية...</span></div>
+          <div class="prog-step" id="pdfStep6"><div class="prog-icon">💾</div><span>حفظ ملف Word النهائي...</span></div>
+        </div>
+
+        <!-- Result -->
+        <div id="pdfResult" class="result-box">
+          <div class="result-icon">📄✅</div>
+          <div class="result-title">تم التحويل بنجاح!</div>
+          <div class="result-info" id="pdfResultInfo"></div>
+          <a id="pdfDownloadLink" href="#" class="btn-dl" download>
+            <i class="fas fa-download"></i> تحميل ملف Word
+          </a>
+        </div>
+
+        <div id="pdfError" class="alert-err"></div>
+
+        <button class="btn-convert btn-red mt-3" id="pdfConvertBtn" onclick="convertPdf()" disabled style="margin-top:14px">
+          <i class="fas fa-rotate"></i> تحويل PDF إلى Word (مع الصور والجداول)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════ -->
+  <!--  تبويب 2: HTML → Word                  -->
+  <!-- ═══════════════════════════════════════ -->
+  <div class="tab-panel" id="panelHtml" id="cardHtml">
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-icon" style="background:#eff6ff;color:#3b82f6">
+          <i class="fas fa-file-word"></i>
+        </div>
+        <div>
+          <div class="card-head-title">تحويل HTML / كود إلى وورد</div>
+          <div class="card-head-sub">تحويل احترافي مع الحفاظ على الجداول والصور والألوان</div>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <!-- Settings -->
+        <div class="settings-row">
+          <div>
+            <div class="field-label">اسم الملف الناتج</div>
+            <input type="text" id="htmlDocName" class="field-input" placeholder="document" dir="ltr">
+          </div>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div class="sub-tabs">
+          <button class="sub-tab active" id="tabPasteBtn" onclick="switchHtmlTab('paste')">
+            <i class="fas fa-paste me-1"></i>الصق HTML
+          </button>
+          <button class="sub-tab" id="tabFileBtn" onclick="switchHtmlTab('file')">
+            <i class="fas fa-file-upload me-1"></i>ارفع ملف HTML
+          </button>
+        </div>
+
+        <!-- Paste Area -->
+        <div id="htmlPasteArea">
+          <div class="field-label">الصق كود HTML أو محتوى الصفحة:</div>
+          <textarea id="htmlInput" class="html-textarea"
+            placeholder="<html>...</html>  أو الصق المحتوى الخام هنا..."></textarea>
+          <div class="info-tip">
+            <i class="fas fa-circle-info"></i>
+            يدعم: جداول كاملة بالألوان، صور base64، عناوين، قوائم، نصوص منسّقة.
+          </div>
+        </div>
+
+        <!-- File Area -->
+        <div id="htmlFileArea" style="display:none">
+          <div class="drop-zone" id="htmlDropZone" onclick="document.getElementById('htmlFileInput').click()">
+            <input type="file" id="htmlFileInput" accept=".html,.htm" onchange="handleHtmlFile(this)" style="display:none">
+            <div class="dz-icons">
+              <div class="dz-icon-box dz-icon-html"><i class="fas fa-file-code"></i></div>
+            </div>
+            <div class="dz-label">ارفع ملف HTML هنا أو اضغط للاختيار</div>
+            <div class="dz-sub">يدعم <code>.html</code> <code>.htm</code> • يستخرج كامل المحتوى</div>
+          </div>
+          <div id="htmlFilePill" style="display:none;text-align:center;margin-top:10px">
+            <span class="file-pill">
+              <i class="fas fa-file-code"></i>
+              <span id="htmlFileName"></span>
+              <button class="rm-pill" onclick="clearHtmlFile()"><i class="fas fa-times"></i></button>
+            </span>
+          </div>
+        </div>
+
+        <!-- Options -->
+        <div class="options-row">
+          <label class="opt-check">
+            <input type="checkbox" id="htmlSmartDraw" checked>
+            <i class="fas fa-chart-bar" style="color:#8b5cf6"></i>
+            رسم ذكي — مخططات تلقائية
+          </label>
+          <label class="opt-check">
+            <input type="checkbox" id="htmlKeepImages" checked>
+            <i class="fas fa-image" style="color:#3b82f6"></i>
+            تضمين الصور (base64)
+          </label>
+        </div>
+
+        <!-- Progress -->
+        <div id="htmlProgress" class="progress-area">
+          <div class="prog-step" id="htmlStep1"><div class="prog-icon">📊</div><span>تشغيل الرسوم البيانية واستخراج الصور...</span></div>
+          <div class="prog-step" id="htmlStep2"><div class="prog-icon">📝</div><span>تحليل بنية HTML وتحويل النصوص...</span></div>
+          <div class="prog-step" id="htmlStep3"><div class="prog-icon">🎨</div><span>تحويل الجداول مع الألوان الكاملة...</span></div>
+          <div class="prog-step" id="htmlStep4"><div class="prog-icon">🖼️</div><span>تضمين الصور ومعالجة الصفحات...</span></div>
+          <div class="prog-step" id="htmlStep5"><div class="prog-icon">🤖</div><span>الرسم الذكي بالذكاء الاصطناعي...</span></div>
+          <div class="prog-step" id="htmlStep6"><div class="prog-icon">💾</div><span>حفظ ملف Word النهائي...</span></div>
+        </div>
+
+        <!-- Result -->
+        <div id="htmlResult" class="result-box">
+          <div class="result-icon">📝✅</div>
+          <div class="result-title">تم التحويل بنجاح!</div>
+          <a id="htmlDownloadLink" href="#" class="btn-dl" download>
+            <i class="fas fa-download"></i> تحميل ملف Word
+          </a>
+          <a id="htmlExcelDownloadLink" href="#" class="btn-dl btn-excel" download style="display:none">
+            <i class="fas fa-file-excel"></i> تحميل ملف Excel
+          </a>
+        </div>
+
+        <div id="htmlError" class="alert-err"></div>
+
+        <button class="btn-convert" id="htmlConvertBtn" onclick="convertHtml()" style="margin-top:14px">
+          <i class="fas fa-rotate"></i> تحويل HTML إلى Word
+        </button>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════ -->
+  <!--  تبويب 3: HTML → Excel                 -->
+  <!-- ═══════════════════════════════════════ -->
+  <div class="tab-panel" id="panelExcel">
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-icon" style="background:#f0fdf4;color:#10b981">
+          <i class="fas fa-file-excel"></i>
+        </div>
+        <div>
+          <div class="card-head-title">تحويل كود HTML إلى ملف Excel</div>
+          <div class="card-head-sub">استخراج الجداول وتحويلها إلى أوراق عمل Excel</div>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <!-- Settings -->
+        <div class="settings-row">
+          <div>
+            <div class="field-label">اسم ملف Excel الناتج</div>
+            <input type="text" id="excelDocName" class="field-input" placeholder="tables" dir="ltr">
+          </div>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div class="sub-tabs">
+          <button class="sub-tab active" id="tabExcelPasteBtn" onclick="switchExcelTab('paste')">
+            <i class="fas fa-paste me-1"></i>الصق HTML
+          </button>
+          <button class="sub-tab" id="tabExcelFileBtn" onclick="switchExcelTab('file')">
+            <i class="fas fa-file-upload me-1"></i>ارفع ملف HTML
+          </button>
+        </div>
+
+        <div id="excelPasteArea">
+          <div class="field-label">الصق كود HTML يحتوي على جداول:</div>
+          <textarea id="excelHtmlInput" class="html-textarea"
+            placeholder="<table>...</table>"></textarea>
+          <div class="info-tip">
+            <i class="fas fa-circle-info"></i>
+            يستخرج جميع الجداول <code>&lt;table&gt;</code> من HTML ويحوّلها إلى أوراق عمل منفصلة في Excel.
+          </div>
+        </div>
+
+        <div id="excelFileArea" style="display:none">
+          <div class="drop-zone" id="excelDropZone" onclick="document.getElementById('excelFileInput').click()">
+            <input type="file" id="excelFileInput" accept=".html,.htm" onchange="handleExcelFile(this)" style="display:none">
+            <div class="dz-icons">
+              <div class="dz-icon-box dz-icon-html"><i class="fas fa-file-code"></i></div>
+            </div>
+            <div class="dz-label">ارفع ملف HTML هنا</div>
+            <div class="dz-sub">يدعم <code>.html</code> <code>.htm</code></div>
+          </div>
+          <div id="excelFilePill" style="display:none;text-align:center;margin-top:10px">
+            <span class="file-pill" style="background:#f0fdf4;border-color:#bbf7d0;color:#065f46">
+              <i class="fas fa-file-code"></i>
+              <span id="excelFileName"></span>
+              <button class="rm-pill" onclick="clearExcelFile()"><i class="fas fa-times"></i></button>
+            </span>
+          </div>
+        </div>
+
+        <!-- Progress -->
+        <div id="excelProgress" class="progress-area">
+          <div class="prog-step" id="excelStep1"><div class="prog-icon">🔍</div><span>تحليل HTML واستخراج الجداول...</span></div>
+          <div class="prog-step" id="excelStep2"><div class="prog-icon">📊</div><span>تحويل الجداول إلى أوراق عمل...</span></div>
+          <div class="prog-step" id="excelStep3"><div class="prog-icon">🎨</div><span>تطبيق التنسيق والألوان...</span></div>
+          <div class="prog-step" id="excelStep4"><div class="prog-icon">💾</div><span>حفظ ملف Excel...</span></div>
+        </div>
+
+        <!-- Result -->
+        <div id="excelResult" class="result-box">
+          <div class="result-icon">📊✅</div>
+          <div class="result-title">تم التحويل إلى Excel بنجاح!</div>
+          <a id="excelDownloadLink" href="#" class="btn-dl btn-excel" download>
+            <i class="fas fa-download"></i> تحميل ملف Excel
+          </a>
+        </div>
+
+        <div id="excelError" class="alert-err"></div>
+
+        <button class="btn-convert btn-green" id="excelConvertBtn" onclick="convertHtmlToExcel()" style="margin-top:14px">
+          <i class="fas fa-file-excel"></i> تحويل HTML إلى Excel
+        </button>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════ -->
+  <!--  تبويب 4: HTML → PowerPoint            -->
+  <!-- ═══════════════════════════════════════ -->
+  <div class="tab-panel" id="panelPpt">
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-icon" style="background:#fff7ed;color:#f97316">
+          <i class="fas fa-file-powerpoint"></i>
+        </div>
+        <div>
+          <div class="card-head-title">تحويل كود HTML إلى PowerPoint</div>
+          <div class="card-head-sub">تحويل HTML إلى شرائح PowerPoint احترافية</div>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <!-- Settings -->
+        <div class="settings-row">
+          <div>
+            <div class="field-label">اسم ملف PowerPoint الناتج</div>
+            <input type="text" id="pptDocName" class="field-input" placeholder="presentation" dir="ltr">
+          </div>
+        </div>
+
+        <div class="field-label" style="margin-bottom:6px">الصق كود HTML للشرائح:</div>
+        <textarea id="pptHtmlInput" class="html-textarea"
+          placeholder="<h1>عنوان الشريحة الأولى</h1>&#10;<p>محتوى الشريحة...</p>&#10;<!-- hr أو --slide-- للفصل بين الشرائح -->"></textarea>
+
+        <div class="info-tip" style="margin-top:12px">
+          <i class="fas fa-circle-info"></i>
+          استخدم <code>&lt;hr&gt;</code> أو <code>--slide--</code> للفصل بين الشرائح. يدعم العناوين والجداول والقوائم.
+        </div>
+
+        <!-- Progress -->
+        <div id="pptProgress" class="progress-area">
+          <div class="prog-step" id="pptStep1"><div class="prog-icon">🔍</div><span>تحليل HTML وتحديد الشرائح...</span></div>
+          <div class="prog-step" id="pptStep2"><div class="prog-icon">🎨</div><span>تصميم الشرائح والتنسيق...</span></div>
+          <div class="prog-step" id="pptStep3"><div class="prog-icon">💾</div><span>حفظ ملف PowerPoint...</span></div>
+        </div>
+
+        <!-- Result -->
+        <div id="pptResult" class="result-box">
+          <div class="result-icon">📑✅</div>
+          <div class="result-title">تم إنشاء العرض بنجاح!</div>
+          <a id="pptDownloadLink" href="#" class="btn-dl" style="background:linear-gradient(135deg,#f97316,#ea580c)" download>
+            <i class="fas fa-download"></i> تحميل ملف PowerPoint
+          </a>
+        </div>
+
+        <div id="pptError" class="alert-err"></div>
+
+        <button class="btn-convert" id="pptConvertBtn" onclick="convertHtmlToPpt()" style="margin-top:14px;background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 4px 14px rgba(249,115,22,.35)">
+          <i class="fas fa-file-powerpoint"></i> تحويل HTML إلى PowerPoint
+        </button>
+
+      </div>
+    </div>
+  </div>
+
+</main><!-- .app-main -->
+
+<script>
+// ══ Tab Switching ══
+const TABS = ['pdf','html','excel','ppt'];
+function switchTab(tab) {
+  TABS.forEach(t => {
+    document.getElementById('panel' + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle('active', t === tab);
+    document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle('active', t === tab);
+  });
+  // Section filter compat
+  history.replaceState(null,'','?section=' + (tab==='pdf'?'pdf2word':tab==='html'?'html2word':tab==='excel'?'html2excel':'html2ppt'));
+}
+
+// ══ Step Helper ══
+function setStep(id, state) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('active','done','err');
+  if (state) el.classList.add(state);
+}
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ══════════════════════════════════════════
+//  PDF → Word
+// ══════════════════════════════════════════
+let pdfFile = null;
+
+function handlePdfFile(input) {
+  const f = input.files[0];
+  if (!f) return;
+  pdfFile = f;
+  document.getElementById('pdfFileName').textContent = f.name;
+  document.getElementById('pdfFilePill').style.display = 'block';
+  document.getElementById('pdfDropZone').classList.add('ready');
+  document.getElementById('pdfDzLabel').textContent = 'تم تحميل الملف ✓';
+  document.getElementById('pdfDzSub').textContent = f.name;
+  document.getElementById('pdfConvertBtn').disabled = false;
+  resetPdfUI();
+}
+function clearPdf() {
+  pdfFile = null;
+  document.getElementById('pdfFileInput').value = '';
+  document.getElementById('pdfFilePill').style.display = 'none';
+  document.getElementById('pdfDropZone').classList.remove('ready');
+  document.getElementById('pdfDzLabel').textContent = 'اسحب ملف PDF هنا أو اضغط للاختيار';
+  document.getElementById('pdfDzSub').innerHTML = 'يدعم <code>.pdf</code> • يُستخرج النص والصور والجداول';
+  document.getElementById('pdfConvertBtn').disabled = true;
+  resetPdfUI();
+}
+function resetPdfUI() {
+  document.getElementById('pdfProgress').style.display = 'none';
+  document.getElementById('pdfResult').style.display = 'none';
+  document.getElementById('pdfError').style.display = 'none';
+  ['pdfStep1','pdfStep2','pdfStep3','pdfStep4','pdfStep5','pdfStep6']
+    .forEach(id => setStep(id,''));
+}
+
+async function convertPdf() {
+  if (!pdfFile) return;
+  const btn = document.getElementById('pdfConvertBtn');
+  btn.disabled = true;
+  document.getElementById('pdfProgress').style.display = 'block';
+  document.getElementById('pdfResult').style.display = 'none';
+  document.getElementById('pdfError').style.display = 'none';
+
+  const steps = ['pdfStep1','pdfStep2','pdfStep3','pdfStep4','pdfStep5','pdfStep6'];
+  steps.forEach(s => setStep(s,''));
+
+  const smartDraw = document.getElementById('pdfSmartDraw').checked;
+
+  try {
+    setStep('pdfStep1','active');
+    const fd = new FormData();
+    fd.append('file', pdfFile);
+    fd.append('smart_draw', smartDraw ? 'true' : 'false');
+
+    const animSteps = async () => {
+      await delay(800);  setStep('pdfStep1','done'); setStep('pdfStep2','active');
+      await delay(1000); setStep('pdfStep2','done'); setStep('pdfStep3','active');
+      await delay(900);  setStep('pdfStep3','done'); setStep('pdfStep4','active');
+      await delay(800);  setStep('pdfStep4','done'); setStep('pdfStep5','active');
+      await delay(smartDraw ? 3500 : 200); setStep('pdfStep5','done'); setStep('pdfStep6','active');
+    };
+
+    const [_, resp] = await Promise.all([
+      animSteps(),
+      fetch('/tools/pdf_to_word', { method: 'POST', body: fd })
+    ]);
+
+    const data = await resp.json();
+    setStep('pdfStep6','done');
+
+    if (data.success) {
+      document.getElementById('pdfResult').style.display = 'block';
+      document.getElementById('pdfResultInfo').textContent =
+        `تم تحويل ${data.pages || '?'} صفحة بنجاح • ${data.filename}`;
+      document.getElementById('pdfDownloadLink').href = data.download_url;
+      document.getElementById('pdfDownloadLink').download = data.filename;
+    } else {
+      throw new Error(data.error || 'خطأ غير معروف');
+    }
+  } catch(e) {
+    steps.forEach(s => {
+      if (document.getElementById(s).classList.contains('active')) setStep(s,'err');
+    });
+    const errEl = document.getElementById('pdfError');
+    errEl.style.display = 'block';
+    errEl.innerHTML = '<i class="fas fa-circle-exclamation me-2"></i>' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// ══════════════════════════════════════════
+//  HTML → Word
+// ══════════════════════════════════════════
+let htmlFileContent = null;
+
+function switchHtmlTab(tab) {
+  document.getElementById('htmlPasteArea').style.display = tab==='paste' ? 'block' : 'none';
+  document.getElementById('htmlFileArea').style.display  = tab==='file'  ? 'block' : 'none';
+  document.getElementById('tabPasteBtn').classList.toggle('active', tab==='paste');
+  document.getElementById('tabFileBtn').classList.toggle('active', tab==='file');
+  htmlFileContent = null;
+}
+
+function handleHtmlFile(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    htmlFileContent = e.target.result;
+    document.getElementById('htmlFileName').textContent = f.name;
+    document.getElementById('htmlFilePill').style.display = 'block';
+    document.getElementById('htmlDropZone').classList.add('ready');
+    const nameWithout = f.name.replace(/\.[^.]+$/, '');
+    document.getElementById('htmlDocName').value = nameWithout;
+  };
+  reader.readAsText(f, 'utf-8');
+}
+function clearHtmlFile() {
+  htmlFileContent = null;
+  document.getElementById('htmlFileInput').value = '';
+  document.getElementById('htmlFilePill').style.display = 'none';
+  document.getElementById('htmlDropZone').classList.remove('ready');
+}
+
+// معالجة HTML مسبقة: Canvas → img
+async function prepareHtmlForConvert(rawHtml) {
+  return new Promise(resolve => {
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1200px;height:900px;visibility:hidden;';
+    document.body.appendChild(iframe);
+    try {
+      const iDoc = iframe.contentDocument || iframe.contentWindow.document;
+      iDoc.open(); iDoc.write(rawHtml); iDoc.close();
+    } catch(e) {
+      document.body.removeChild(iframe);
+      resolve(rawHtml); return;
+    }
+    let waited = 0;
+    const checkInterval = setInterval(() => {
+      waited += 200;
+      const ready = iframe.contentWindow && iframe.contentWindow.__chartsReady;
+      if (ready || waited >= 4000) {
+        clearInterval(checkInterval);
+        try {
+          const iDoc = iframe.contentDocument || iframe.contentWindow.document;
+          const canvases = iDoc.querySelectorAll('canvas');
+          canvases.forEach(canvas => {
+            try {
+              const dataUrl = canvas.toDataURL('image/png', 1.0);
+              if (dataUrl && dataUrl.length > 100 && dataUrl !== 'data:,') {
+                const img = iDoc.createElement('img');
+                img.src = dataUrl;
+                const w = canvas.width || canvas.offsetWidth || 600;
+                const h = canvas.height || canvas.offsetHeight || 400;
+                img.setAttribute('width',  Math.min(w, 900));
+                img.setAttribute('height', Math.round(h * Math.min(900/w, 1)));
+                img.style.cssText = 'max-width:100%;height:auto;display:block;margin:8px auto;';
+                canvas.parentNode && canvas.parentNode.replaceChild(img, canvas);
+              } else {
+                canvas.parentNode && canvas.parentNode.removeChild(canvas);
+              }
+            } catch(e) {
+              canvas.parentNode && canvas.parentNode.removeChild(canvas);
+            }
+          });
+          const INLINE_PROPS = ['color','background-color','font-size','font-weight','font-family','text-align','border-left-color','border-right-color'];
+          const SKIP_BG_TAGS = new Set(['html','body','head','script','style','meta','link']);
+          iDoc.querySelectorAll('*').forEach(el => {
+            try {
+              const tag = (el.tagName||'').toLowerCase();
+              if (SKIP_BG_TAGS.has(tag)) return;
+              const computed = iframe.contentWindow.getComputedStyle(el);
+              const existing = el.getAttribute('style') || '';
+              const additions = [];
+              INLINE_PROPS.forEach(prop => {
+                if (existing.includes(prop)) return;
+                const val = computed.getPropertyValue(prop);
+                if (!val) return;
+                if (val==='rgba(0, 0, 0, 0)' || val==='transparent') return;
+                if (prop==='color' && (val==='rgb(0, 0, 0)' || val==='rgba(0,0,0,1)')) return;
+                if (prop==='background-color') {
+                  if (val==='rgba(0, 0, 0, 0)' || val==='transparent' || val==='rgb(255, 255, 255)') return;
+                }
+                additions.push(`${prop}:${val}`);
+              });
+              if (additions.length) {
+                el.setAttribute('style', existing + (existing && !existing.endsWith(';') ? ';' : '') + additions.join(';'));
+              }
+            } catch(e) {}
+          });
+          const result = iDoc.documentElement.outerHTML;
+          document.body.removeChild(iframe);
+          resolve(result);
+        } catch(e) {
+          document.body.removeChild(iframe);
+          resolve(rawHtml);
+        }
+      }
+    }, 200);
+  });
+}
+
+async function convertHtml() {
+  const isFile = document.getElementById('htmlFileArea').style.display !== 'none';
+  let htmlContent = isFile ? htmlFileContent : document.getElementById('htmlInput').value.trim();
+  if (!htmlContent) { alert('يرجى إدخال HTML أو رفع ملف HTML'); return; }
+
+  const btn = document.getElementById('htmlConvertBtn');
+  btn.disabled = true;
+  document.getElementById('htmlProgress').style.display = 'block';
+  document.getElementById('htmlResult').style.display = 'none';
+  document.getElementById('htmlError').style.display = 'none';
+
+  const steps = ['htmlStep1','htmlStep2','htmlStep3','htmlStep4','htmlStep5','htmlStep6'];
+  steps.forEach(s => setStep(s,''));
+
+  const filename  = document.getElementById('htmlDocName').value.trim() || 'document';
+  const smartDraw = document.getElementById('htmlSmartDraw').checked;
+
+  try {
+    setStep('htmlStep1','active');
+    const hasCharts = htmlContent.includes('Chart(') || htmlContent.includes('<canvas');
+    if (hasCharts) {
+      try { htmlContent = await prepareHtmlForConvert(htmlContent); } catch(e) {}
+    }
+    setStep('htmlStep1','done'); setStep('htmlStep2','active');
+
+    const animSteps = async () => {
+      await delay(500);  setStep('htmlStep2','done'); setStep('htmlStep3','active');
+      await delay(600);  setStep('htmlStep3','done'); setStep('htmlStep4','active');
+      await delay(500);  setStep('htmlStep4','done'); setStep('htmlStep5','active');
+      await delay(smartDraw ? 3500 : 300); setStep('htmlStep5','done'); setStep('htmlStep6','active');
+    };
+
+    const [_, resp] = await Promise.all([
+      animSteps(),
+      fetch('/tools/html_to_word', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ html: htmlContent, filename, smart_draw: smartDraw, rtl: true })
+      })
+    ]);
+
+    const data = await resp.json();
+    setStep('htmlStep6','done');
+
+    if (data.success) {
+      document.getElementById('htmlResult').style.display = 'block';
+      document.getElementById('htmlDownloadLink').href = data.download_url;
+      document.getElementById('htmlDownloadLink').download = data.filename;
+      document.getElementById('htmlExcelDownloadLink').style.display = 'none';
+    } else {
+      throw new Error(data.error || 'خطأ غير معروف');
+    }
+  } catch(e) {
+    steps.forEach(s => {
+      if (document.getElementById(s).classList.contains('active')) setStep(s,'err');
+    });
+    const errEl = document.getElementById('htmlError');
+    errEl.style.display = 'block';
+    errEl.innerHTML = '<i class="fas fa-circle-exclamation me-2"></i>' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// ══════════════════════════════════════════
+//  HTML → Excel (تبويب 3 + دالة مشتركة)
+// ══════════════════════════════════════════
+let excelFileContent = null;
+
+function switchExcelTab(tab) {
+  document.getElementById('excelPasteArea').style.display = tab==='paste' ? 'block' : 'none';
+  document.getElementById('excelFileArea').style.display  = tab==='file'  ? 'block' : 'none';
+  document.getElementById('tabExcelPasteBtn').classList.toggle('active', tab==='paste');
+  document.getElementById('tabExcelFileBtn').classList.toggle('active', tab==='file');
+  excelFileContent = null;
+}
+
+function handleExcelFile(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    excelFileContent = e.target.result;
+    document.getElementById('excelFileName').textContent = f.name;
+    document.getElementById('excelFilePill').style.display = 'block';
+    document.getElementById('excelDropZone').classList.add('ready');
+    document.getElementById('excelDocName').value = f.name.replace(/\.[^.]+$/,'');
+  };
+  reader.readAsText(f,'utf-8');
+}
+function clearExcelFile() {
+  excelFileContent = null;
+  document.getElementById('excelFileInput').value = '';
+  document.getElementById('excelFilePill').style.display = 'none';
+  document.getElementById('excelDropZone').classList.remove('ready');
+}
+
+// دالة مشتركة للتحويل إلى Excel (يُستدعى من تبويب HTML→Excel وأيضاً من الزر القديم في HTML→Word)
+async function convertHtmlToExcel() {
+  // تحديد مصدر HTML: هل نحن في تبويب Excel المستقل؟
+  const isExcelPanel = document.getElementById('panelExcel').classList.contains('active');
+  let htmlContent, filename, progressPrefix, stepsIds, errorId, resultId, dlId;
+
+  if (isExcelPanel) {
+    const isFile = document.getElementById('excelFileArea').style.display !== 'none';
+    htmlContent = isFile ? excelFileContent : document.getElementById('excelHtmlInput').value.trim();
+    filename    = document.getElementById('excelDocName').value.trim() || 'tables';
+    progressPrefix = 'excel';
+    stepsIds = ['excelStep1','excelStep2','excelStep3','excelStep4'];
+    errorId  = 'excelError';
+    resultId = 'excelResult';
+    dlId     = 'excelDownloadLink';
+  } else {
+    // قديم: استدعاء من تبويب HTML→Word
+    const isFile = document.getElementById('htmlFileArea').style.display !== 'none';
+    htmlContent = isFile ? htmlFileContent : document.getElementById('htmlInput').value.trim();
+    filename    = document.getElementById('htmlDocName').value.trim() || 'tables';
+    progressPrefix = 'html';
+    stepsIds = ['htmlStep1','htmlStep2','htmlStep3','htmlStep4','htmlStep5','htmlStep6'];
+    errorId  = 'htmlError';
+    resultId = 'htmlResult';
+    dlId     = 'htmlExcelDownloadLink';
+  }
+
+  if (!htmlContent) { alert('يرجى إدخال HTML أو رفع ملف'); return; }
+
+  const btn = isExcelPanel
+    ? document.getElementById('excelConvertBtn')
+    : document.getElementById('htmlExcelBtn');
+  if (btn) btn.disabled = true;
+
+  document.getElementById(progressPrefix + 'Progress').style.display = 'block';
+  document.getElementById(errorId).style.display = 'none';
+  stepsIds.forEach(s => setStep(s,''));
+
+  try {
+    setStep(stepsIds[0],'active');
+    const animSteps = async () => {
+      for (let i = 1; i < stepsIds.length; i++) {
+        await delay(700);
+        setStep(stepsIds[i-1],'done');
+        setStep(stepsIds[i],'active');
+      }
+    };
+    const [_, resp] = await Promise.all([
+      animSteps(),
+      fetch('/tools/html_to_excel', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ html: htmlContent, filename })
+      })
+    ]);
+    const data = await resp.json();
+    setStep(stepsIds[stepsIds.length-1],'done');
+
+    if (data.success) {
+      document.getElementById(resultId).style.display = 'block';
+      const dlEl = document.getElementById(dlId);
+      dlEl.href = data.download_url;
+      dlEl.download = data.filename;
+      dlEl.style.display = 'inline-flex';
+    } else {
+      throw new Error(data.error || 'خطأ غير معروف');
+    }
+  } catch(e) {
+    stepsIds.forEach(s => {
+      if (document.getElementById(s).classList.contains('active')) setStep(s,'err');
+    });
+    const errEl = document.getElementById(errorId);
+    errEl.style.display = 'block';
+    errEl.innerHTML = '<i class="fas fa-circle-exclamation me-2"></i>' + e.message;
+  }
+  if (btn) btn.disabled = false;
+}
+
+// ══════════════════════════════════════════
+//  HTML → PowerPoint
+// ══════════════════════════════════════════
+async function convertHtmlToPpt() {
+  const htmlContent = document.getElementById('pptHtmlInput').value.trim();
+  if (!htmlContent) { alert('يرجى إدخال HTML للشرائح'); return; }
+
+  const btn = document.getElementById('pptConvertBtn');
+  btn.disabled = true;
+  document.getElementById('pptProgress').style.display = 'block';
+  document.getElementById('pptResult').style.display = 'none';
+  document.getElementById('pptError').style.display = 'none';
+
+  const steps = ['pptStep1','pptStep2','pptStep3'];
+  steps.forEach(s => setStep(s,''));
+
+  const filename = document.getElementById('pptDocName').value.trim() || 'presentation';
+
+  try {
+    setStep('pptStep1','active');
+    const animSteps = async () => {
+      await delay(700); setStep('pptStep1','done'); setStep('pptStep2','active');
+      await delay(900); setStep('pptStep2','done'); setStep('pptStep3','active');
+    };
+    const [_, resp] = await Promise.all([
+      animSteps(),
+      fetch('/tools/html_to_ppt', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ html: htmlContent, filename })
+      })
+    ]);
+    const data = await resp.json();
+    setStep('pptStep3','done');
+    if (data.success) {
+      document.getElementById('pptResult').style.display = 'block';
+      document.getElementById('pptDownloadLink').href = data.download_url;
+      document.getElementById('pptDownloadLink').download = data.filename;
+    } else {
+      throw new Error(data.error || 'خطأ غير معروف');
+    }
+  } catch(e) {
+    steps.forEach(s => {
+      if (document.getElementById(s).classList.contains('active')) setStep(s,'err');
+    });
+    const errEl = document.getElementById('pptError');
+    errEl.style.display = 'block';
+    errEl.innerHTML = '<i class="fas fa-circle-exclamation me-2"></i>' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// ══ Drag & Drop ══
+function setupDrop(zoneId, inputId, handler) {
+  const zone = document.getElementById(zoneId);
+  if (!zone) return;
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('drag-over');
+    const dt = e.dataTransfer;
+    if (dt.files.length) {
+      const inp = document.getElementById(inputId);
+      try {
+        const dt2 = new DataTransfer();
+        dt2.items.add(dt.files[0]);
+        inp.files = dt2.files;
+        handler(inp);
+      } catch(ex) {}
+    }
+  });
+}
+setupDrop('pdfDropZone',   'pdfFileInput',   handlePdfFile);
+setupDrop('htmlDropZone',  'htmlFileInput',  handleHtmlFile);
+setupDrop('excelDropZone', 'excelFileInput', handleExcelFile);
+
+// ══ URL section param (backward compat) ══
+(function(){
+  var params = new URLSearchParams(window.location.search);
+  var section = params.get('section');
+  if (!section) return;
+  if (section === 'pdf2word')    switchTab('pdf');
+  else if (section === 'html2word')  switchTab('html');
+  else if (section === 'html2excel') switchTab('excel');
+  else if (section === 'html2ppt')   switchTab('ppt');
+})();
+</script>
+</body>
+</html>
