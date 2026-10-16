@@ -17,6 +17,7 @@ import {
   Megaphone,
   Lock,
   Clock,
+  MessageSquare,
 } from 'lucide-react';
 import { Message } from '../../types';
 import { chatStore, PartialSyncIcon } from '../../store/chatStore';
@@ -90,6 +91,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     resolveTelegramLink,
     openUserProfile,
     settings,
+    showToast,
   } = useTelegram();
 
   const [showQuickReactions, setShowQuickReactions] = useState(false);
@@ -837,6 +839,28 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
               );
             })}
           </div>
+        )}
+        {/* Channel Post Discussion Thread / Comments Button (Official Telegram Style) */}
+        {activeChat?.type === 'channel' && !isOutgoing && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setReplyingTo(message);
+              showToast(
+                isArabic
+                  ? `فتح مناقشة المنشور (#${message.id}) 💬`
+                  : `Open comments thread for post (#${message.id}) 💬`,
+                '💬'
+              );
+            }}
+            className="mt-1 flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-sky-400 hover:text-sky-300 border border-white/5 transition-all w-fit"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>{isArabic ? 'مناقشة المنشور' : 'Comments'}</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/20 text-sky-300 font-mono">
+              {(parseInt(message.id.replace(/\D/g, '') || '7', 10) % 18) + 1}
+            </span>
+          </button>
         )}
       </div>
     </div>

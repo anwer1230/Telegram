@@ -27,3 +27,6 @@ telemetry_logs.json
 .backups/
 data/*.db
 data/client_storage_backup.json
+google-services.json
+**/google-services.json
+

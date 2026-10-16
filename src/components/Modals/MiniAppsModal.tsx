@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   X,
@@ -15,6 +15,10 @@ import {
   Globe,
   Coins,
   CheckCircle2,
+  Play,
+  Flame,
+  ArrowRight,
+  Code,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
 import confetti from 'canvas-confetti';
@@ -98,29 +102,55 @@ const FEATURED_MINI_APPS: MiniAppItem[] = [
     url: 'https://catizen.ai',
     starsPrice: 20,
   },
+  {
+    id: 'app_blum',
+    name: 'Blum Crypto Exchange',
+    nameAr: 'منصة بلوم (Blum)',
+    botUsername: '@blum_crypto_bot',
+    category: 'crypto',
+    icon: '🌸',
+    description: 'Hybrid trading app combining CEX & DEX inside Telegram WebApps.',
+    descriptionAr: 'منصة تداول وربح النقاط المدمجة كتطبيق تيليجرام مصغر.',
+    url: 'https://blum.io',
+    starsPrice: 0,
+  },
 ];
 
-interface MiniAppsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser, settings, showToast } = useTelegram();
-  const isArabic = settings.language === 'ar';
-
+export const MiniAppsModal: React.FC = () => {
+  const { activeModal, setActiveModal, currentUser, settings, showToast } = useTelegram();
+  const [activeCategory, setActiveCategory] = useState<string>('all');
   const [activeApp, setActiveApp] = useState<MiniAppItem | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<string>('all');
-  const [userStars, setUserStars] = useState<number>(() => {
-    return Number(localStorage.getItem('tg_user_stars_balance') || 250);
-  });
   const [isSimulatingLaunch, setIsSimulatingLaunch] = useState(false);
+  const [customUrlInput, setCustomUrlInput] = useState('');
+  const [userStars, setUserStars] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('tg_user_stars_balance');
+      return saved ? parseInt(saved, 10) : 350;
+    } catch {
+      return 350;
+    }
+  });
 
-  if (!isOpen) return null;
+  // Simulated WebApp state
+  const [gameScore, setGameScore] = useState(0);
+  const [mainButtonText, setMainButtonText] = useState('اضغط للربح (TAP TO EARN)');
+  const [mainButtonLoading, setMainButtonLoading] = useState(false);
+
+  const isArabic = settings.language === 'ar';
+
+  if (activeModal !== 'mini-apps') return null;
+
+  const onClose = () => {
+    setActiveApp(null);
+    setIsFullscreen(false);
+    setActiveModal('none');
+  };
 
   const handleLaunchApp = (app: MiniAppItem) => {
     setIsSimulatingLaunch(true);
+    setGameScore(0);
+    setMainButtonText(isArabic ? 'اضغط للربح (TAP TO EARN)' : 'TAP TO EARN (+10)');
     setTimeout(() => {
       setActiveApp(app);
       setIsSimulatingLaunch(false);
@@ -131,7 +161,30 @@ export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose })
           origin: { y: 0.6 },
         });
       } catch {}
-    }, 400);
+    }, 300);
+  };
+
+  const handleLaunchCustomUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customUrlInput.trim()) return;
+    const url = customUrlInput.trim().startsWith('http')
+      ? customUrlInput.trim()
+      : `https://${customUrlInput.trim()}`;
+
+    const customApp: MiniAppItem = {
+      id: `custom_${Date.now()}`,
+      name: 'Custom WebApp',
+      nameAr: 'تطبيق ويب مخصص',
+      botUsername: '@webapp_bot',
+      category: 'utility',
+      icon: '🌐',
+      description: url,
+      descriptionAr: url,
+      url,
+      starsPrice: 0,
+    };
+    handleLaunchApp(customApp);
+    setCustomUrlInput('');
   };
 
   const handleSpendStars = (amount: number, appName: string) => {
@@ -154,10 +207,26 @@ export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose })
     } catch {}
     showToast(
       isArabic
-        ? `تم دفع ${amount} ⭐ بنجاح داخل ${appName}`
-        : `Paid ${amount} ⭐ successfully in ${appName}`,
-      '✨'
+        ? `تم دفع ${amount} نجمة لـ ${appName} بنجاح! ⭐`
+        : `Successfully paid ${amount} Stars to ${appName}! ⭐`,
+      '⭐'
     );
+  };
+
+  const handleMainButtonClick = () => {
+    // Official window.Telegram.WebApp.MainButton simulation
+    setGameScore((s) => s + 10);
+    setMainButtonLoading(true);
+    setTimeout(() => {
+      setMainButtonLoading(false);
+    }, 150);
+
+    // Haptic feedback simulation
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(20);
+      } catch {}
+    }
   };
 
   const filteredApps =
@@ -167,7 +236,7 @@ export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose })
 
   return (
     <div
-      id="modal-telegram-mini-apps"
+      id="modal-mini-apps"
       className="fixed inset-0 z-[9990] flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in select-none"
       dir={isArabic ? 'rtl' : 'ltr'}
     >
@@ -176,8 +245,8 @@ export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose })
           activeApp && isFullscreen
             ? 'h-[98vh] max-w-5xl'
             : activeApp
-            ? 'h-[85vh] max-w-4xl'
-            : 'max-h-[85vh] max-w-2xl'
+            ? 'h-[88vh] max-w-4xl'
+            : 'max-h-[88vh] max-w-3xl'
         }`}
       >
         {/* Header */}
@@ -196,25 +265,25 @@ export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose })
                   <div className="text-sm font-bold text-white truncate flex items-center gap-1.5">
                     <span>{isArabic ? activeApp.nameAr : activeApp.name}</span>
                     <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-emerald-500/20 text-emerald-300 font-mono">
-                      bot API
+                      Telegram.WebApp v7.10
                     </span>
                   </div>
-                  <div className="text-[11px] text-gray-400 font-mono truncate">
+                  <span className="text-[10px] text-gray-400 font-mono">
                     {activeApp.botUsername}
-                  </div>
+                  </span>
                 </div>
               </>
             ) : (
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#2481cc] to-sky-400 flex items-center justify-center shadow">
-                  <Sparkles className="w-4 h-4 text-white" />
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#2481cc] to-sky-400 flex items-center justify-center text-white">
+                  <Sparkles className="w-4 h-4" />
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-white">
-                    {isArabic ? 'تطبيقات تيليجرام المصغرة (TMA)' : 'Telegram Mini Apps (TMA)'}
+                    {isArabic ? 'تطبيقات تليجرام المصغرة (Mini Apps)' : 'Telegram Mini Apps Platform'}
                   </h3>
-                  <p className="text-[11px] text-gray-400">
-                    {isArabic ? 'DrKLO bots.invokeWebView & SDK' : 'Embedded WebApps & Stars SDK'}
+                  <p className="text-[10px] text-gray-400">
+                    {isArabic ? 'منصة ألعاب وبوتات WebApps على شبكة TON' : 'WebApps & Games Ecosystem'}
                   </p>
                 </div>
               </div>
@@ -222,26 +291,17 @@ export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose })
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Stars Balance Badge */}
-            <div
-              onClick={() => {
-                const add = userStars + 100;
-                setUserStars(add);
-                localStorage.setItem('tg_user_stars_balance', String(add));
-                showToast(isArabic ? 'تم شحن 100 نجمة ⭐' : 'Added 100 Stars ⭐', '⭐');
-              }}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold cursor-pointer hover:bg-amber-500/25 transition-colors"
-              title={isArabic ? 'انقر لشحن رصيد النجوم' : 'Click to top-up stars'}
-            >
-              <Coins className="w-3.5 h-3.5 text-amber-400" />
-              <span>{userStars} ⭐</span>
+            {/* Stars Balance Indicator */}
+            <div className="px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1">
+              <span>⭐</span>
+              <span>{userStars}</span>
             </div>
 
             {activeApp && (
               <button
                 onClick={() => setIsFullscreen(!isFullscreen)}
                 className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                title={isFullscreen ? 'Restore' : 'Fullscreen'}
               >
                 {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
               </button>
@@ -260,11 +320,13 @@ export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose })
         {activeApp ? (
           /* Active Mini App Webview Sandbox Container */
           <div className="flex-1 flex flex-col bg-[#0e1621] relative overflow-hidden">
-            {/* MiniApp Mock Bar */}
+            {/* MiniApp Protocol Bar */}
             <div className="px-3 py-1.5 bg-[#17212b] border-b border-white/5 flex items-center justify-between text-[11px] text-gray-400">
               <div className="flex items-center gap-2 truncate">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="font-mono truncate">tg://webapp?initData=user_{currentUser.id}</span>
+                <span className="font-mono text-[10px] text-emerald-400 truncate">
+                  window.Telegram.WebApp (initData: user_{currentUser.id})
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 {activeApp.starsPrice && activeApp.starsPrice > 0 ? (
@@ -279,50 +341,105 @@ export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen, onClose })
               </div>
             </div>
 
-            {/* Embedded Live Container Interface */}
-            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-[#2481cc] to-sky-400 flex items-center justify-center text-4xl shadow-xl animate-bounce">
-                {activeApp.icon}
-              </div>
-              <div className="space-y-1 max-w-md">
-                <h4 className="text-xl font-bold text-white">
-                  {isArabic ? activeApp.nameAr : activeApp.name}
-                </h4>
-                <p className="text-xs text-gray-400">
-                  {isArabic ? activeApp.descriptionAr : activeApp.description}
-                </p>
-              </div>
+            {/* Embedded Live Container / Interactive Sandbox */}
+            <div className="flex-1 flex flex-col items-center justify-between p-4 relative overflow-y-auto">
+              {/* App Interactive Canvas / Tap-To-Earn Interface */}
+              <div className="w-full max-w-md my-auto flex flex-col items-center text-center space-y-4">
+                <div
+                  onClick={handleMainButtonClick}
+                  className="w-28 h-28 rounded-full bg-gradient-to-tr from-[#2481cc] via-sky-400 to-amber-300 flex items-center justify-center text-5xl shadow-2xl cursor-pointer hover:scale-105 active:scale-95 transition-transform duration-100 border-4 border-white/20 select-none group"
+                >
+                  <span className="group-hover:rotate-12 transition-transform">
+                    {activeApp.icon}
+                  </span>
+                </div>
 
-              {/* WebApp Simulated View */}
-              <div className="w-full max-w-md p-4 rounded-2xl bg-[#17212b] border border-white/10 text-left rtl:text-right space-y-3 shadow-inner">
-                <div className="flex items-center justify-between text-xs pb-2 border-b border-white/5">
-                  <span className="text-gray-400">{isArabic ? 'المستخدم الموثق' : 'Authenticated Peer'}</span>
-                  <span className="font-bold text-sky-400">{currentUser.name} (@{currentUser.username || 'user'})</span>
+                <div className="space-y-1">
+                  <div className="text-3xl font-extrabold text-white font-mono flex items-center justify-center gap-2">
+                    <Coins className="w-6 h-6 text-amber-400 animate-spin" />
+                    <span>+{gameScore}</span>
+                    <span className="text-xs text-amber-400 font-sans">{isArabic ? 'نقطة' : 'PTS'}</span>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    {isArabic ? 'اضغط على الأيقونة أو الزر الرئيسي لكسب النقاط!' : 'Tap the coin or main button to mine points!'}
+                  </p>
                 </div>
-                <div className="flex items-center justify-between text-xs pb-2 border-b border-white/5">
-                  <span className="text-gray-400">{isArabic ? 'بروتوكول الويب' : 'SDK Bridge'}</span>
-                  <span className="font-mono text-emerald-400">Telegram.WebApp v7.10</span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-400">{isArabic ? 'رصيد النجوم' : 'Stars Available'}</span>
-                  <span className="font-bold text-amber-400">{userStars} ⭐</span>
+
+                {/* Session Info Card */}
+                <div className="w-full p-3.5 rounded-2xl bg-[#17212b]/80 border border-white/10 text-left rtl:text-right space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">{isArabic ? 'المستخدم' : 'Peer'}:</span>
+                    <span className="font-bold text-sky-400">{currentUser.name}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">initData:</span>
+                    <span className="font-mono text-[10px] text-emerald-400 truncate max-w-[200px]">
+                      query_id=AAH_{Date.now()}&user_id={currentUser.id}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Theme Params:</span>
+                    <span className="font-mono text-[10px] text-gray-300">#17212b (Dark Telegram)</span>
+                  </div>
                 </div>
 
                 <a
                   href={activeApp.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full mt-2 py-2.5 px-4 rounded-xl bg-[#2481cc] hover:bg-[#1c6fad] text-white font-bold text-xs flex items-center justify-center gap-2 transition-transform active:scale-98"
+                  className="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 underline underline-offset-4"
                 >
-                  <ExternalLink className="w-4 h-4" />
-                  <span>{isArabic ? 'فتح التطبيق في نافذة خارجية' : 'Open in External Window'}</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>{isArabic ? 'فتح الرابط في متصفح خارجي' : 'Open in External Browser'}</span>
                 </a>
+              </div>
+
+              {/* Official Telegram WebApp MainButton at the bottom */}
+              <div className="w-full max-w-md pt-3">
+                <button
+                  id="telegram-webapp-main-button"
+                  onClick={handleMainButtonClick}
+                  disabled={mainButtonLoading}
+                  className="w-full py-3.5 px-6 rounded-2xl bg-[#2481cc] hover:bg-[#1c70b4] text-white font-bold text-sm shadow-xl shadow-sky-500/25 flex items-center justify-center gap-2 transition-transform active:scale-98"
+                >
+                  {mainButtonLoading ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Zap className="w-4 h-4 fill-white" />
+                  )}
+                  <span>{mainButtonText}</span>
+                </button>
               </div>
             </div>
           </div>
         ) : (
           /* Mini Apps Directory Catalog */
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Custom URL Launcher Bar */}
+            <form onSubmit={handleLaunchCustomUrl} className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Globe className="w-4 h-4 text-gray-400 absolute left-3 rtl:right-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={customUrlInput}
+                  onChange={(e) => setCustomUrlInput(e.target.value)}
+                  placeholder={
+                    isArabic
+                      ? 'أدخل رابط أي بوت أو تطبيق ويب تيليجرام (https://...)'
+                      : 'Launch any Telegram WebApp URL (https://...)'
+                  }
+                  className="w-full bg-[#1e2c3a] border border-white/10 rounded-2xl py-2.5 px-9 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={!customUrlInput.trim()}
+                className="px-4 py-2.5 rounded-2xl bg-[#2481cc] hover:bg-[#1c70b4] disabled:opacity-50 text-white font-bold text-xs shrink-0 transition-colors"
+              >
+                {isArabic ? 'تشغيل' : 'Launch'}
+              </button>
+            </form>
+
             {/* Category Filter Pills */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
               {[

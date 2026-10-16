@@ -28,6 +28,7 @@ import { PremiumModal } from './components/Modals/PremiumModal';
 import { SecretChatInfoModal } from './components/Modals/SecretChatInfoModal';
 import { GroupAdminModal } from './components/Modals/GroupAdminModal';
 import { ForumTopicsModal } from './components/Modals/ForumTopicsModal';
+import { DownloadsManagerModal } from './components/Modals/DownloadsManagerModal';
 import { SenderModal } from './components/Modals/SenderModal';
 import { MonitorModal } from './components/Modals/MonitorModal';
 import { MyMessagesModal } from './components/Modals/MyMessagesModal';
@@ -285,6 +286,7 @@ const TelegramAppContent: React.FC = () => {
       <SecretChatInfoModal />
       <GroupAdminModal />
       <ForumTopicsModal />
+      <DownloadsManagerModal />
       
       {/* 7 Core Telegram Functions (Activities) */}
       <SenderModal />

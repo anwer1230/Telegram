@@ -454,6 +454,56 @@ export const NavigationDrawer: React.FC = () => {
                     </motion.button>
                   );
                 })()}
+
+                {/* Downloads & Chunked Media Manager */}
+                {(() => {
+                  const isActive = (activeModal as string) === 'downloads-manager';
+                  return (
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      id="drawer-downloads-manager"
+                      onClick={() => handleItemClick(() => setActiveModal('downloads-manager' as any))}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all ${
+                        isActive
+                          ? 'active bg-[#2481cc]/20 text-[#5288c1] font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-[#2481cc]'
+                          : 'hover:bg-white/5 text-gray-200 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <Download className="w-5 h-5 text-sky-400 shrink-0" />
+                        <span>{isArabic ? 'إدارة التنزيلات والوسائط' : 'Downloads & Media'}</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-emerald-400 font-bold">
+                        512KB
+                      </span>
+                    </motion.button>
+                  );
+                })()}
+
+                {/* Telegram Stars & Gifts */}
+                {(() => {
+                  const isActive = (activeModal as string) === 'gift-auctions';
+                  return (
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      id="drawer-telegram-stars"
+                      onClick={() => handleItemClick(() => setActiveModal('gift-auctions' as any))}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all ${
+                        isActive
+                          ? 'active bg-[#2481cc]/20 text-[#5288c1] font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-[#2481cc]'
+                          : 'hover:bg-white/5 text-gray-200 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <Star className="w-5 h-5 text-amber-400 shrink-0 fill-amber-400/30" />
+                        <span>{isArabic ? 'نجوم تيليجرام والهدايا' : 'Telegram Stars & Gifts'}</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-amber-300 font-bold">
+                        ⭐ STARS
+                      </span>
+                    </motion.button>
+                  );
+                })()}
               </div>
 
               {/* Automation & Smart Tools Suite (4 Main Functions Requested) */}

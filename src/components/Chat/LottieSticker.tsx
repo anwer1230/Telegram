@@ -107,7 +107,7 @@ const LottieStickerComponent: React.FC<LottieStickerProps> = ({
       {!hasError && animationData ? (
         <Lottie
           lottieRef={lottieRef}
-          src={animationData}
+          animationData={animationData}
           autoplay={autoplay}
           loop={loop}
           style={{ width: '100%', height: '100%' }}

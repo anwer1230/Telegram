@@ -34,6 +34,41 @@ export interface ProfileUserInfo {
   sourceChatTitle?: string;
 }
 
+export interface ForumTopic {
+  id: number;
+  chatId: string;
+  title: string;
+  iconColor?: number;
+  iconEmoji?: string;
+  isPinned?: boolean;
+  isClosed?: boolean;
+  unreadCount?: number;
+  totalMessages?: number;
+  lastMessage?: string;
+  lastMessageDate?: string;
+  topMessageId?: number;
+}
+
+export interface DiscussionThread {
+  channelId: string;
+  postId: string;
+  discussionChatId: string;
+  totalComments: number;
+  comments: Message[];
+}
+
+export interface ChunkedTransferProgress {
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+  transferredBytes: number;
+  totalParts: number;
+  completedParts: number;
+  speedBytesPerSec: number;
+  status: 'uploading' | 'downloading' | 'paused' | 'completed' | 'failed';
+  blobUrl?: string;
+}
+
 export interface Story {
   id: string;
   userId: string;
@@ -47,6 +82,8 @@ export interface Story {
   viewsCount: number;
   isViewed: boolean;
   isMyStory?: boolean;
+  durationHours?: number;
+  privacy?: 'everyone' | 'contacts' | 'close_friends' | 'selected';
 }
 
 export interface Reaction {

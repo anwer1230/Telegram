@@ -497,6 +497,336 @@ export class TelegramRPCRegistry {
           };
         }
 
+        // ==========================================
+        // 9. VOIP & PHONE SUBSYSTEM (phone.*)
+        // ==========================================
+        case 'phone.getCallConfig': {
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              audio_frame_size: 60,
+              jitter_min_delay: 20,
+              jitter_max_delay: 150,
+              default_p2p_contacts: true,
+              data_saving_always: false,
+              reflectors: [
+                { id: 1, ip: '149.154.175.50', ipv6: '', port: 443, peer_tag: 'dc1_reflector' },
+                { id: 2, ip: '149.154.167.51', ipv6: '', port: 443, peer_tag: 'dc2_reflector' },
+                { id: 4, ip: '149.154.167.91', ipv6: '', port: 443, peer_tag: 'dc4_reflector' },
+              ],
+            },
+          };
+        }
+
+        case 'phone.requestCall': {
+          const { userId, isVideo, gAHash } = params;
+          const callId = `call_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              phoneCall: {
+                id: callId,
+                accessHash: 'access_' + Date.now(),
+                date: serverTime,
+                adminId: 'self',
+                participantId: userId,
+                gAHash: gAHash || 'ga_hash_simulated',
+                protocol: {
+                  minLayer: 65,
+                  maxLayer: 92,
+                  udpP2p: true,
+                  udpReflector: true,
+                  libraryVersions: ['3.0.0', '4.0.0'],
+                },
+                isVideo: Boolean(isVideo),
+              },
+            },
+          };
+        }
+
+        case 'phone.acceptCall': {
+          const { callId, gB } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              phoneCall: {
+                id: callId,
+                gB: gB || 'gb_simulated',
+                status: 'accepted',
+                date: serverTime,
+              },
+            },
+          };
+        }
+
+        case 'phone.discardCall': {
+          const { callId, duration = 0, reason = 'disconnect' } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              phoneCallDiscarded: {
+                id: callId,
+                duration,
+                reason,
+                date: serverTime,
+              },
+            },
+          };
+        }
+
+        // ==========================================
+        // 10. CHUNKED MEDIA STREAMING & UPLOAD (upload.*)
+        // ==========================================
+        case 'upload.getFile': {
+          const { location, offset = 0, limit = 524288 } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              type: 'storage.filePartial',
+              mtime: serverTime,
+              offset,
+              limit,
+              bytesLength: limit,
+              bytes: Buffer.alloc(Math.min(limit, 65536)).toString('base64'),
+            },
+          };
+        }
+
+        case 'upload.saveBigFilePart':
+        case 'upload.saveFilePart': {
+          const { fileId, filePart, totalParts, bytes } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              fileId,
+              filePart,
+              totalParts,
+              bytesLength: bytes ? bytes.length : 0,
+              saved: true,
+            },
+          };
+        }
+
+        // ==========================================
+        // 11. STORIES SUBSYSTEM (stories.*)
+        // ==========================================
+        case 'stories.getAllStories': {
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              count: 0,
+              stories: [],
+              hasMore: false,
+            },
+          };
+        }
+
+        case 'stories.getPeerStories': {
+          const { peer } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              peer,
+              stories: [],
+            },
+          };
+        }
+
+        case 'stories.sendStory': {
+          const { mediaUrl, mediaType = 'image', caption = '', period = 86400, privacy = 'everyone' } = params;
+          const storyId = `story_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              id: storyId,
+              mediaUrl,
+              mediaType,
+              caption,
+              date: serverTime,
+              expires: serverTime + period,
+              privacy,
+              views: 1,
+            },
+          };
+        }
+
+        case 'stories.deleteStories': {
+          const { id } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: { deleted: [id] },
+          };
+        }
+
+        // ==========================================
+        // 12. FORUM TOPICS & DISCUSSIONS (channels.* & messages.*)
+        // ==========================================
+        case 'channels.getForumTopics': {
+          const { channel } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              count: 4,
+              topics: [
+                { id: 1, title: 'العام والنقاشات', iconColor: 0x2481cc, iconEmoji: '💬', isPinned: true, totalMessages: 142 },
+                { id: 2, title: 'الإعلانات الرسمية', iconColor: 0x10b981, iconEmoji: '📢', isPinned: true, totalMessages: 28 },
+                { id: 3, title: 'الروابط والمصادر', iconColor: 0x8b5cf6, iconEmoji: '🔗', isPinned: false, totalMessages: 95 },
+                { id: 4, title: 'الدعم الفني والأسئلة', iconColor: 0xf59e0b, iconEmoji: '❓', isPinned: false, totalMessages: 64 },
+              ],
+            },
+          };
+        }
+
+        case 'channels.createForumTopic': {
+          const { channel, title, iconColor, iconEmoji } = params;
+          const topicId = Math.floor(Date.now() / 1000) % 100000;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              id: topicId,
+              title: title || 'موضوع جديد',
+              iconColor: iconColor || 0x2481cc,
+              iconEmoji: iconEmoji || '💬',
+              isPinned: false,
+              totalMessages: 1,
+            },
+          };
+        }
+
+        case 'messages.getDiscussionMessage': {
+          const { peer, msgId } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              channelId: peer,
+              postId: msgId,
+              totalComments: 18,
+              messages: [],
+            },
+          };
+        }
+
+        // ==========================================
+        // 13. UPDATES GAP SYNCHRONIZER (updates.*)
+        // ==========================================
+        case 'updates.getState': {
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              pts: 10420,
+              qts: 512,
+              date: serverTime,
+              seq: 85,
+              unreadCount: 0,
+            },
+          };
+        }
+
+        case 'updates.getDifference': {
+          const { pts = 0, date = 0, qts = 0 } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              isIntermediate: false,
+              state: {
+                pts: pts + 1,
+                qts,
+                date: serverTime,
+                seq: 86,
+                unreadCount: 0,
+              },
+              newMessages: [],
+              newEncryptedMessages: [],
+              otherUpdates: [],
+              chats: [],
+              users: [],
+            },
+          };
+        }
+
+        case 'updates.getChannelDifference': {
+          const { channel, pts = 0 } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              isFinal: true,
+              pts: pts + 1,
+              timeout: 10,
+              newMessages: [],
+              otherUpdates: [],
+              chats: [],
+              users: [],
+            },
+          };
+        }
+
+        // ==========================================
+        // 14. TELEGRAM STARS & PAYMENTS (payments.* & stars.*)
+        // ==========================================
+        case 'payments.getPaymentForm': {
+          const { invoiceSlug } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              invoiceSlug,
+              title: 'Telegram Stars Purchase',
+              description: 'Official Stars transaction',
+              currency: 'XTR',
+              prices: [{ label: '100 Stars', amount: 100 }],
+            },
+          };
+        }
+
+        case 'payments.sendStarsForm': {
+          const { amount, purpose = 'gift' } = params;
+          return {
+            success: true,
+            rpc: method,
+            serverTime,
+            result: {
+              success: true,
+              transactionId: `tx_stars_${Date.now()}`,
+              amount,
+              purpose,
+              date: serverTime,
+            },
+          };
+        }
+
         default:
           return this.handleFallbackRPC(method, params, serverTime);
       }
@@ -548,15 +878,74 @@ export class TelegramRPCRegistry {
           result: { firstName: params.firstName, lastName: params.lastName, about: params.about },
         };
 
-      case 'help.getConfig':
+      case 'phone.getCallConfig':
         return {
           success: true,
           rpc: method,
           serverTime,
           result: {
-            date: serverTime,
-            thisDc: 4,
-            testMode: false,
+            audio_frame_size: 60,
+            jitter_min_delay: 20,
+            jitter_max_delay: 150,
+            default_p2p_contacts: true,
+            reflectors: [
+              { id: 1, ip: '149.154.175.50', port: 443, peer_tag: 'dc1_reflector' },
+              { id: 2, ip: '149.154.167.51', port: 443, peer_tag: 'dc2_reflector' },
+            ],
+          },
+        };
+
+      case 'phone.requestCall':
+        return {
+          success: true,
+          rpc: method,
+          serverTime,
+          result: {
+            phoneCall: {
+              id: `call_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+              date: serverTime,
+              adminId: 'self',
+              participantId: params.userId,
+              isVideo: Boolean(params.isVideo),
+            },
+          },
+        };
+
+      case 'stories.getAllStories':
+      case 'stories.getPeerStories':
+        return {
+          success: true,
+          rpc: method,
+          serverTime,
+          result: { stories: [] },
+        };
+
+      case 'channels.getForumTopics':
+        return {
+          success: true,
+          rpc: method,
+          serverTime,
+          result: {
+            count: 4,
+            topics: [
+              { id: 1, title: 'العام والنقاشات', iconColor: 0x2481cc, iconEmoji: '💬', isPinned: true, totalMessages: 142 },
+              { id: 2, title: 'الإعلانات الرسمية', iconColor: 0x10b981, iconEmoji: '📢', isPinned: true, totalMessages: 28 },
+              { id: 3, title: 'الروابط والمصادر', iconColor: 0x8b5cf6, iconEmoji: '🔗', isPinned: false, totalMessages: 95 },
+              { id: 4, title: 'الدعم الفني والأسئلة', iconColor: 0xf59e0b, iconEmoji: '❓', isPinned: false, totalMessages: 64 },
+            ],
+          },
+        };
+
+      case 'upload.getFile':
+        return {
+          success: true,
+          rpc: method,
+          serverTime,
+          result: {
+            type: 'storage.filePartial',
+            offset: params.offset || 0,
+            limit: params.limit || 524288,
+            bytes: Buffer.alloc(32).toString('base64'),
           },
         };
 
