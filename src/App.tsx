@@ -100,14 +100,25 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     headers['x-telegram-session'] = savedSession;
   }
 
-  const response = await fetch(`/api${path}`, {
-    ...init,
-    headers,
-    credentials: 'include',
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'REQUEST_FAILED');
-  return data as T;
+  const controller = new AbortController();
+  const timeoutMs = path.includes('/messages') && init?.method === 'POST' ? 15000 : 7000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`/api${path}`, {
+      ...init,
+      headers,
+      credentials: 'include',
+      signal: init?.signal || controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'REQUEST_FAILED');
+    return data as T;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
 }
 
 function toChat(chat: ApiChat): Chat {
@@ -1525,14 +1536,14 @@ function AppWorkspace() {
       }>('/telegram/accounts');
       if (res?.accounts) {
         setAccounts(res.accounts);
-        if (res.activeId) {
-          setActiveAccountId(res.activeId);
-        } else if (res.accounts.length > 0 && !activeAccountId) {
-          setActiveAccountId(res.accounts[0].id);
-        }
+        setActiveAccountId(current => {
+          if (res.activeId) return res.activeId;
+          if (res.accounts.length > 0 && !current) return res.accounts[0].id;
+          return current;
+        });
       }
     } catch {}
-  }, [activeAccountId]);
+  }, []);
 
   const handleSwitchAccount = async (accId: string) => {
     try {
@@ -1626,7 +1637,6 @@ function AppWorkspace() {
           } catch {}
         }
         setAuth(status);
-        void loadAccounts();
       })
       .catch(() => setAuth({ authenticated: false, state: 'phone' }))
       .finally(() => setAuthLoading(false));

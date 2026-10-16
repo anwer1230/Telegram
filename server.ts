@@ -531,7 +531,12 @@ app.get('/api/telegram/status', async (req, res) => {
   if (!tgStatus.isLiveConnected && clientSession) {
     console.log('[Server] Attempting auto-reconnection via Client Session Relay header...');
     try {
-      const restored = await restoreSessionFromString(clientSession);
+      const restored = await Promise.race([
+        restoreSessionFromString(clientSession),
+        new Promise<{ success: boolean; user?: any; error?: string }>((resolve) =>
+          setTimeout(() => resolve({ success: false, error: 'RECONNECT_TIMEOUT' }), 3500)
+        ),
+      ]);
       if (restored.success && restored.user) {
         userPhone = restored.user.phone;
         isAuthenticated = true;

@@ -68,6 +68,10 @@ export function getAllStoredAccounts(): StoredSession[] {
   return Object.values(sessions);
 }
 
+let restoringPromise: Promise<{ success: boolean; user?: TelegramUser; sessionString?: string; error?: string }> | null = null;
+let lastFailedSession = '';
+let lastFailedTime = 0;
+
 /**
  * Restore Telegram MTProto Client session from a session string (Plan 1: Client-Side Session Relay)
  */
@@ -83,33 +87,46 @@ export async function restoreSessionFromString(sessionString: string): Promise<{
     return { success: true, user: activeUser, sessionString: cleanSession };
   }
 
-  try {
-    console.log('[TelegramService] Reconnecting MTProto Client via session relay...');
-    const client = new TelegramClient(new StringSession(cleanSession), TELEGRAM_API_ID, TELEGRAM_API_HASH, {
-      connectionRetries: 2,
-      useWSS: false,
-      timeout: 5,
-    });
+  // Cooldown on recently failed session (don't retry for 10 seconds to prevent hammering and timeouts)
+  if (lastFailedSession === cleanSession && Date.now() - lastFailedTime < 10000) {
+    return { success: false, error: 'SESSION_RECENTLY_FAILED' };
+  }
 
-    // Guard connection with a 6-second timeout so it never hangs requests or boot
-    await Promise.race([
-      client.connect(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('CONNECTION_TIMEOUT')), 6000)),
-    ]);
+  // Deduplicate concurrent restoration requests
+  if (restoringPromise) {
+    return restoringPromise;
+  }
 
-    const isAuth = await Promise.race([
-      client.isUserAuthorized(),
-      new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('AUTH_CHECK_TIMEOUT')), 4000)),
-    ]);
+  restoringPromise = (async () => {
+    try {
+      console.log('[TelegramService] Reconnecting MTProto Client via session relay...');
+      const client = new TelegramClient(new StringSession(cleanSession), TELEGRAM_API_ID, TELEGRAM_API_HASH, {
+        connectionRetries: 1,
+        useWSS: false,
+        timeout: 3,
+      });
 
-    if (!isAuth) {
-      try {
-        await client.disconnect();
-      } catch {
-        // ignore
+      // Guard connection with a 3-second timeout so it never hangs requests or causes TIMEOUT error
+      await Promise.race([
+        client.connect(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('CONNECTION_TIMEOUT')), 3000)),
+      ]);
+
+      const isAuth = await Promise.race([
+        client.isUserAuthorized(),
+        new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('AUTH_CHECK_TIMEOUT')), 2500)),
+      ]);
+
+      if (!isAuth) {
+        lastFailedSession = cleanSession;
+        lastFailedTime = Date.now();
+        try {
+          await client.disconnect();
+        } catch {
+          // ignore
+        }
+        return { success: false, error: 'SESSION_REVOKED_OR_EXPIRED' };
       }
-      return { success: false, error: 'SESSION_REVOKED_OR_EXPIRED' };
-    }
 
     const me = (await client.getMe()) as any;
     const user: TelegramUser = {
@@ -149,9 +166,16 @@ export async function restoreSessionFromString(sessionString: string): Promise<{
     console.log(`[TelegramService] Successfully restored live MTProto session: ${user.name} (${user.phone})`);
     return { success: true, user, sessionString: cleanSession };
   } catch (err: any) {
+    lastFailedSession = cleanSession;
+    lastFailedTime = Date.now();
     console.warn('[TelegramService] Auto-reconnection failed:', err?.message || err);
     return { success: false, error: err?.message || 'AUTO_RECONNECT_FAILED' };
+  } finally {
+    restoringPromise = null;
   }
+  })();
+
+  return restoringPromise;
 }
 
 /**
