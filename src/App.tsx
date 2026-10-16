@@ -23,6 +23,8 @@ import { AutoJoinModal } from '@/components/features/AutoJoinModal';
 import { SavedLinksModal } from '@/components/features/SavedLinksModal';
 import { BatchMessagesModal } from '@/components/features/BatchMessagesModal';
 import { MessageTemplatesModal, type MessageTemplate } from '@/components/features/MessageTemplatesModal';
+import { CardPricesModal } from '@/components/features/CardPricesModal';
+import { SystemLogsModal } from '@/components/features/SystemLogsModal';
 import { ChatWallpaperModal, WALLPAPER_PRESETS, type WallpaperConfig } from '@/components/features/ChatWallpaperModal';
 import { PWAInstallModal } from '@/components/features/PWAInstallModal';
 
@@ -1904,8 +1906,21 @@ function AppWorkspace() {
         />
       )}
 
+      {activeService === 'card_prices' && (
+        <CardPricesModal
+          onClose={() => setActiveService(null)}
+          onSendToChat={handleSendToChat}
+        />
+      )}
+
+      {activeService === 'system_logs' && (
+        <SystemLogsModal
+          onClose={() => setActiveService(null)}
+        />
+      )}
+
       {/* In-App Quick Service Overlay Viewer for other tools */}
-      {activeService && !['publishing_monitoring', 'broadcast', 'monitoring', 'autoreplies', 'accounts', 'learning', 'rotating', 'join', 'saved_links', 'batch_messages', 'templates', 'install'].includes(activeService) && (
+      {activeService && !['publishing_monitoring', 'broadcast', 'monitoring', 'autoreplies', 'accounts', 'learning', 'rotating', 'join', 'saved_links', 'batch_messages', 'templates', 'card_prices', 'system_logs', 'install'].includes(activeService) && (
         <div className="fixed inset-0 z-50 flex h-full w-full bg-background fade-up" dir="rtl">
           <InAppServiceViewer
             serviceId={activeService}

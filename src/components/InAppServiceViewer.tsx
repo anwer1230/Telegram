@@ -23,6 +23,8 @@ import {
   Eye,
   Bot,
   Users,
+  CreditCard,
+  Terminal,
 } from 'lucide-react';
 import { AutoBroadcastModal } from './features/AutoBroadcastModal';
 import { GroupMonitoringModal } from './features/GroupMonitoringModal';
@@ -30,6 +32,8 @@ import { AutoRepliesModal } from './features/AutoRepliesModal';
 import { AccountsManagerModal } from './features/AccountsManagerModal';
 import { OriginalPublishingMonitoringModal } from './features/OriginalPublishingMonitoringModal';
 import { SavedLinksModal } from './features/SavedLinksModal';
+import { CardPricesModal } from './features/CardPricesModal';
+import { SystemLogsModal } from './features/SystemLogsModal';
 
 export type ServiceItem = {
   id: string;
@@ -202,6 +206,29 @@ export const ALL_SERVICES: ServiceItem[] = [
     tone: 'bg-muted text-muted-foreground',
     category: 'core',
   },
+  {
+    id: 'card_prices',
+    title: 'أسعار بطاقات الاشتراك',
+    shortTitle: 'بطاقات الاشتراك',
+    eyebrow: 'باقات سرعة إنجاز',
+    description: 'باقات اشتراك يومية، أسبوعية، وشهرية VIP لخدمات النشر والمراقبة والدعم الأكاديمي.',
+    url: '/card_prices',
+    icon: CreditCard,
+    tone: 'bg-amber-500/20 text-amber-500',
+    featured: true,
+    category: 'core',
+  },
+  {
+    id: 'system_logs',
+    title: 'سجلات النظام ومراقبة النشاط',
+    shortTitle: 'سجلات النظام',
+    eyebrow: 'المراقبة الحية',
+    description: 'سجل نشاط العمليات البرمجية، اتصالات MTProto، وعمليات النشر والرصد.',
+    url: '/system_logs',
+    icon: Terminal,
+    tone: 'bg-sky-500/20 text-sky-400',
+    category: 'tools',
+  },
 ];
 
 type InAppServiceViewerProps = {
@@ -235,6 +262,14 @@ export function InAppServiceViewer({
 
   if (serviceId === 'accounts') {
     return <AccountsManagerModal onClose={onClose} />;
+  }
+
+  if (serviceId === 'card_prices') {
+    return <CardPricesModal onClose={onClose} onSendToChat={onSendToChat} />;
+  }
+
+  if (serviceId === 'system_logs') {
+    return <SystemLogsModal onClose={onClose} />;
   }
 
   const iframeRef = useRef<HTMLIFrameElement>(null);

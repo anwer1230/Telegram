@@ -40,6 +40,8 @@ import {
   Trash2,
   RefreshCw,
   Plus,
+  CreditCard,
+  Terminal,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -691,6 +693,42 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
                   </div>
                   <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/25 text-amber-200 border border-amber-400/30 rounded font-mono">
                     TEMPLATES
+                  </span>
+                </button>
+
+                {/* 9. أسعار بطاقات الاشتراك */}
+                <button
+                  type="button"
+                  onClick={() => handleAction(() => onOpenService('card_prices'))}
+                  className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-gray-100 hover:bg-amber-500/15 transition-all text-right group"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <CreditCard size={18} className="text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
+                    <div className="flex flex-col text-right">
+                      <span className="font-semibold text-white">أسعار بطاقات الاشتراك</span>
+                      <span className="text-[10px] text-gray-400">باقات يومية، أسبوعية، وشهرية VIP</span>
+                    </div>
+                  </div>
+                  <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/25 text-amber-200 border border-amber-400/30 rounded font-mono">
+                    CARDS
+                  </span>
+                </button>
+
+                {/* 10. سجلات النظام ومراقبة النشاط */}
+                <button
+                  type="button"
+                  onClick={() => handleAction(() => onOpenService('system_logs'))}
+                  className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-gray-100 hover:bg-slate-500/15 transition-all text-right group"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <Terminal size={18} className="text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
+                    <div className="flex flex-col text-right">
+                      <span className="font-semibold text-white">سجلات النظام ومراقبة النشاط</span>
+                      <span className="text-[10px] text-gray-400">سجل عمليات النشر، المراقبة والاتصال</span>
+                    </div>
+                  </div>
+                  <span className="px-1.5 py-0.5 text-[9px] font-bold bg-sky-500/25 text-sky-200 border border-sky-400/30 rounded font-mono">
+                    LOGS
                   </span>
                 </button>
               </div>
