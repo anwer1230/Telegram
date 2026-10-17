@@ -888,7 +888,12 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setReplyingTo(message);
+              setReplyingTo({
+                messageId: message.id,
+                senderName: message.senderName || 'Channel Post',
+                textSnippet: message.text || (message.media?.type ? `[${message.media.type}]` : 'Post'),
+                mediaType: message.media?.type as any,
+              });
               showToast(
                 isArabic
                   ? `فتح مناقشة المنشور (#${message.id}) 💬`

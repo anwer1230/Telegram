@@ -96,7 +96,7 @@ export class StoriesController {
 
     // Notify listeners
     NotificationCenter.getInstance(this.currentAccount).postNotificationName(
-      NotificationCenter.storiesListUpdated || 19901,
+      NotificationCenter.storiesUpdated,
       this.cachedStories
     );
 
@@ -116,7 +116,7 @@ export class StoriesController {
     this.cachedStories = this.cachedStories.filter((s) => s.id !== storyId);
     this.saveToStorage();
     NotificationCenter.getInstance(this.currentAccount).postNotificationName(
-      NotificationCenter.storiesListUpdated || 19901,
+      NotificationCenter.storiesUpdated,
       this.cachedStories
     );
   }

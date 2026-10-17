@@ -116,8 +116,14 @@ const FEATURED_MINI_APPS: MiniAppItem[] = [
   },
 ];
 
-export const MiniAppsModal: React.FC = () => {
+export interface MiniAppsModalProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export const MiniAppsModal: React.FC<MiniAppsModalProps> = ({ isOpen: propIsOpen, onClose: propOnClose }) => {
   const { activeModal, setActiveModal, currentUser, settings, showToast } = useTelegram();
+  const isOpen = propIsOpen !== undefined ? propIsOpen : activeModal === ('mini-apps' as any);
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [activeApp, setActiveApp] = useState<MiniAppItem | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -139,12 +145,16 @@ export const MiniAppsModal: React.FC = () => {
 
   const isArabic = settings.language === 'ar';
 
-  if (activeModal !== 'mini-apps') return null;
+  if (!isOpen) return null;
 
-  const onClose = () => {
+  const handleClose = () => {
     setActiveApp(null);
     setIsFullscreen(false);
-    setActiveModal('none');
+    if (propOnClose) {
+      propOnClose();
+    } else {
+      setActiveModal('none');
+    }
   };
 
   const handleLaunchApp = (app: MiniAppItem) => {
@@ -308,7 +318,7 @@ export const MiniAppsModal: React.FC = () => {
             )}
 
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
             >
               <X className="w-5 h-5" />

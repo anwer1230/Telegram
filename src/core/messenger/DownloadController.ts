@@ -91,7 +91,7 @@ export class DownloadController {
         clearInterval(interval);
 
         NotificationCenter.getInstance(this.currentAccount).postNotificationName(
-          NotificationCenter.fileDidLoad || 19902,
+          (NotificationCenter as any).fileDidLoad || 19902,
           fileId
         );
       }

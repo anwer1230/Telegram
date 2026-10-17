@@ -106,12 +106,15 @@ const LottieStickerComponent: React.FC<LottieStickerProps> = ({
     >
       {!hasError && animationData ? (
         <Lottie
-          lottieRef={lottieRef}
-          animationData={animationData}
-          autoplay={autoplay}
-          loop={loop}
-          style={{ width: '100%', height: '100%' }}
-          onError={() => setHasError(true)}
+          {...({
+            lottieRef,
+            src: animationData,
+            animationData,
+            autoplay,
+            loop,
+            style: { width: '100%', height: '100%' },
+            onError: () => setHasError(true),
+          } as any)}
         />
       ) : url ? (
         <img
