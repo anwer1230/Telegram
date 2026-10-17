@@ -1450,8 +1450,12 @@ export class MessagesController {
 
   public isSponsoredMessagesEnabled(): boolean {
     if (typeof window !== 'undefined') {
-      const val = localStorage.getItem(`tg_ads_enabled_${this.currentAccount}`);
-      return val !== null ? JSON.parse(val) : true;
+      try {
+        const val = localStorage.getItem(`tg_ads_enabled_${this.currentAccount}`);
+        return val !== null ? JSON.parse(val) : true;
+      } catch {
+        return true;
+      }
     }
     return true;
   }

@@ -82,7 +82,11 @@ export class SQLiteSearchIndex {
         };
 
         this.worker.onerror = (err: ErrorEvent) => {
-          console.warn('[SQLiteSearchIndex] Web Worker runtime error, falling back to main-thread state:', err.message);
+          try {
+            err.preventDefault?.();
+            err.stopImmediatePropagation?.();
+          } catch {}
+          console.warn('[SQLiteSearchIndex] Web Worker runtime error, falling back to main-thread state:', err?.message || err);
           this.isWorkerReady = false;
         };
 

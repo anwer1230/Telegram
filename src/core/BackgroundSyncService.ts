@@ -269,7 +269,11 @@ export class BackgroundSyncService {
         this.worker = new Worker(workerUrl);
 
         this.worker.onmessage = this.handleWorkerMessage.bind(this);
-        this.worker.onerror = (err) => {
+        this.worker.onerror = (err: any) => {
+          try {
+            err.preventDefault?.();
+            err.stopImmediatePropagation?.();
+          } catch {}
           console.warn('[BackgroundSyncService] Worker error, switching to fallback:', err);
           this.statusMetrics.isWorkerActive = false;
           this.statusMetrics.workerType = 'main-thread-fallback';

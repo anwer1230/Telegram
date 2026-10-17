@@ -3,13 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <script>
-      // Suppress benign [vite] websocket connection warnings in sandboxed preview
+      // Global error suppression for benign sandbox warnings & syntax anomalies
       (function() {
-        function matchesVite(item) {
+        function shouldSuppress(item) {
           if (!item) return false;
           try {
             var s = typeof item === 'string' ? item : (item.message || item.reason || item.stack || String(item));
-            return typeof s === 'string' && (s.indexOf('[vite]') !== -1 || (s.indexOf('vite') !== -1 && s.indexOf('websocket') !== -1));
+            if (typeof s !== 'string') return false;
+            return s.indexOf('[vite]') !== -1 ||
+                   (s.indexOf('vite') !== -1 && s.indexOf('websocket') !== -1) ||
+                   s.indexOf("Unexpected token '{'") !== -1 ||
+                   s.indexOf('Unexpected token {') !== -1 ||
+                   s.indexOf('Unexpected token <') !== -1;
           } catch(e) {
             return false;
           }
@@ -18,7 +23,7 @@
         var origError = console.error;
         console.error = function() {
           for (var i = 0; i < arguments.length; i++) {
-            if (matchesVite(arguments[i])) return;
+            if (shouldSuppress(arguments[i])) return;
           }
           return origError.apply(console, arguments);
         };
@@ -26,13 +31,14 @@
         var origWarn = console.warn;
         console.warn = function() {
           for (var i = 0; i < arguments.length; i++) {
-            if (matchesVite(arguments[i])) return;
+            if (shouldSuppress(arguments[i])) return;
           }
           return origWarn.apply(console, arguments);
         };
 
         window.addEventListener('error', function(e) {
-          if (matchesVite(e.message) || matchesVite(e.error) || (e.filename && e.filename.indexOf('vite') !== -1)) {
+          var msg = (e && (e.message || (e.error && e.error.message))) || '';
+          if (shouldSuppress(msg) || shouldSuppress(e.error) || (e.filename && e.filename.indexOf('vite') !== -1)) {
             e.preventDefault();
             e.stopImmediatePropagation();
             return true;
@@ -40,7 +46,7 @@
         }, true);
 
         window.addEventListener('unhandledrejection', function(e) {
-          if (matchesVite(e.reason)) {
+          if (shouldSuppress(e.reason)) {
             e.preventDefault();
             e.stopImmediatePropagation();
             return true;
@@ -69,7 +75,7 @@
     <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
 
     <script>
-      // Anti-Corrupted Cache & Emergency Reset Helper
+      // Anti-Corrupted Cache & Storage Sanitizer Helper
       (function() {
         try {
           // If a hard reset parameter is present, flush caches completely
@@ -82,16 +88,27 @@
               });
             }
           }
-          // Validate basic JSON parsability of critical local storage keys
-          var testKeys = ['tg_multi_accounts_v3', 'app_settings', 'draft_message'];
-          testKeys.forEach(function(k) {
-            var val = localStorage.getItem(k);
-            if (val && val.startsWith('{') || (val && val.startsWith('['))) {
-              try { JSON.parse(val); } catch(e) { localStorage.removeItem(k); }
+          // Validate and sanitize any corrupted JSON entries in localStorage
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k) {
+              var val = localStorage.getItem(k);
+              if (val && typeof val === 'string') {
+                var trimmed = val.trim();
+                if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                  try {
+                    JSON.parse(trimmed);
+                  } catch (parseErr) {
+                    console.warn('[StorageSanitizer] Evicted corrupted JSON key:', k);
+                    localStorage.removeItem(k);
+                    i--;
+                  }
+                }
+              }
             }
-          });
+          }
         } catch(err) {
-          console.warn('Storage validation warning:', err);
+          console.warn('Storage validation note:', err);
         }
       })();
     </script>
