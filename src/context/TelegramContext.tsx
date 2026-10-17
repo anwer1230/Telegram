@@ -67,6 +67,7 @@ import { messageCache } from '../services/IndexedDBMessageCache';
 import { telegramDB } from '../utils/sqliteStorage';
 import { chatStore, ChatStore, ChatReadPosition } from '../store/chatStore';
 import { privacyController } from '../core/messenger/PrivacySettingsController';
+import { SecretChatHelper } from '../core/messenger/SecretChatHelper';
 
 interface TelegramContextType {
   currentUser: User;
@@ -2578,6 +2579,18 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // Persist to local IndexedDB Message Cache
     messageCache.putMessage(activeChatId, newMessage).catch(() => {});
+
+    // Secret Chat: strictly client-side E2EE, do NOT send cleartext to cloud backend
+    const currentActiveChat = chats.find((c) => c.id === activeChatId);
+    if (currentActiveChat?.isSecret) {
+      newMessage.isSecret = true;
+      newMessage.ttlSeconds = currentActiveChat.ttlSeconds || 30;
+      newMessage.expiresAt = Date.now() + (currentActiveChat.ttlSeconds || 30) * 1000;
+      SecretChatHelper.getInstance()
+        .sendSecretMessage(activeChatId, text.trim(), currentActiveChat.ttlSeconds || 30)
+        .catch(console.error);
+      return;
+    }
 
     // Dispatch to real Telegram MTProto server
     fetch('/api/telegram/messages/send', {
