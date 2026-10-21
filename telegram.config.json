@@ -1,5 +1,5 @@
 {
-  "NODE_VERSION": "20.18.0",
+  "NODE_VERSION": "22.14.0",
   "NODE_ENV": "production",
   "TDLIB_API_ID": 34773007,
   "TDLIB_API_HASH": "2a6b16abed75c3f6898ee79e9237fd25",
@@ -8,7 +8,7 @@
   "VAPID_SUBJECT": "mailto:anwrfwad178@gmail.com",
   "PORT": 3000,
   "notes": {
-    "NODE_VERSION": "20.18.0 إصدار Node المستقر",
+    "NODE_VERSION": "22.14.0 إصدار Node المستقر المتوافق مع محرك البناء",
     "NODE_ENV": "production وضع الإنتاج",
     "TDLIB_API_ID": "34773007 معرف تليجرام الرسمي",
     "TDLIB_API_HASH": "2a6b16abed75c3f6898ee79e9237fd25 مفتاح تليجرام الرسمي",

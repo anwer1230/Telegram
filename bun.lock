@@ -54,6 +54,10 @@
       },
     },
   },
+  "overrides": {
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+  },
   "packages": {
     "@cryptography/aes": ["@cryptography/aes@0.1.1", "", {}, "sha512-PcYz4FDGblO6tM2kSC+VzhhK62vml6k6/YAkiWtyPvrgJVfnDRoHGDtKn5UiaRRUrvUTTocBpvc2rRgTCqxjsg=="],
 
