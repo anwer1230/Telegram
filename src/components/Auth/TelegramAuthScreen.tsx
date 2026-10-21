@@ -350,24 +350,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
     }
   };
 
-  // 4. Quick Instant Demo Login
-  const handleQuickDemoLogin = () => {
-    setIsLoading(true);
-    setStatusMessage(isArabic ? 'جارٍ إنشاء جلسة سحابية مشفرة...' : 'Creating secure session...');
 
-    setTimeout(() => {
-      setIsLoading(false);
-      const fullPhone = normalizeFullPhone(phoneNumber || '+967 772 997 043');
-      login({
-        name: firstName.trim() || 'أنور فؤاد',
-        phone: fullPhone,
-        username: username.trim() || 'anwer_dev',
-        avatar: '',
-        bio: 'Telegram Native Client • Layer 184',
-      });
-      showToast(isArabic ? 'تم تفعيل الجلسة والاتصال بالسحابة' : 'Session activated', '✅');
-    }, 700);
-  };
 
   // 5. Official Telegram MTProto QR Code Login Subsystem
   const [qrSessionId, setQrSessionId] = useState<string>('');
@@ -674,15 +657,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
                   )}
                 </button>
 
-                {/* Quick 1-Click Demo Login */}
-                <button
-                  type="button"
-                  onClick={handleQuickDemoLogin}
-                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 active:scale-[0.99] text-gray-300 text-xs font-semibold rounded-2xl border border-white/10 flex items-center justify-center gap-2 transition-all cursor-pointer"
-                >
-                  <Sparkles size={14} className="text-amber-400" />
-                  <span>{isArabic ? 'دخول فوري مباشر (Demo / Quick Connect)' : 'Instant Direct Connect (Demo)'}</span>
-                </button>
+
               </form>
             )}
 

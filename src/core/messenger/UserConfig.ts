@@ -132,7 +132,8 @@ export class UserConfig {
     if (typeof window !== 'undefined') {
       const multi = SecureSessionStorage.getItem<any[]>('tg_multi_accounts_v3') || SecureSessionStorage.getItem<any[]>('tg_accounts');
       if (multi && Array.isArray(multi)) {
-        const cleanMulti = multi.filter(acc => acc && acc.user && !UserConfig.isMockUser(acc.user));
+        const hasGlobalSession = !!(SecureSessionStorage.getItem<string>('tg_session_string') || localStorage.getItem('tg_session_string'));
+        const cleanMulti = multi.filter(acc => acc && acc.user && !UserConfig.isMockUser(acc.user) && (acc.sessionString || hasGlobalSession));
         if (cleanMulti.length !== multi.length) {
           if (cleanMulti.length === 0) {
             SecureSessionStorage.removeItem('tg_multi_accounts_v3');

@@ -26,50 +26,27 @@ export const StoriesBar: React.FC = () => {
       const saved = localStorage.getItem('tg_user_stories_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          // Strictly filter out any mock/demo stories
+          const realStories = parsed.filter(
+            (s) =>
+              s &&
+              s.id &&
+              !s.id.startsWith('st_tg_news') &&
+              !s.id.startsWith('st_durov') &&
+              !s.id.startsWith('st_ton_web3') &&
+              s.userName !== 'Telegram News' &&
+              s.userName !== 'Pavel Durov' &&
+              s.userName !== 'TON Ecosystem'
+          );
+          if (realStories.length !== parsed.length) {
+            localStorage.setItem('tg_user_stories_v1', JSON.stringify(realStories));
+          }
+          return realStories;
+        }
       }
     } catch {}
-    return [
-      {
-        id: 'st_tg_news',
-        userId: 'user_tg_news',
-        userName: 'Telegram News',
-        userAvatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80',
-        mediaUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
-        mediaType: 'image',
-        caption: '🚀 إطلاق التحديث الكبير: ميزات الخصوصية التامة ومحرك الفوارق MTProto!',
-        timestamp: 'منذ ساعتين',
-        expiresAt: Date.now() + 86400000,
-        viewsCount: 14200,
-        isViewed: false,
-      },
-      {
-        id: 'st_durov',
-        userId: 'user_durov',
-        userName: 'Pavel Durov',
-        userAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        mediaUrl: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=800&auto=format&fit=crop&q=80',
-        mediaType: 'image',
-        caption: '⭐ Telegram Stars now power digital goods and games across 950M users.',
-        timestamp: 'منذ 5 ساعات',
-        expiresAt: Date.now() + 86400000,
-        viewsCount: 28900,
-        isViewed: false,
-      },
-      {
-        id: 'st_ton_web3',
-        userId: 'user_ton',
-        userName: 'TON Ecosystem',
-        userAvatar: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=150&auto=format&fit=crop&q=80',
-        mediaUrl: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800&auto=format&fit=crop&q=80',
-        mediaType: 'image',
-        caption: '💎 مرحباً بكم في عصر التطبيقات المصغرة اللامركزية على تيليجرام.',
-        timestamp: 'أمس',
-        expiresAt: Date.now() + 86400000,
-        viewsCount: 8900,
-        isViewed: true,
-      },
-    ];
+    return [];
   });
 
   const [activeStoryIndex, setActiveStoryIndex] = useState<number | null>(null);

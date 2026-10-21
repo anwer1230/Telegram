@@ -1866,70 +1866,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     MessagesStorage.getInstance(0).cleanUp(false);
     ConnectionsManager.getInstance(0).cleanup(false);
 
-    const initialAccChats: Chat[] = [
-      {
-        id: 'chat_saved_messages',
-        title: 'الرسائل المحفوظة',
-        type: 'saved',
-        avatar: data.avatar || '',
-        unreadCount: 0,
-        isPinned: true,
-        lastMessage: {
-          id: `m_s_1_${Date.now()}`,
-          senderName: 'You',
-          text: `مساحة التخزين السحابية الشخصية مشفرة بنجاح (${newUser.phone})`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isOutgoing: true,
-          status: 'read',
-        },
-      },
-      {
-        id: 'chat_telegram',
-        title: 'Telegram Notifications',
-        type: 'bot',
-        avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80',
-        unreadCount: 1,
-        isPinned: false,
-        isVerified: true,
-        lastMessage: {
-          id: `m_tg_1_${Date.now()}`,
-          senderName: 'Telegram',
-          text: `مرحباً بك في تيليجرام الرسمي! تم تسجيل الدخول إلى حسابك (${newUser.phone}) بنجاح عبر بروتوكول MTProto 2.0 الآمن.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isOutgoing: false,
-          status: 'delivered',
-        },
-      },
-    ];
-
-    const initialAccMessages: Record<string, Message[]> = {
-      chat_saved_messages: [
-        {
-          id: `m_s_1_${Date.now()}`,
-          chatId: 'chat_saved_messages',
-          senderId: newUser.id,
-          senderName: 'You',
-          text: `مساحة التخزين السحابية الشخصية مشفرة بنجاح (${newUser.phone})`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          date: new Date().toISOString().split('T')[0],
-          isOutgoing: true,
-          status: 'read',
-        },
-      ],
-      chat_telegram: [
-        {
-          id: `m_tg_1_${Date.now()}`,
-          chatId: 'chat_telegram',
-          senderId: '777000',
-          senderName: 'Telegram',
-          text: `مرحباً بك في تيليجرام الرسمي! تم تسجيل الدخول إلى حسابك (${newUser.phone}) بنجاح عبر بروتوكول MTProto 2.0 الآمن.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          date: new Date().toISOString().split('T')[0],
-          isOutgoing: false,
-          status: 'delivered',
-        },
-      ],
-    };
+    const initialAccChats: Chat[] = [];
+    const initialAccMessages: Record<string, Message[]> = {};
 
     const defaultAccSettings: AppSettings = {
       theme: 'dark',
@@ -1946,9 +1884,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       id: newId,
       user: newUser,
       settings: defaultAccSettings,
-      chats: initialAccChats,
-      messages: initialAccMessages,
-      unreadCount: 1,
+      chats: [],
+      messages: {},
+      unreadCount: 0,
       isActive: true,
       sessionString: data.sessionString,
     };
@@ -1958,8 +1896,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAccounts(nextAccounts);
     setActiveAccountId(newId);
     setCurrentUser(newUser);
-    setChats(initialAccChats);
-    setMessages(initialAccMessages);
+    setChats([]);
+    setMessages({});
     setSettings(defaultAccSettings);
     setActiveChatId(null);
     setIsAuthenticated(true);

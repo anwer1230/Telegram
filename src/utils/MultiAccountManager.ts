@@ -61,13 +61,26 @@ export class UserConfig {
    * Goal 1: Purges dummy/mock/test accounts and resets selectedAccount to the real account
    */
   public static cleanupTestAccounts(): void {
+    const hasGlobalSession = typeof window !== 'undefined' ? !!(SecureSessionStorage.getItem<string>('tg_session_string') || localStorage.getItem('tg_session_string')) : false;
     const realAccounts = this.accounts.filter((a) => {
-      const isTest = (a.user as any)?.isTestAccount ||
-                     a.user?.phone?.startsWith('+999') ||
-                     a.user?.phone === '0000000000' ||
-                     a.user?.phone?.includes('test') ||
-                     (a.user as any)?.isDummy === true;
-      return !isTest && a.isActive !== false;
+      const u = a.user;
+      if (!u) return false;
+      const isMock =
+        !u.id ||
+        u.id === 'user_anwer_main' ||
+        u.id === 'user_primary' ||
+        u.id === 'user_self' ||
+        u.id.startsWith('mock_') ||
+        u.username === 'anwer_dev' ||
+        u.name === 'أنور فؤاد' ||
+        u.phone === '+967 770 123 456' ||
+        u.phone === '+967770123456' ||
+        u.phone === '0000000000' ||
+        u.phone?.startsWith('+999') ||
+        u.phone?.includes('test') ||
+        (u as any).isDummy === true;
+      const hasSession = !!(a.sessionString || hasGlobalSession);
+      return !isMock && a.isActive !== false && hasSession;
     });
 
     if (realAccounts.length > 0) {
