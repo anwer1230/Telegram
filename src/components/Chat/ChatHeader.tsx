@@ -207,10 +207,10 @@ export const ChatHeader: React.FC = () => {
         {/* Avatar */}
         <div
           onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-          className="relative w-10 h-10 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-tr from-[#8A2BE2] to-[#FF69B4] text-white font-bold text-base cursor-pointer shrink-0 shadow-sm transition-transform active:scale-95"
+          className="relative w-10 h-10 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-tr from-[#2481cc] to-[#50a7ea] text-white font-bold text-base cursor-pointer shrink-0 shadow-sm transition-transform active:scale-95"
         >
           {isSavedMessages ? (
-            <div className="w-full h-full bg-[#8A2BE2] flex items-center justify-center">
+            <div className="w-full h-full bg-[#2481cc] flex items-center justify-center">
               <Bookmark className="w-5 h-5 fill-white text-white" />
             </div>
           ) : activeChat.avatar ? (

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MessageSquare,
   Megaphone,
@@ -14,7 +14,8 @@ import {
   UserCheck,
   ExternalLink,
   Flame,
-  Radio,
+  ArrowRight,
+  EyeOff,
 } from 'lucide-react';
 import { InAppNotification } from '../../types';
 import { useTelegram } from '../../context/TelegramContext';
@@ -24,16 +25,9 @@ interface InAppNotificationBannerProps {
   onDismiss: (id: string) => void;
 }
 
-/**
- * InAppNotificationBanner - Official Telegram Android (DrKLO) Notification Layout
- *
- * Implements:
- * 1. 🚨 Title: 🚨 كلمة مراقبة: [الكلمة] (with highlighted warning amber/rose accents)
- * 2. 💬 Body Line 1: 💬 الرسالة: [Message text snippet]
- * 3. 📍 Body Line 2: 📍 المصدر: [Group / Channel / Chat Name] (with Live link if public)
- * 4. 🔘 Action 1: "الانتقال إلى الرسالة" (Scroll to exact messageId in ChatView)
- * 5. 🔘 Action 2: "متابعة المرسل / مراسلة المرسل" (Open 1-on-1 private chat with senderId = userId)
- */
+const SESSION_SWIPE_KEY = 'tg_session_notif_right_swipes';
+const SWIPE_LIMIT_FOR_SESSION = 3;
+
 export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = ({
   notifications,
   onDismiss,
@@ -46,9 +40,35 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     setReplyingTo,
     resolveTelegramLink,
     settings,
+    showToast,
   } = useTelegram();
 
   const isArabic = settings.language === 'ar';
+
+  // Read right-swipe count from sessionStorage (reset automatically on new session)
+  const [sessionRightSwipes, setSessionRightSwipes] = useState<number>(() => {
+    try {
+      const val = sessionStorage.getItem(SESSION_SWIPE_KEY);
+      return val ? parseInt(val, 10) : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  // Swipe / Drag gesture state
+  const [dragOffset, setDragOffset] = useState<number>(0);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [isSwipingOut, setIsSwipingOut] = useState<boolean>(false);
+  const startXRef = useRef<number | null>(null);
+  const currentDragOffsetRef = useRef<number>(0);
+
+  // Sync ref with state
+  currentDragOffsetRef.current = dragOffset;
+
+  // If already reached 3 right-swipes in this session, do not render notifications at all
+  if (sessionRightSwipes >= SWIPE_LIMIT_FOR_SESSION) {
+    return null;
+  }
 
   if (!notifications.length) return null;
 
@@ -60,7 +80,7 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
       case 'keyword_alert':
         return <Flame className="w-3.5 h-3.5 text-amber-400 fill-amber-400 animate-pulse" />;
       case 'channel_post':
-        return <Megaphone className="w-3.5 h-3.5 text-sky-400" />;
+        return <Megaphone className="w-3.5 h-3.5 text-[#2481cc]" />;
       case 'mention':
         return <AtSign className="w-3.5 h-3.5 text-amber-400" />;
       case 'call':
@@ -72,12 +92,103 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
       case 'pinned':
         return <Pin className="w-3.5 h-3.5 text-yellow-400" />;
       default:
-        return <MessageSquare className="w-3.5 h-3.5 text-sky-400" />;
+        return <MessageSquare className="w-3.5 h-3.5 text-[#2481cc]" />;
     }
   };
 
-  // 1. General Banner Click Intent -> Jumps directly to the message if available, else opens chat
+  const handleSuccessfulRightSwipe = useCallback(() => {
+    setIsSwipingOut(true);
+    const nextCount = sessionRightSwipes + 1;
+    setSessionRightSwipes(nextCount);
+    try {
+      sessionStorage.setItem(SESSION_SWIPE_KEY, nextCount.toString());
+    } catch {}
+
+    setTimeout(() => {
+      onDismiss(current.id);
+      setIsSwipingOut(false);
+      setDragOffset(0);
+
+      if (nextCount >= SWIPE_LIMIT_FOR_SESSION) {
+        showToast(
+          isArabic
+            ? 'تم إيقاف ظهور الإشعارات لهذه الجلسة بعد تمريرها لليمين 3 مرات. ستعود للظهور تلقائياً عند إعادة الدخول.'
+            : 'Notifications paused for this session (swiped right 3 times). They will reappear on next session.',
+          '🔕'
+        );
+      } else {
+        showToast(
+          isArabic
+            ? `مررت لليمين (${nextCount}/${SWIPE_LIMIT_FOR_SESSION}). عند 3 مرات ستتوقف الإشعارات لهذه الجلسة.`
+            : `Swiped right (${nextCount}/${SWIPE_LIMIT_FOR_SESSION}). 3 swipes pause notifications for this session.`,
+          '👉'
+        );
+      }
+    }, 220);
+  }, [sessionRightSwipes, current.id, onDismiss, showToast, isArabic]);
+
+  // Touch gesture handlers for mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (isSwipingOut) return;
+    startXRef.current = e.touches[0].clientX;
+    setIsDragging(true);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging || startXRef.current === null || isSwipingOut) return;
+    const diff = e.touches[0].clientX - startXRef.current;
+    // We only react to rightward swipes (diff > 0)
+    if (diff > 0) {
+      setDragOffset(diff);
+    } else {
+      setDragOffset(diff * 0.15); // gentle rubber-band left resistance
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (!isDragging || isSwipingOut) return;
+    setIsDragging(false);
+    startXRef.current = null;
+    const finalOffset = currentDragOffsetRef.current;
+    if (finalOffset > 75) {
+      handleSuccessfulRightSwipe();
+    } else {
+      setDragOffset(0);
+    }
+  };
+
+  // Mouse drag handlers for desktop
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (isSwipingOut || (e.target as HTMLElement).closest('button')) return;
+    startXRef.current = e.clientX;
+    setIsDragging(true);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || startXRef.current === null || isSwipingOut) return;
+    const diff = e.clientX - startXRef.current;
+    if (diff > 0) {
+      setDragOffset(diff);
+    } else {
+      setDragOffset(diff * 0.15);
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (!isDragging || isSwipingOut) return;
+    setIsDragging(false);
+    startXRef.current = null;
+    const finalOffset = currentDragOffsetRef.current;
+    if (finalOffset > 75) {
+      handleSuccessfulRightSwipe();
+    } else {
+      setDragOffset(0);
+    }
+  };
+
+  // General Banner Click Intent -> Jumps directly to the message if not dragging
   const handleClickBanner = () => {
+    if (Math.abs(dragOffset) > 10) return; // Ignore drag clicks
     if (current.chatId && current.messageId) {
       jumpToMessage(current.chatId, current.messageId);
     } else if (current.chatId) {
@@ -86,7 +197,6 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     onDismiss(current.id);
   };
 
-  // 2. Action Button 1: Jump to Message (Scrolls directly over messageId)
   const handleJumpToMessage = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (current.chatId && current.messageId) {
@@ -97,16 +207,16 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     onDismiss(current.id);
   };
 
-  // 3. Action Button 2: Message / Follow Sender (Opens 1-on-1 private chat with senderId)
   const handleMessageSender = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const senderId = current.senderId || (current.senderName ? `user_${current.senderName.replace(/\s+/g, '_')}` : 'user_unknown');
+    const senderId =
+      current.senderId ||
+      (current.senderName ? `user_${current.senderName.replace(/\s+/g, '_')}` : 'user_unknown');
     const senderName = current.senderName || 'مستخدم تيليجرام';
     openPrivateChat(senderId, senderName, current.avatar, current.senderUsername);
     onDismiss(current.id);
   };
 
-  // 4. Live Link click for public group or username
   const handleOpenLiveLink = (e: React.MouseEvent, link: string) => {
     e.stopPropagation();
     resolveTelegramLink(link);
@@ -133,33 +243,76 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     onDismiss(current.id);
   };
 
+  // Calculate dynamic transform & opacity
+  const bannerTransform = isSwipingOut
+    ? 'translateX(120vw)'
+    : dragOffset > 0
+    ? `translateX(${dragOffset}px)`
+    : dragOffset < 0
+    ? `translateX(${dragOffset}px)`
+    : 'translateX(0)';
+
+  const bannerOpacity = isSwipingOut
+    ? 0
+    : dragOffset > 0
+    ? Math.max(0.2, 1 - dragOffset / 280)
+    : 1;
+
   return (
     <div
       id={`tg-notification-banner-${current.id}`}
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] w-[95%] max-w-lg animate-in slide-in-from-top-4 duration-300 pointer-events-auto select-none"
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] w-[95%] max-w-lg pointer-events-auto select-none"
       dir={isArabic ? 'rtl' : 'ltr'}
+      style={{
+        transform: `translate(-50%, 0)`,
+      }}
     >
       <div
         onClick={handleClickBanner}
-        className={`group relative overflow-hidden rounded-3xl p-4 shadow-2xl backdrop-blur-2xl border cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] ${
-          isKeywordAlert
-            ? 'border-amber-500/50 bg-[#16130b]/95 shadow-amber-950/40'
-            : 'border-white/15 bg-[#1c2834]/95 shadow-black/60'
-        }`}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
         style={{
+          transform: bannerTransform,
+          opacity: bannerOpacity,
+          transition: isDragging ? 'none' : 'transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.25s ease',
           boxShadow: isKeywordAlert
             ? '0 16px 40px -6px rgba(245, 158, 11, 0.25), 0 0 0 1px rgba(245, 158, 11, 0.3)'
             : '0 16px 40px -6px rgba(0, 0, 0, 0.65)',
         }}
+        className={`group relative overflow-hidden rounded-3xl p-4 shadow-2xl backdrop-blur-2xl border cursor-pointer select-none touch-pan-y ${
+          isKeywordAlert
+            ? 'border-amber-500/50 bg-[#17212b]/95 shadow-amber-950/40'
+            : 'border-white/15 bg-[#17212b]/95 shadow-black/60'
+        }`}
       >
-        {/* Glow Accent Bar */}
+        {/* Official Telegram Blue Top Accent Bar */}
         <div
           className={`absolute top-0 left-0 right-0 h-1 ${
             isKeywordAlert
               ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-yellow-400 animate-pulse'
-              : 'bg-gradient-to-r from-sky-400 via-[#2481cc] to-indigo-500'
+              : 'bg-gradient-to-r from-[#2481cc] via-[#0088cc] to-[#5288c1]'
           }`}
         />
+
+        {/* Right-Swipe Feedback Pill (Appears while dragging to the right) */}
+        {dragOffset > 25 && (
+          <div className="absolute top-2 left-4 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#2481cc]/90 text-white text-[11px] font-bold shadow-md animate-in fade-in">
+            <ArrowRight className="w-3.5 h-3.5 animate-pulse" />
+            <span>
+              {isArabic
+                ? `تمرير لليمين (${sessionRightSwipes + 1}/${SWIPE_LIMIT_FOR_SESSION})`
+                : `Swipe right (${sessionRightSwipes + 1}/${SWIPE_LIMIT_FOR_SESSION})`}
+            </span>
+            {sessionRightSwipes + 1 >= SWIPE_LIMIT_FOR_SESSION && (
+              <EyeOff className="w-3 h-3 text-amber-300 ml-1" />
+            )}
+          </div>
+        )}
 
         <div className="flex items-start gap-3.5">
           {/* Avatar / Category Badge */}
@@ -167,7 +320,7 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
             className={`relative shrink-0 w-12 h-12 rounded-2xl overflow-hidden flex items-center justify-center font-bold text-white shadow-lg ${
               isKeywordAlert
                 ? 'bg-gradient-to-br from-amber-500 to-rose-600 ring-2 ring-amber-400/40'
-                : 'bg-gradient-to-tr from-sky-600 to-cyan-500'
+                : 'bg-gradient-to-tr from-[#2481cc] to-[#0088cc]'
             }`}
           >
             {current.avatar ? (
@@ -304,6 +457,14 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
                   <span>{isArabic ? 'كتم' : 'Mute'}</span>
                 </button>
               )}
+            </div>
+
+            {/* Gesture Hint Footnote */}
+            <div className="mt-1.5 text-[10px] text-gray-400/70 flex items-center gap-1">
+              <span>{isArabic ? '💡 مرر لليمين للإخفاء' : '💡 Swipe right to dismiss'}</span>
+              <span className="font-mono text-[#2481cc]">
+                ({sessionRightSwipes}/{SWIPE_LIMIT_FOR_SESSION})
+              </span>
             </div>
           </div>
 

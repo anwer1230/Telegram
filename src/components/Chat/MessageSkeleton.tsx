@@ -45,7 +45,7 @@ export const MessageSkeletonRow: React.FC<MessageSkeletonRowProps> = React.memo(
           className={`flex justify-end items-end px-3 py-1 w-full select-none ${className}`}
           style={{ height: SKELETON_HEIGHTS.outgoing_short }}
         >
-          <div className="relative max-w-[220px] rounded-2xl rounded-br-xs px-3.5 py-2.5 bg-[var(--tg-theme-bubble-out,#7026b9)]/45 border border-[var(--tg-theme-bubble-out,#7026b9)]/30 tg-skeleton-shimmer shadow-sm">
+          <div className="relative max-w-[220px] rounded-2xl rounded-br-xs px-3.5 py-2.5 bg-[var(--tg-theme-bubble-out,#2b5278)]/45 border border-[var(--tg-theme-bubble-out,#2b5278)]/30 tg-skeleton-shimmer shadow-sm">
             <div className="h-3 w-28 bg-white/35 rounded-md mb-2" />
             <div className="flex items-center justify-end gap-1.5 ml-auto">
               <div className="h-2 w-8 bg-white/25 rounded-xs" />
@@ -63,7 +63,7 @@ export const MessageSkeletonRow: React.FC<MessageSkeletonRowProps> = React.memo(
           className={`flex justify-end items-end px-3 py-1 w-full select-none ${className}`}
           style={{ height: SKELETON_HEIGHTS.outgoing_medium }}
         >
-          <div className="relative max-w-[300px] w-64 rounded-2xl rounded-br-xs px-3.5 py-2.5 bg-[var(--tg-theme-bubble-out,#7026b9)]/45 border border-[var(--tg-theme-bubble-out,#7026b9)]/30 tg-skeleton-shimmer shadow-sm">
+          <div className="relative max-w-[300px] w-64 rounded-2xl rounded-br-xs px-3.5 py-2.5 bg-[var(--tg-theme-bubble-out,#2b5278)]/45 border border-[var(--tg-theme-bubble-out,#2b5278)]/30 tg-skeleton-shimmer shadow-sm">
             <div className="h-3 w-full bg-white/35 rounded-md mb-2" />
             <div className="h-3 w-3/5 bg-white/25 rounded-md mb-2" />
             <div className="flex items-center justify-end gap-1.5 ml-auto">

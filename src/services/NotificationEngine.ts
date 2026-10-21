@@ -224,9 +224,19 @@ export class NotificationEngine {
       }
     }
 
-    // 2. Add to In-App notification list
-    this.activeNotifications = [...this.activeNotifications, notif];
-    this.notifyListeners();
+    // 2. Add to In-App notification list (unless suppressed for current session via 3 right swipes)
+    let sessionPaused = false;
+    try {
+      const swipes = sessionStorage.getItem('tg_session_notif_right_swipes');
+      if (swipes && parseInt(swipes, 10) >= 3) {
+        sessionPaused = true;
+      }
+    } catch {}
+
+    if (!sessionPaused) {
+      this.activeNotifications = [...this.activeNotifications, notif];
+      this.notifyListeners();
+    }
 
     // 3. Post to central NotificationsController
     notificationsController.postNotification({

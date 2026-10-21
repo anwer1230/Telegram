@@ -129,8 +129,8 @@ export const NavigationDrawer: React.FC = () => {
               color: 'var(--tg-theme-bubble-in-text, #ffffff)',
             }}
           >
-            {/* User Profile Header (Telegram Android Style with Purple-to-Pink Brand Gradient) */}
-            <div className="p-4 bg-gradient-to-r from-[#8A2BE2] to-[#FF69B4] text-white flex flex-col justify-between min-h-[148px] shadow-sm relative shrink-0">
+            {/* User Profile Header (Telegram Android Style with Official Telegram Blue Gradient) */}
+            <div className="p-4 bg-gradient-to-br from-[#2481cc] via-[#2076ba] to-[#175c92] text-white flex flex-col justify-between min-h-[148px] shadow-sm relative shrink-0">
               {/* Header Action Buttons */}
               <div className="flex items-center justify-between">
                 {/* User Avatar */}

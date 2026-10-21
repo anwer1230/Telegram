@@ -337,26 +337,26 @@ const TelegramContext = createContext<TelegramContextType | undefined>(undefined
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: 'dark',
-  accentColor: '#5288c1',
+  accentColor: '#2481cc',
   fontSize: 16,
   language: 'ar',
   sendByEnter: true,
-  soundEffects: false,
+  soundEffects: true,
   autoDownloadMedia: true,
   chatWallpaper: 'default',
   bubbleCornerRadius: 16,
   chatListViewMode: 'two_lines',
   enableAnimations: true,
-  inAppSounds: false,
+  inAppSounds: true,
   showTranslateButton: true,
   autoDownloadMobile: true,
   autoDownloadWifi: true,
   autoDownloadRoaming: false,
   streamingEnabled: true,
-  notificationSound: 'silent',
-  muteChatSounds: true,
-  enableSendSound: false,
-  soundVolume: 0,
+  notificationSound: 'classic',
+  muteChatSounds: false,
+  enableSendSound: true,
+  soundVolume: 100,
 };
 
 // Global in-memory Telemetry error log collector
@@ -1247,8 +1247,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setSettings((prev) => ({
           ...prev,
           ...savedSettings,
-          muteChatSounds: savedSettings.muteChatSounds !== undefined ? Boolean(savedSettings.muteChatSounds) : (prev.muteChatSounds ?? true),
-          soundVolume: typeof savedSettings.soundVolume === 'number' ? savedSettings.soundVolume : (prev.soundVolume ?? 0),
+          muteChatSounds: savedSettings.muteChatSounds !== undefined ? Boolean(savedSettings.muteChatSounds) : (prev.muteChatSounds ?? false),
+          soundVolume: typeof savedSettings.soundVolume === 'number' ? savedSettings.soundVolume : (prev.soundVolume ?? 100),
         }));
         if (savedSettings.bubbleCornerRadius !== undefined) {
           themeController.applyBubbleCornerRadius(savedSettings.bubbleCornerRadius);
@@ -2260,12 +2260,56 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => window.removeEventListener('click', handleClick);
   }, [chatContextMenu, messageContextMenu]);
 
-  // Handle HTML language and theme class
+  // Handle HTML language and theme class with official Telegram palette
   useEffect(() => {
     document.documentElement.setAttribute('dir', settings.language === 'ar' ? 'rtl' : 'ltr');
     document.documentElement.setAttribute('lang', settings.language);
     document.documentElement.className = `theme-${settings.theme}`;
-  }, [settings.theme, settings.language]);
+    const accent = settings.accentColor || '#2481cc';
+    document.documentElement.style.setProperty('--tg-theme-accent', accent);
+
+    if (settings.theme === 'light' || settings.theme === 'day') {
+      document.documentElement.style.setProperty('--tg-theme-bg', '#eef2f5');
+      document.documentElement.style.setProperty('--tg-theme-surface', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-sidebar', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-header', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-chat-bg', '#eef2f5');
+      document.documentElement.style.setProperty('--tg-theme-border', '#dfe1e5');
+      document.documentElement.style.setProperty('--tg-theme-bubble-in', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-bubble-out', '#effdde');
+      document.documentElement.style.setProperty('--tg-theme-bubble-in-text', '#000000');
+      document.documentElement.style.setProperty('--tg-theme-bubble-out-text', '#000000');
+      document.documentElement.style.setProperty('--tg-theme-text', '#000000');
+      document.documentElement.style.setProperty('--tg-theme-text-secondary', '#707579');
+    } else if (settings.theme === 'night') {
+      document.documentElement.style.setProperty('--tg-theme-bg', '#000000');
+      document.documentElement.style.setProperty('--tg-theme-surface', '#111111');
+      document.documentElement.style.setProperty('--tg-theme-sidebar', '#111111');
+      document.documentElement.style.setProperty('--tg-theme-header', '#111111');
+      document.documentElement.style.setProperty('--tg-theme-chat-bg', '#000000');
+      document.documentElement.style.setProperty('--tg-theme-border', 'rgba(255, 255, 255, 0.06)');
+      document.documentElement.style.setProperty('--tg-theme-bubble-in', '#181818');
+      document.documentElement.style.setProperty('--tg-theme-bubble-out', '#1f3c58');
+      document.documentElement.style.setProperty('--tg-theme-bubble-in-text', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-bubble-out-text', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-text', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-text-secondary', '#888888');
+    } else {
+      // Official Telegram Dark (Default)
+      document.documentElement.style.setProperty('--tg-theme-bg', '#0e1621');
+      document.documentElement.style.setProperty('--tg-theme-surface', '#17212b');
+      document.documentElement.style.setProperty('--tg-theme-sidebar', '#17212b');
+      document.documentElement.style.setProperty('--tg-theme-header', '#17212b');
+      document.documentElement.style.setProperty('--tg-theme-chat-bg', '#0e1621');
+      document.documentElement.style.setProperty('--tg-theme-border', 'rgba(255, 255, 255, 0.08)');
+      document.documentElement.style.setProperty('--tg-theme-bubble-in', '#182533');
+      document.documentElement.style.setProperty('--tg-theme-bubble-out', '#2b5278');
+      document.documentElement.style.setProperty('--tg-theme-bubble-in-text', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-bubble-out-text', '#ffffff');
+      document.documentElement.style.setProperty('--tg-theme-text', '#f5f5f5');
+      document.documentElement.style.setProperty('--tg-theme-text-secondary', '#7f91a4');
+    }
+  }, [settings.theme, settings.accentColor, settings.language]);
 
   // Backend connection status
   useEffect(() => {

@@ -7,8 +7,8 @@ import { telegramAudio } from '../utils/audioNotification';
 
 export class AudioService {
   private static instance: AudioService;
-  private volume: number = 0;
-  private isMuted: boolean = true;
+  private volume: number = 1.0;
+  private isMuted: boolean = false;
   private soundType: string = 'crystal';
   private ringtoneInterval: any = null;
 

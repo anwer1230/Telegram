@@ -112,7 +112,11 @@ export const ThemeEditorModal: React.FC<ThemeEditorModalProps> = ({ isOpen, onCl
 
     document.documentElement.style.setProperty('--tg-theme-accent', preset.accent);
     document.documentElement.style.setProperty('--tg-theme-surface', preset.surface);
+    document.documentElement.style.setProperty('--tg-theme-sidebar', preset.surface);
     document.documentElement.style.setProperty('--tg-theme-bg', preset.background);
+    document.documentElement.style.setProperty('--tg-theme-chat-bg', preset.background);
+    document.documentElement.style.setProperty('--tg-theme-bubble-in', preset.bubbleIn);
+    document.documentElement.style.setProperty('--tg-theme-bubble-out', preset.bubbleOut);
 
     showToast(
       isArabic ? `تم تطبيق نمط "${preset.nameAr}" بنجاح!` : `Theme "${preset.name}" applied!`,
