@@ -88,9 +88,9 @@ export const ChatProfileDrawer: React.FC<Props> = ({
   ];
 
   return (
-    <div className="w-full md:w-[380px] lg:w-[400px] h-full bg-[#17212b] border-r border-[#242f3d] flex flex-col z-20 shadow-2xl animate-fade-in select-none">
+    <div className="fixed inset-0 z-50 md:relative md:z-20 md:w-[380px] lg:w-[420px] md:flex-shrink-0 h-full bg-[#17212b] md:border-r border-[#242f3d] flex flex-col shadow-2xl animate-fade-in select-none overflow-hidden" dir="rtl">
       {/* Header */}
-      <div className="h-14 px-4 flex items-center justify-between border-b border-[#242f3d] bg-[#17212b]">
+      <div className="h-14 px-4 flex items-center justify-between border-b border-[#242f3d] bg-[#17212b] flex-shrink-0">
         <div className="flex items-center gap-2">
           <button
             onClick={onClose}
@@ -123,26 +123,26 @@ export const ChatProfileDrawer: React.FC<Props> = ({
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto w-full">
         {/* Profile Banner & Avatar */}
-        <div className="p-6 flex flex-col items-center text-center border-b border-[#242f3d] bg-gradient-to-b from-black/20 to-transparent">
-          <div className="relative mb-3">
+        <div className="p-6 flex flex-col items-center justify-center text-center border-b border-[#242f3d] bg-gradient-to-b from-black/25 to-transparent w-full">
+          <div className="relative mb-3 mx-auto">
             <img
               src={chat.avatar}
               alt={chat.title}
-              className="w-24 h-24 rounded-full object-cover shadow-xl border-2 border-teal-500/30"
+              className="w-24 h-24 rounded-full object-cover shadow-xl border-2 border-teal-500/30 mx-auto"
             />
             {chat.isOnline && (
               <span className="absolute bottom-1 left-1 w-4 h-4 bg-emerald-400 border-2 border-[#17212b] rounded-full" />
             )}
           </div>
 
-          <div className="flex items-center justify-center gap-1.5 mb-1">
-            <h2 className="text-lg font-bold text-white max-w-[280px] truncate">{chat.title}</h2>
-            {chat.isVerified && <Sparkles className="w-4 h-4 text-amber-300" />}
+          <div className="flex items-center justify-center gap-1.5 mb-1 w-full px-4 text-center">
+            <h2 className="text-lg font-bold text-white text-center break-words max-w-full leading-snug">{chat.title}</h2>
+            {chat.isVerified && <Sparkles className="w-4 h-4 text-amber-300 flex-shrink-0" />}
           </div>
 
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-400 text-center w-full">
             {chat.type === 'saved' 
               ? 'سحابة تيليجرام الرسمية غير المحدودة' 
               : chat.membersCount 
@@ -153,7 +153,7 @@ export const ChatProfileDrawer: React.FC<Props> = ({
           </p>
 
           {/* Quick Actions (Mute, Search, Clear) */}
-          <div className="flex items-center justify-center gap-6 mt-5 w-full">
+          <div className="flex items-center justify-center gap-6 mt-5 w-full mx-auto">
             <button
               onClick={handleToggleMute}
               className="flex flex-col items-center gap-1.5 text-xs text-gray-300 hover:text-teal-400 transition-colors"

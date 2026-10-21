@@ -88,7 +88,7 @@ const DEFAULT_SESSIONS: ActiveSession[] = [
 const DEFAULT_CHATS: ChatItem[] = [
   {
     id: 'saved_messages',
-    title: 'الرسائل المحفوظة (Saved Messages)',
+    title: 'الرسائل المحفوظة',
     type: 'saved',
     avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80',
     lastMessage: 'سحابة تيليجرام التخزينية الرسمية - مساحة تخزين مشفرة وغير محدودة ☁️',
