@@ -29,6 +29,7 @@ import { KeyboardShortcutsModal } from './components/screens/KeyboardShortcutsMo
 import { NewGroupModal } from './components/modals/NewGroupModal';
 import { NewChannelModal } from './components/modals/NewChannelModal';
 import { ContactsModal } from './components/modals/ContactsModal';
+import { hapticFeedback } from './utils/haptics';
 
 type CurrentView = 
   | 'chat' 
@@ -75,12 +76,57 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // التعامل الفعلي مع أزرار الجوال (زر الرجوع في نظام أندرويد والمتصفحات)
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      hapticFeedback('light');
+
+      // 1. إذا كانت أي نافذة منبثقة مفتوحة، أغلقها فوراً
+      if (isDrawerOpen) { setIsDrawerOpen(false); return; }
+      if (isAddAccountOpen) { setIsAddAccountOpen(false); return; }
+      if (isCloudStatusOpen) { setIsCloudStatusOpen(false); return; }
+      if (isCacheModalOpen) { setIsCacheModalOpen(false); return; }
+      if (isShortcutsModalOpen) { setIsShortcutsModalOpen(false); return; }
+      if (isNewGroupOpen) { setIsNewGroupOpen(false); return; }
+      if (isNewChannelOpen) { setIsNewChannelOpen(false); return; }
+      if (isContactsOpen) { setIsContactsOpen(false); return; }
+
+      // 2. إذا كنا داخل شاشة فرعية في الإعدادات، ارجع خطوة للخلف
+      if (currentView !== 'chat') {
+        navigateBack();
+        return;
+      }
+
+      // 3. إذا كان المستخدم في الهاتف وداخل محادثة، ارجع لقائمة المحادثات
+      if (activeChat) {
+        setActiveChat(null);
+        return;
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [
+    isDrawerOpen, isAddAccountOpen, isCloudStatusOpen, isCacheModalOpen, 
+    isShortcutsModalOpen, isNewGroupOpen, isNewChannelOpen, isContactsOpen, 
+    currentView, activeChat, viewHistory
+  ]);
+
+  const pushNavigationHistory = () => {
+    try {
+      window.history.pushState({ app: 'telegram' }, '');
+    } catch (e) {}
+  };
+
   const navigateTo = (view: CurrentView) => {
+    hapticFeedback('selection');
+    pushNavigationHistory();
     setViewHistory((prev) => [...prev, currentView]);
     setCurrentView(view);
   };
 
   const navigateBack = () => {
+    hapticFeedback('light');
     if (viewHistory.length > 0) {
       const prev = viewHistory[viewHistory.length - 1];
       setViewHistory((prevArr) => prevArr.slice(0, -1));
@@ -91,6 +137,8 @@ export default function App() {
   };
 
   const handleSelectChat = (chat: ChatItem) => {
+    hapticFeedback('selection');
+    pushNavigationHistory();
     setActiveChat(chat);
     setCurrentView('chat');
     setViewHistory([]);
@@ -104,6 +152,7 @@ export default function App() {
   };
 
   const handleSwitchAccount = (userId: string) => {
+    hapticFeedback('success');
     telegramService.switchAccount(userId);
     setCurrentUser(telegramService.getCurrentUser());
     setChats(telegramService.getChats());

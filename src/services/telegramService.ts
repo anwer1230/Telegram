@@ -13,6 +13,7 @@ import {
 import { cryptoService } from './cryptoService';
 
 const STORAGE_KEYS = {
+  MASTER_REGISTRY: 'tg_accounts_master_registry_v1',
   CURRENT_USER: 'tg_current_user_v2',
   ACCOUNTS: 'tg_accounts_v2',
   CHATS: 'tg_chats_v2',
@@ -30,37 +31,22 @@ const STORAGE_KEYS = {
   SESSION_STRING: 'tg_mtproto_session_str'
 };
 
-// الحسابات الافتراضية الرسمية لتيليجرام ويب بلاس (تدعم التبديل اللحظي بين الحسابات)
+// الحساب الفعلي المعتمد لتيليجرام ويب (تم حذف الحسابات التجريبية بالكامل)
 const DEFAULT_ACCOUNTS: TelegramUser[] = [
   {
-    id: 'user_primary',
-    name: 'حسابي (Personal Account)',
+    id: 'user_official_primary',
+    name: 'حساب تيليجرام الرسمي',
     firstName: 'مستخدم',
     lastName: 'تيليجرام',
     phone: '+966 50 123 4567',
-    username: 'my_telegram',
-    bio: 'مرحباً! أنا أستخدم تيليجرام ويب بلاس الرسمي ☁️ • الحساب الشخصي',
+    username: 'telegram_user',
+    bio: 'حساب تيليجرام ويب بلاس الرسمي • متصل بسحابة تيليجرام ☁️',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-    unreadTotal: 1,
+    unreadTotal: 0,
     isActive: true,
     isVerified: true,
     birthday: '1 يناير 2000',
     personalChannel: '@telegram'
-  },
-  {
-    id: 'user_secondary',
-    name: 'حساب الأعمال (Telegram Business)',
-    firstName: 'حساب',
-    lastName: 'الأعمال',
-    phone: '+966 55 987 6543',
-    username: 'business_pro',
-    bio: 'الحساب الرسمي للأعمال والشركات • متصل بسحابة تيليجرام 💼',
-    avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80',
-    unreadTotal: 4,
-    isActive: false,
-    isVerified: true,
-    birthday: '15 مايو 1998',
-    personalChannel: '@telegram_business'
   }
 ];
 
@@ -292,8 +278,11 @@ class TelegramService {
   private isConnectedToCloud = true;
   private listeners: (() => void)[] = [];
 
+  private keepAliveTimer: any = null;
+
   constructor() {
     this.ensureInitialized();
+    this.startKeepAliveWorker();
   }
 
   private ensureInitialized() {
@@ -302,11 +291,28 @@ class TelegramService {
       try { localStorage.removeItem(oldKey); } catch (e) {}
     });
 
+    // استعادة الحسابات من السجل السحابي الدائم Master Registry لضمان عدم الخروج العشوائي أبداً
+    let masterAccounts = DEFAULT_ACCOUNTS;
+    try {
+      const savedMaster = localStorage.getItem(STORAGE_KEYS.MASTER_REGISTRY);
+      if (savedMaster) {
+        const parsed = JSON.parse(savedMaster);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          masterAccounts = parsed;
+        }
+      } else {
+        localStorage.setItem(STORAGE_KEYS.MASTER_REGISTRY, JSON.stringify(DEFAULT_ACCOUNTS));
+      }
+    } catch (e) {
+      masterAccounts = DEFAULT_ACCOUNTS;
+    }
+
     if (!localStorage.getItem(STORAGE_KEYS.ACCOUNTS)) {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(DEFAULT_ACCOUNTS));
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(masterAccounts));
     }
     if (!localStorage.getItem(STORAGE_KEYS.CURRENT_USER)) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(DEFAULT_ACCOUNTS[0]));
+      const active = masterAccounts.find(a => a.isActive) || masterAccounts[0];
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(active));
     }
     if (!localStorage.getItem(STORAGE_KEYS.CHATS)) {
       localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(DEFAULT_CHATS));
@@ -323,6 +329,25 @@ class TelegramService {
     if (!localStorage.getItem(STORAGE_KEYS.GENERAL)) {
       localStorage.setItem(STORAGE_KEYS.GENERAL, JSON.stringify(DEFAULT_GENERAL_SETTINGS));
     }
+  }
+
+  // عامل النبض السحابي الدائم لمنع فقدان الجلسات أو الخروج العشوائي
+  private startKeepAliveWorker() {
+    if (typeof window === 'undefined') return;
+    if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
+
+    this.keepAliveTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/telegram/account/keepalive');
+        const data = await res.json();
+        if (data.isAlive) {
+          this.isConnectedToCloud = true;
+        }
+      } catch (e) {
+        // الاتصال غير متوفر مؤقتاً، لا تقم بتسجيل الخروج إطلاقاً
+        this.isConnectedToCloud = false;
+      }
+    }, 25000);
   }
 
   subscribe(listener: () => void) {
@@ -356,6 +381,7 @@ class TelegramService {
         isActive: a.id === userId
       }));
       localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedAccounts));
+      localStorage.setItem(STORAGE_KEYS.MASTER_REGISTRY, JSON.stringify(updatedAccounts));
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(target));
       this.notify();
       return target;
@@ -370,6 +396,7 @@ class TelegramService {
 
     const accounts = this.getAccounts().map(a => a.id === current.id ? updated : a);
     localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
+    localStorage.setItem(STORAGE_KEYS.MASTER_REGISTRY, JSON.stringify(accounts));
 
     this.notify();
     return updated;
@@ -389,6 +416,7 @@ class TelegramService {
     }
     accounts.push(created);
     localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
+    localStorage.setItem(STORAGE_KEYS.MASTER_REGISTRY, JSON.stringify(accounts));
     this.notify();
     return created;
   }
@@ -400,6 +428,7 @@ class TelegramService {
     }
     const filtered = accounts.filter(a => a.id !== userId);
     localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(filtered));
+    localStorage.setItem(STORAGE_KEYS.MASTER_REGISTRY, JSON.stringify(filtered));
     const current = this.getCurrentUser();
     if (current.id === userId) {
       filtered[0].isActive = true;

@@ -15,6 +15,7 @@ import { telegramService } from '../services/telegramService';
 import { ChatItem, ChatMessage } from '../types/telegram';
 import { CallModal } from './modals/CallModal';
 import { ChatProfileDrawer } from './ChatProfileDrawer';
+import { hapticFeedback } from '../utils/haptics';
 
 interface Props {
   chat: ChatItem;
@@ -58,6 +59,40 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
 
   // Reply State
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+
+  // Mobile Swipe-to-Reply Gesture State
+  const [swipingMsgId, setSwipingMsgId] = useState<string | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState<number>(0);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const handleMsgTouchStart = (e: React.TouchEvent, msg: ChatMessage) => {
+    touchStartRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+    };
+    setSwipingMsgId(msg.id);
+    setSwipeOffset(0);
+  };
+
+  const handleMsgTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const deltaX = e.touches[0].clientX - touchStartRef.current.x;
+    const deltaY = Math.abs(e.touches[0].clientY - touchStartRef.current.y);
+    // Only capture horizontal gestures
+    if (deltaY < 35 && Math.abs(deltaX) > 8) {
+      setSwipeOffset(Math.max(-70, Math.min(70, deltaX)));
+    }
+  };
+
+  const handleMsgTouchEnd = (msg: ChatMessage) => {
+    if (Math.abs(swipeOffset) > 40) {
+      hapticFeedback('medium');
+      setReplyingTo(msg);
+    }
+    setSwipingMsgId(null);
+    setSwipeOffset(0);
+    touchStartRef.current = null;
+  };
 
   // Copied alert notification
   const [copyNotice, setCopyNotice] = useState(false);
@@ -213,6 +248,7 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
 
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
+    hapticFeedback('success');
     const text = inputText;
     setInputText('');
     setShowPicker(false);
@@ -224,6 +260,7 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
   };
 
   const handleSendSticker = async (stickerUrl: string) => {
+    hapticFeedback('selection');
     setShowPicker(false);
     await telegramService.sendMessage(
       chat.id,
@@ -390,9 +427,10 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
             <button 
               onClick={(e) => {
                 e.stopPropagation();
+                hapticFeedback('light');
                 onBack();
               }}
-              className="p-1 hover:bg-black/10 rounded-full transition-colors md:hidden text-white"
+              className="p-1 hover:bg-black/10 rounded-full transition-colors md:hidden text-white active:scale-95"
               title="رجوع"
             >
               <ArrowRight className="w-5 h-5" />
@@ -632,7 +670,14 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
                 <div
                   key={msg.id}
                   id={`msg-${msg.id}`}
-                  className={`flex flex-col ${isMe ? 'items-start' : 'items-end'} group relative transition-colors rounded-2xl p-0.5`}
+                  onTouchStart={(e) => handleMsgTouchStart(e, msg)}
+                  onTouchMove={handleMsgTouchMove}
+                  onTouchEnd={() => handleMsgTouchEnd(msg)}
+                  style={{
+                    transform: swipingMsgId === msg.id ? `translateX(${swipeOffset}px)` : undefined,
+                    transition: swipingMsgId === msg.id ? 'none' : 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)'
+                  }}
+                  className={`flex flex-col ${isMe ? 'items-start' : 'items-end'} group relative transition-colors rounded-2xl p-0.5 touch-manipulation select-none`}
                 >
                   {/* Floating Action Toolbar on Message Hover (Official Web K/A Parity) */}
                   <div className={`opacity-0 group-hover:opacity-100 transition-opacity absolute -top-8 ${
