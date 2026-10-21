@@ -26,6 +26,9 @@ import { CloudStatusModal } from './components/screens/CloudStatusModal';
 import { AddAccountModal } from './components/AddAccountModal';
 import { CacheManagementModal } from './components/screens/CacheManagementModal';
 import { KeyboardShortcutsModal } from './components/screens/KeyboardShortcutsModal';
+import { NewGroupModal } from './components/modals/NewGroupModal';
+import { NewChannelModal } from './components/modals/NewChannelModal';
+import { ContactsModal } from './components/modals/ContactsModal';
 
 type CurrentView = 
   | 'chat' 
@@ -56,6 +59,9 @@ export default function App() {
   const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
   const [isCacheModalOpen, setIsCacheModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [isNewGroupOpen, setIsNewGroupOpen] = useState(false);
+  const [isNewChannelOpen, setIsNewChannelOpen] = useState(false);
+  const [isContactsOpen, setIsContactsOpen] = useState(false);
 
   useEffect(() => {
     // Initial theme styling setup
@@ -117,6 +123,9 @@ export default function App() {
         onOpenAddAccount={() => setIsAddAccountOpen(true)}
         onOpenCloudStatus={() => setIsCloudStatusOpen(true)}
         onOpenChatFolders={() => navigateTo('chat_folders')}
+        onOpenNewGroup={() => setIsNewGroupOpen(true)}
+        onOpenNewChannel={() => setIsNewChannelOpen(true)}
+        onOpenContacts={() => setIsContactsOpen(true)}
       />
 
       {/* Cloud Status Modal (API_ID: 34773007, API_HASH, WSS Protocol, DC Selector) */}
@@ -144,6 +153,42 @@ export default function App() {
       {/* Official Telegram Web Keyboard Shortcuts Modal */}
       {isShortcutsModalOpen && (
         <KeyboardShortcutsModal onClose={() => setIsShortcutsModalOpen(false)} />
+      )}
+
+      {/* New Group Modal */}
+      {isNewGroupOpen && (
+        <NewGroupModal
+          onClose={() => setIsNewGroupOpen(false)}
+          onSuccess={(chatId) => {
+            setIsNewGroupOpen(false);
+            setChats(telegramService.getChats());
+            handleSelectChatById(chatId);
+          }}
+        />
+      )}
+
+      {/* New Channel Modal */}
+      {isNewChannelOpen && (
+        <NewChannelModal
+          onClose={() => setIsNewChannelOpen(false)}
+          onSuccess={(chatId) => {
+            setIsNewChannelOpen(false);
+            setChats(telegramService.getChats());
+            handleSelectChatById(chatId);
+          }}
+        />
+      )}
+
+      {/* Contacts / New Chat Modal */}
+      {isContactsOpen && (
+        <ContactsModal
+          onClose={() => setIsContactsOpen(false)}
+          onSelectContact={(chatId) => {
+            setIsContactsOpen(false);
+            setChats(telegramService.getChats());
+            handleSelectChatById(chatId);
+          }}
+        />
       )}
 
       {/* Views Routing */}
@@ -273,6 +318,9 @@ export default function App() {
               onSelectChat={(chat) => setActiveChat(chat)}
               onOpenDrawer={() => setIsDrawerOpen(true)}
               onOpenCloudStatus={() => setIsCloudStatusOpen(true)}
+              onOpenNewGroup={() => setIsNewGroupOpen(true)}
+              onOpenNewChannel={() => setIsNewChannelOpen(true)}
+              onOpenContacts={() => setIsContactsOpen(true)}
             />
           </div>
 

@@ -24,6 +24,9 @@ interface Props {
   onOpenAddAccount: () => void;
   onOpenCloudStatus: () => void;
   onOpenChatFolders: () => void;
+  onOpenNewGroup: () => void;
+  onOpenNewChannel: () => void;
+  onOpenContacts: () => void;
 }
 
 export const NavigationDrawer: React.FC<Props> = ({
@@ -36,7 +39,10 @@ export const NavigationDrawer: React.FC<Props> = ({
   onOpenPlusSettings,
   onOpenAddAccount,
   onOpenCloudStatus,
-  onOpenChatFolders
+  onOpenChatFolders,
+  onOpenNewGroup,
+  onOpenNewChannel,
+  onOpenContacts
 }) => {
   if (!isOpen) return null;
 
@@ -122,7 +128,7 @@ export const NavigationDrawer: React.FC<Props> = ({
             </button>
 
             <button
-              onClick={onClose}
+              onClick={() => { onOpenNewGroup(); onClose(); }}
               className="w-full px-5 py-3 flex items-center justify-between hover:bg-white/5 transition-colors text-right"
             >
               <span className="text-sm font-medium text-gray-200">مجموعة جديدة</span>
@@ -130,7 +136,7 @@ export const NavigationDrawer: React.FC<Props> = ({
             </button>
 
             <button
-              onClick={onClose}
+              onClick={() => { onOpenNewChannel(); onClose(); }}
               className="w-full px-5 py-3 flex items-center justify-between hover:bg-white/5 transition-colors text-right"
             >
               <span className="text-sm font-medium text-gray-200">قناة جديدة</span>
@@ -138,7 +144,7 @@ export const NavigationDrawer: React.FC<Props> = ({
             </button>
 
             <button
-              onClick={onClose}
+              onClick={() => { onOpenContacts(); onClose(); }}
               className="w-full px-5 py-3 flex items-center justify-between hover:bg-white/5 transition-colors text-right"
             >
               <span className="text-sm font-medium text-gray-200">جهات الاتصال</span>

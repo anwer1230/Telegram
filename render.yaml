@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: telegram-web-plus
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: telegram-web-plus
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/telegram/status
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: TELEGRAM_API_ID
+        value: "34773007"
+      - key: TELEGRAM_API_HASH
+        value: "2a6b16abed75c3f6898ee79e9237fd25"
