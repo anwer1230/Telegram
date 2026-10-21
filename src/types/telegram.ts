@@ -58,6 +58,7 @@ export interface ChatItem {
   username?: string;
   bio?: string;
   membersCount?: number;
+  pinnedMessageId?: string;
 }
 
 export interface ActiveSession {

@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { 
   Menu, Search, Cloud, Pin, Check, CheckCheck, 
   MessageSquarePlus, ShieldCheck, Sparkles, Filter, X,
-  Users, Megaphone, Contact
+  Users, Megaphone, Contact, BellOff
 } from 'lucide-react';
 import { telegramService } from '../services/telegramService';
 import { ChatItem } from '../types/telegram';
@@ -69,37 +69,54 @@ export const ChatList: React.FC<Props> = ({
     return true;
   });
 
+  // Calculate unread count per tab
+  const getTabUnreadCount = (tabId: string) => {
+    return chats.reduce((acc, c) => {
+      let matches = false;
+      if (tabId === 'all') matches = true;
+      else if (tabId === 'personal') matches = c.type === 'user';
+      else if (tabId === 'groups') matches = c.type === 'group';
+      else if (tabId === 'channels') matches = c.type === 'channel';
+      else if (tabId === 'bots') matches = c.type === 'bot';
+      else if (tabId === 'unread') matches = c.unreadCount > 0;
+      else if (tabId === 'saved') matches = c.type === 'saved';
+      return matches ? acc + (c.unreadCount || 0) : acc;
+    }, 0);
+  };
+
   return (
     <div className="flex flex-col h-full w-full bg-[#17212b] border-l border-[#242f3d] select-none relative">
-      {/* Top Header Bar matching Screenshot 2 */}
+      {/* Top Header Bar matching Telegram Web K (56px) */}
       <div 
-        className="flex items-center justify-between px-4 py-3 shadow-md transition-colors"
+        className="h-14 flex items-center justify-between px-3.5 shadow-md transition-colors flex-shrink-0"
         style={{ backgroundColor: theme.primaryColor }}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={onOpenDrawer}
-            className="p-1 hover:bg-black/10 rounded-full transition-colors text-white"
+            className="p-1.5 hover:bg-black/10 rounded-full transition-colors text-white"
             title="القائمة الجانبية"
           >
-            <Menu className="w-6 h-6" />
+            <Menu className="w-5 h-5" />
           </button>
-          <h1 className="text-xl font-bold tracking-wide text-white">تيليجرام</h1>
+          <h1 className="text-lg font-bold tracking-wide text-white">تيليجرام</h1>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <button
             onClick={onOpenCloudStatus}
             className="p-1.5 hover:bg-black/10 rounded-full transition-colors text-white relative"
             title="حالة سحابة تيليجرام والتشفير"
           >
             <Cloud className="w-5 h-5 text-white" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-emerald-400 rounded-full border border-teal-800" />
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-400 rounded-full border border-teal-800" />
           </button>
 
           <button
             onClick={() => setIsSearchOpen(!isSearchOpen)}
-            className="p-1.5 hover:bg-black/10 rounded-full transition-colors text-white"
+            className={`p-1.5 rounded-full transition-colors text-white ${
+              isSearchOpen ? 'bg-black/20' : 'hover:bg-black/10'
+            }`}
             title="بحث"
           >
             <Search className="w-5 h-5" />
@@ -109,10 +126,10 @@ export const ChatList: React.FC<Props> = ({
 
       {/* Real-time search bar */}
       {isSearchOpen && (
-        <div className="p-2.5 bg-[#0e1621] border-b border-[#242f3d] flex items-center gap-2 animate-fade-in">
+        <div className="p-2.5 bg-[#0e1621] border-b border-[#242f3d] flex items-center gap-2 animate-fade-in flex-shrink-0">
           <input
             type="text"
-            placeholder="بحث في الرسائل والمحادثات السحابية..."
+            placeholder="بحث في المحادثات والرسائل..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="flex-1 bg-[#17212b] border border-[#242f3d] text-white text-xs py-2 px-3 rounded-xl focus:outline-none focus:border-teal-400 text-right"
@@ -130,19 +147,25 @@ export const ChatList: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Tabs matching Telegram Web folders */}
-      <div className="flex items-center overflow-x-auto scrollbar-none bg-[#17212b] border-b border-[#242f3d] px-2 text-xs font-semibold">
+      {/* Tabs matching Telegram Web folders (Height: 48px) */}
+      <div className="flex items-center overflow-x-auto scrollbar-none bg-[#17212b] border-b border-[#242f3d] px-2 text-xs font-semibold flex-shrink-0">
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
+          const unread = getTabUnreadCount(tab.id);
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`py-3 px-3.5 whitespace-nowrap transition-colors relative flex items-center gap-1.5 ${
+              className={`py-3 px-3 whitespace-nowrap transition-colors relative flex items-center gap-1.5 ${
                 isActive ? 'text-teal-400 font-bold' : 'text-gray-400 hover:text-gray-200'
               }`}
             >
               <span>{tab.label}</span>
+              {unread > 0 && (
+                <span className="px-1.5 py-0.2 bg-[#242f3d] text-gray-300 text-[10px] rounded-full font-bold">
+                  {unread}
+                </span>
+              )}
               {isActive && (
                 <div 
                   className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
@@ -154,8 +177,8 @@ export const ChatList: React.FC<Props> = ({
         })}
       </div>
 
-      {/* Chat List Items */}
-      <div className="flex-1 overflow-y-auto divide-y divide-[#242f3d]/60">
+      {/* Chat List Items - Fixed height 72px per Telegram Web specification */}
+      <div className="flex-1 overflow-y-auto divide-y divide-[#242f3d]/40">
         {filteredChats.length === 0 ? (
           <div className="p-8 text-center text-gray-400 text-xs space-y-2">
             <p>لا توجد محادثات في هذا القسم</p>
@@ -168,12 +191,12 @@ export const ChatList: React.FC<Props> = ({
               <div
                 key={chat.id}
                 onClick={() => onSelectChat(chat)}
-                className={`px-4 py-3 flex items-center justify-between cursor-pointer transition-colors relative ${
+                className={`h-[72px] px-3.5 flex items-center justify-between cursor-pointer transition-colors relative ${
                   isSelected ? 'bg-[#242f3d]' : 'hover:bg-white/5'
                 }`}
               >
-                {/* Right side: Avatar and online indicator */}
-                <div className="flex items-center gap-3 flex-1 min-w-0 pr-1">
+                {/* Avatar and Info */}
+                <div className="flex items-center gap-3 flex-1 min-w-0 pr-0.5">
                   <div className="relative flex-shrink-0">
                     <img
                       src={chat.avatar}
@@ -186,32 +209,39 @@ export const ChatList: React.FC<Props> = ({
                   </div>
 
                   <div className="flex-1 min-w-0 text-right">
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-[11px] text-gray-400 font-mono">
+                    {/* Top Row: Title + Time */}
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] text-gray-400 font-mono flex-shrink-0">
                         {chat.lastMessageTime}
                       </span>
-                      <div className="flex items-center gap-1 truncate max-w-[170px]">
+                      <div className="flex items-center gap-1 truncate max-w-[190px]">
                         {chat.isVerified && <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />}
-                        <h3 className="text-sm font-bold text-gray-100 truncate">{chat.title}</h3>
+                        <h3 className="text-sm font-semibold text-gray-100 truncate">{chat.title}</h3>
                       </div>
                     </div>
 
+                    {/* Bottom Row: Message snippet + Status Badges */}
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
+                      {/* Left side in RTL: Badges (Pin, Mute, Unread) */}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {chat.isMuted && (
+                          <BellOff className="w-3.5 h-3.5 text-gray-500" />
+                        )}
                         {chat.isPinned && (
                           <Pin className="w-3.5 h-3.5 text-gray-400 rotate-45" />
                         )}
                         {chat.unreadCount > 0 && (
                           <span 
-                            className="px-2 py-0.5 rounded-full text-xs font-bold text-white shadow-xs"
-                            style={{ backgroundColor: theme.primaryColor }}
+                            className="px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-xs"
+                            style={{ backgroundColor: chat.isMuted ? '#6c7883' : theme.primaryColor }}
                           >
                             {chat.unreadCount}
                           </span>
                         )}
                       </div>
 
-                      <p className="text-xs text-gray-400 truncate max-w-[190px]">
+                      {/* Right side in RTL: Snippet */}
+                      <p className="text-xs text-gray-400 truncate max-w-[200px] leading-relaxed">
                         {chat.lastMessage}
                       </p>
                     </div>
@@ -296,10 +326,10 @@ export const ChatList: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Floating Action Button (FAB) matching User Screenshot */}
+      {/* Floating Action Button (FAB) matching Official Telegram Web */}
       <button
         onClick={() => setShowFabMenu(!showFabMenu)}
-        className="absolute bottom-5 left-5 w-13 h-13 rounded-full shadow-2xl flex items-center justify-center text-white transition-all active:scale-95 hover:scale-105 z-30"
+        className="absolute bottom-5 left-5 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center text-white transition-all active:scale-95 hover:scale-105 z-30"
         style={{ backgroundColor: theme.primaryColor }}
         title="إنشاء مجموعة أو قناة أو محادثة جديدة"
       >

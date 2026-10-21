@@ -386,7 +386,13 @@ class TelegramService {
     return all[chatId] || [];
   }
 
-  async sendMessage(chatId: string, text: string, mediaType?: 'photo' | 'voice' | 'file', mediaUrl?: string): Promise<ChatMessage> {
+  async sendMessage(
+    chatId: string, 
+    text: string, 
+    mediaType?: 'photo' | 'voice' | 'file' | 'sticker' | 'location', 
+    mediaUrl?: string,
+    replyTo?: { id: string; text: string; sender: string }
+  ): Promise<ChatMessage> {
     const user = this.getCurrentUser();
     const now = new Date();
     const timeStr = now.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
@@ -405,6 +411,7 @@ class TelegramService {
       status: 'sent',
       mediaType,
       mediaUrl,
+      replyTo,
       isEncrypted: true
     };
 
@@ -423,7 +430,7 @@ class TelegramService {
       if (c.id === chatId) {
         return {
           ...c,
-          lastMessage: text || (mediaType === 'voice' ? 'رسالة صوتية 🎙️' : 'ملف وسائط'),
+          lastMessage: text || (mediaType === 'voice' ? 'رسالة صوتية 🎙️' : mediaType === 'sticker' ? 'ملصق متحرك 🎭' : 'ملف وسائط'),
           lastMessageTime: timeStr
         };
       }
@@ -451,6 +458,71 @@ class TelegramService {
 
     this.notify();
     return newMsg;
+  }
+
+  deleteMessage(chatId: string, messageId: string): void {
+    const raw = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+    const all = raw ? JSON.parse(raw) : DEFAULT_MESSAGES;
+    if (all[chatId]) {
+      all[chatId] = all[chatId].filter((m: ChatMessage) => m.id !== messageId);
+      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(all));
+      this.notify();
+    }
+  }
+
+  pinMessage(chatId: string, messageId: string): void {
+    const chats = this.getChats();
+    const updated = chats.map(c => {
+      if (c.id === chatId) {
+        return { ...c, pinnedMessageId: messageId };
+      }
+      return c;
+    });
+    localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(updated));
+    this.notify();
+  }
+
+  unpinMessage(chatId: string): void {
+    const chats = this.getChats();
+    const updated = chats.map(c => {
+      if (c.id === chatId) {
+        const { pinnedMessageId, ...rest } = c;
+        return rest;
+      }
+      return c;
+    });
+    localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(updated));
+    this.notify();
+  }
+
+  getPinnedMessage(chatId: string): ChatMessage | undefined {
+    const chat = this.getChats().find(c => c.id === chatId);
+    if (!chat || !chat.pinnedMessageId) return undefined;
+    const msgs = this.getMessages(chatId);
+    return msgs.find(m => m.id === chat.pinnedMessageId);
+  }
+
+  toggleMuteChat(chatId: string): boolean {
+    const chats = this.getChats();
+    let isNowMuted = false;
+    const updated = chats.map(c => {
+      if (c.id === chatId) {
+        isNowMuted = !c.isMuted;
+        return { ...c, isMuted: isNowMuted };
+      }
+      return c;
+    });
+    localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(updated));
+    this.notify();
+    return isNowMuted;
+  }
+
+  clearChatHistory(chatId: string): void {
+    const raw = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+    const all = raw ? JSON.parse(raw) : DEFAULT_MESSAGES;
+    all[chatId] = [];
+    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(all));
+    this.notify();
   }
 
   private receiveSimulatedReply(chatId: string, userText: string) {

@@ -309,8 +309,8 @@ export default function App() {
       {currentView === 'chat' && (
         <div className="flex w-full h-full">
           {/* Chat List Sidebar: On mobile visible when no chat is focused, or on desktop always visible (w-80 to w-96) */}
-          <div className={`h-full border-l border-[#242f3d] ${
-            activeChat ? 'hidden md:flex md:w-80 lg:w-96' : 'w-full flex'
+          <div className={`h-full border-l border-[#242f3d] flex-shrink-0 ${
+            activeChat ? 'hidden md:flex md:w-[380px] lg:w-[420px]' : 'w-full flex'
           }`}>
             <ChatList
               chats={chats}
