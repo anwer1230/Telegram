@@ -93,14 +93,7 @@ export class DraftSyncService {
         }
       }
 
-      // Default sample draft if empty
-      if (this.drafts.size === 0) {
-        this.drafts.set('chat_durov', {
-          chatId: 'chat_durov',
-          text: 'مرحباً بافل، نود مناقشة خطة التحديثات القادمة لتيليجرام.',
-          updatedAt: Date.now() - 3600000,
-        });
-      }
+
     } catch (e) {
       console.warn('[DraftSyncService] Failed to load drafts from storage:', e);
     }

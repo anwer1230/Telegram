@@ -11,7 +11,7 @@
 
 import { User, UserAccount, Chat, Message, AppSettings } from '../types';
 import { ConnectionsManager } from '../core/ConnectionsManager';
-import { DEFAULT_ACCOUNTS, INITIAL_CHATS, INITIAL_MESSAGES } from '../data/mockTelegramData';
+
 import { SecureSessionStorage } from './SecureSessionStorage';
 
 export type MultiAccountEventType =

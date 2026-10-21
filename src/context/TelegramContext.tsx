@@ -794,66 +794,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    return [
-      {
-        id: 'link_1',
-        url: 'https://t.me/telegram',
-        sourceChatId: 'chat_durov',
-        sourceChatTitle: 'Pavel Durov',
-        sourceSenderName: 'Pavel Durov',
-        detectedAt: '10:15 AM',
-        type: 'telegram_channel',
-        extractedTitle: 'Telegram News & Official',
-        memberCount: 9400000,
-        joined: true,
-        joinedAt: '10:15 AM',
-        autoJoined: true,
-        status: 'joined',
-      },
-      {
-        id: 'link_2',
-        url: 'https://t.me/toncoin',
-        sourceChatId: 'chat_crypto',
-        sourceChatTitle: 'TON & Web3 Developers',
-        sourceSenderName: 'Alex Developer',
-        detectedAt: '11:30 AM',
-        type: 'telegram_channel',
-        extractedTitle: 'The Open Network (TON)',
-        memberCount: 2800000,
-        joined: true,
-        joinedAt: '11:30 AM',
-        autoJoined: true,
-        status: 'joined',
-      },
-      {
-        id: 'link_3',
-        url: 'https://t.me/+invite_tg_developers_hub',
-        sourceChatId: 'chat_general',
-        sourceChatTitle: 'Telegram Global Community',
-        sourceSenderName: 'Sarah Connor',
-        detectedAt: '12:05 PM',
-        type: 'telegram_group',
-        extractedTitle: 'Telegram MTProto Developers Hub',
-        memberCount: 45200,
-        joined: false,
-        autoJoined: false,
-        status: 'pending',
-      },
-      {
-        id: 'link_4',
-        url: 'https://t.me/major_official',
-        sourceChatId: 'chat_botfather',
-        sourceChatTitle: 'BotFather',
-        sourceSenderName: 'BotFather',
-        detectedAt: '01:20 PM',
-        type: 'telegram_channel',
-        extractedTitle: 'Major Stars & Games Channel',
-        memberCount: 1540000,
-        joined: false,
-        autoJoined: false,
-        status: 'pending',
-      },
-    ];
+    return [];
   });
 
   const [autoJoinLinksEnabled, setAutoJoinLinksEnabled] = useState<boolean>(() => {
@@ -1698,11 +1639,11 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const testSimulateFcmPush = (customParams?: Partial<FcmPushPacket>) => {
-    const dialogId = customParams?.dialog_id || activeChatId || 'chat_durov';
+    const dialogId = customParams?.dialog_id || activeChatId || (chats[0]?.id || '');
     const targetChat = chats.find((c) => c.id === dialogId);
-    const title = customParams?.title || targetChat?.title || 'Pavel Durov';
+    const title = customParams?.title || targetChat?.title || 'Telegram';
     const body = customParams?.body || 'Test MTProto FCM push message received in background 🚀';
-    const senderId = customParams?.sender_id || targetChat?.id || 'durov';
+    const senderId = customParams?.sender_id || targetChat?.id || 'telegram';
 
     // Broadcast through service worker simulation
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {

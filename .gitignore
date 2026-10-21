@@ -2,6 +2,8 @@ node_modules
 node_modules/
 build/
 dist/
+node-compile-cache/
+.aistudio/
 coverage/
 .DS_Store
 *.log

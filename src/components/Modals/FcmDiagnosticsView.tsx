@@ -48,7 +48,7 @@ export const FcmDiagnosticsView: React.FC<{ onBack: () => void }> = ({ onBack })
   const [showRawJson, setShowRawJson] = useState(false);
   const [customTitle, setCustomTitle] = useState('Telegram MTProto');
   const [customBody, setCustomBody] = useState('New incoming message notification');
-  const [selectedTargetDialog, setSelectedTargetDialog] = useState<string>(activeChatId || (chats[0]?.id || 'chat_durov'));
+  const [selectedTargetDialog, setSelectedTargetDialog] = useState<string>(activeChatId || (chats[0]?.id || ''));
   const [isSimulating, setIsSimulating] = useState(false);
   const [isEnablingFcm, setIsEnablingFcm] = useState(false);
 
@@ -107,8 +107,9 @@ export const FcmDiagnosticsView: React.FC<{ onBack: () => void }> = ({ onBack })
 
   const handleTestPush = (mode: 'active' | 'custom' | 'background') => {
     setIsSimulating(true);
-    let targetId = activeChatId || 'chat_durov';
-    let title = 'Pavel Durov';
+    let targetId = activeChatId || (chats[0]?.id || '');
+    const targetChat = chats.find(c => c.id === targetId);
+    let title = targetChat?.title || 'Telegram';
     let body = 'Simulated Telegram push notification via FCM';
 
     if (mode === 'custom') {
