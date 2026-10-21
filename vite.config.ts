@@ -8,7 +8,23 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname || process.cwd(), '.'),
+      },
+    },
+    build: {
+      chunkSizeWarningLimit: 5000,
+      rollupOptions: {
+        onwarn(warning, defaultHandler) {
+          if (
+            warning.code === 'EVAL' ||
+            warning.code === 'INEFFECTIVE_DYNAMIC_IMPORT' ||
+            warning.message?.includes('eval') ||
+            warning.message?.includes('ineffective dynamic import')
+          ) {
+            return;
+          }
+          defaultHandler(warning);
+        },
       },
     },
     server: {

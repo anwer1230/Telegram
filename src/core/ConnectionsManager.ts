@@ -6,6 +6,7 @@
  */
 
 import { TLRPC } from './TLRPC';
+import { MessagesController } from './MessagesController';
 import { telegramDB } from '../utils/sqliteStorage';
 import { SecureSessionStorage } from '../utils/SecureSessionStorage';
 
@@ -159,9 +160,9 @@ export class ConnectionsManager {
     this.updateState('CONNECTION_STATE_UPDATING');
     
     // Import and trigger difference reconciliation
-    import('./MessagesController').then(({ MessagesController }) => {
+    try {
       MessagesController.getInstance(this.accountNum).getDifference();
-    }).catch(() => {});
+    } catch (_) {}
 
     setTimeout(() => {
       this.updateState('CONNECTION_STATE_CONNECTED');
@@ -250,11 +251,9 @@ export class ConnectionsManager {
         `[ConnectionsManager] Intercepted 401 / ${err.text} on account ${this.accountNum}. Triggering cleanup and session revocation.`
       );
       this.cleanup(false);
-      import('./MessagesController')
-        .then(({ MessagesController }) => {
-          MessagesController.getInstance(this.accountNum).performForcedLogout(err.text || 'AUTH_KEY_UNREGISTERED');
-        })
-        .catch(() => {});
+      try {
+        MessagesController.getInstance(this.accountNum).performForcedLogout(err.text || 'AUTH_KEY_UNREGISTERED');
+      } catch (_) {}
     }
   }
 
@@ -514,11 +513,11 @@ export class ConnectionsManager {
               this.updateListeners.forEach((l) => l(success));
 
               // استدعاء المزامنة السحابية ومعالجة التحديثات فورياً (processUpdates & getDifference)
-              import('./MessagesController').then(({ MessagesController }) => {
+              try {
                 const controller = MessagesController.getInstance(this.accountNum);
                 controller.processUpdates(success, false);
                 controller.getDifference();
-              }).catch(() => {});
+              } catch (_) {}
 
               // إرسال حدث الانضمام للتزامن مع واجهات المستخدم
               if (typeof window !== 'undefined') {
@@ -593,11 +592,11 @@ export class ConnectionsManager {
               this.updateListeners.forEach((l) => l(success));
 
               // استدعاء المزامنة السحابية ومعالجة التحديثات فورياً (processUpdates & getDifference)
-              import('./MessagesController').then(({ MessagesController }) => {
+              try {
                 const controller = MessagesController.getInstance(this.accountNum);
                 controller.processUpdates(success, false);
                 controller.getDifference();
-              }).catch(() => {});
+              } catch (_) {}
 
               if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('tg-joined-chat', { detail: data.joinedChat }));

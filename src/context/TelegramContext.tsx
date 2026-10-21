@@ -66,7 +66,9 @@ import { getTelegramEpoch, parseTelegramDate, formatTelegramTime } from '../util
 import { messageCache } from '../services/IndexedDBMessageCache';
 import { telegramDB } from '../utils/sqliteStorage';
 import { chatStore, ChatStore, ChatReadPosition } from '../store/chatStore';
-import { privacyController } from '../core/messenger/PrivacySettingsController';
+import { privacyController, PrivacySettingsController } from '../core/messenger/PrivacySettingsController';
+import { TwoStepVerificationController } from '../core/messenger/TwoStepVerificationController';
+import { storageCloudBackupService } from '../services/StorageCloudBackupService';
 import { SecretChatHelper } from '../core/messenger/SecretChatHelper';
 
 interface TelegramContextType {
@@ -1286,9 +1288,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     // 📦 Initialize Firestore Background Storage Backup Daemon (backs up tg_multi_accounts_v3, app_settings, etc.)
-    import('../services/StorageCloudBackupService').then(({ storageCloudBackupService }) => {
+    try {
       storageCloudBackupService.initialize({ autoRestoreIfEmpty: true });
-    }).catch(() => {});
+    } catch (_) {}
 
     const onStorageRestoredFromCloud = () => {
       const saved = SecureSessionStorage.getItem<UserAccount[]>('tg_multi_accounts_v3');
@@ -1336,9 +1338,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           webPushManager.checkAndAutoSubscribe();
         }).catch(() => {});
         // Trigger debounced Firestore backup when accounts/state update
-        import('../services/StorageCloudBackupService').then(({ storageCloudBackupService }) => {
+        try {
           storageCloudBackupService.triggerDebouncedBackup(2500);
-        }).catch(() => {});
+        } catch (_) {}
       }
     } catch (e) {
       console.warn('[TelegramContext] Encrypted session auto-heal notice:', e);
@@ -4632,9 +4634,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         update._ === 'updateNewAuthorization' ||
         update.type === 'updateNewAuthorization'
       ) {
-        import('../core/MessagesController').then(({ MessagesController }) => {
+        try {
           MessagesController.getInstance().processUpdates(update);
-        }).catch(() => {});
+        } catch (_) {}
         return;
       }
 
@@ -4686,9 +4688,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         update.type === 'read_history_inbox' ||
         update.type === 'read_history_outbox'
       ) {
-        import('../core/MessagesController').then(({ MessagesController }) => {
+        try {
           MessagesController.getInstance().processSingleUpdate(update);
-        }).catch(() => {});
+        } catch (_) {}
 
         if (update.type === 'edit_message' && update.message) {
           const editedMsg = update.message;
@@ -4987,11 +4989,11 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       socket.on('connect', () => {
         console.log('[Socket.IO] Connected/Reconnected to server. Triggering differences & offline recovery...');
-        import('../core/MessagesController').then(({ MessagesController }) => {
+        try {
           const controller = MessagesController.getInstance();
           controller.getDifference();
           controller.getChannelDifferenceService().handleLongOfflineRecovery();
-        }).catch(() => {});
+        } catch (_) {}
       });
 
       socket.on('settings_updated', (payload: any) => {
@@ -5022,24 +5024,20 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           payload?.type === '2fa_updated' ||
           payload?.subType === 'email_verified'
         ) {
-          import('../core/messenger/TwoStepVerificationController')
-            .then(({ TwoStepVerificationController }) => {
-              TwoStepVerificationController.getInstance().updateFromRemote(payload);
-            })
-            .catch(() => {});
+          try {
+            TwoStepVerificationController.getInstance().updateFromRemote(payload);
+          } catch (_) {}
           showToast(settings.language === 'ar' ? 'تم تحديث إعدادات التحقق بخطوتين والبريد' : '2FA settings synced', '🔐');
         }
         // 3. Privacy updates
         if (payload?.subType === 'privacy_updated' || payload?.type === 'privacy_updated' || payload?.target) {
-          import('../core/messenger/PrivacySettingsController')
-            .then(({ PrivacySettingsController }) => {
-              if (payload.target && payload.option) {
-                PrivacySettingsController.getInstance().updateRuleFromRemote(payload.target, payload.option);
-              } else {
-                PrivacySettingsController.getInstance().loadPrivacySettings();
-              }
-            })
-            .catch(() => {});
+          try {
+            if (payload.target && payload.option) {
+              PrivacySettingsController.getInstance().updateRuleFromRemote(payload.target, payload.option);
+            } else {
+              PrivacySettingsController.getInstance().loadPrivacySettings();
+            }
+          } catch (_) {}
           showToast(settings.language === 'ar' ? 'تم تحديث إعدادات الخصوصية' : 'Privacy settings synced', '🛡️');
         }
       });
@@ -5082,14 +5080,12 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (rawUpdate?.message || rawUpdate?.type === 'new_message') {
             handleIncomingUpdate(rawUpdate);
           }
-          import('../core/MessagesController').then(({ MessagesController }) => {
-            const controller = MessagesController.getInstance();
-            if (rawUpdate?.update) {
-              controller.processUpdates(rawUpdate.update);
-            } else if (rawUpdate) {
-              controller.processUpdates(rawUpdate);
-            }
-          }).catch(() => {});
+          const controller = MessagesController.getInstance();
+          if (rawUpdate?.update) {
+            controller.processUpdates(rawUpdate.update);
+          } else if (rawUpdate) {
+            controller.processUpdates(rawUpdate);
+          }
         } catch (e) {
           console.warn('[Socket.IO] raw_update processing error:', e);
         }
@@ -5307,9 +5303,9 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         activeChatId.startsWith('-100'));
 
     if (isSupergroup) {
-      import('../core/MessagesController').then(({ MessagesController }) => {
+      try {
         MessagesController.getInstance().checkChannelDifference(activeChatId);
-      }).catch(() => {});
+      } catch (_) {}
     }
   }, [activeChatId, isAuthenticated, chats]);
 

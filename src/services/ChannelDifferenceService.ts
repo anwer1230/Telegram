@@ -16,6 +16,7 @@
 
 import { Message, Chat } from '../types';
 import { MessagesStorage } from '../core/MessagesStorage';
+import { MessagesController } from '../core/MessagesController';
 import { NotificationCenter } from '../core/NotificationCenter';
 import { UserConfig } from '../core/messenger/UserConfig';
 
@@ -234,7 +235,6 @@ export class ChannelDifferenceService {
         // 3. Process other updates (e.g. edits, deletions, read inbox/outbox)
         if (data.otherUpdates && Array.isArray(data.otherUpdates) && data.otherUpdates.length > 0) {
           try {
-            const { MessagesController } = await import('../core/MessagesController');
             const controller = MessagesController.getInstance(this.currentAccount);
             controller.processUpdates(data.otherUpdates, true);
           } catch (ctrlErr) {
@@ -419,7 +419,6 @@ export class ChannelDifferenceService {
     console.log(`🔄 [ChannelDifferenceService ${this.currentAccount}] Running full supergroup offline recovery (offline ~${Math.round(offlineDurationMs / 1000)}s)...`);
 
     try {
-      const { MessagesController } = await import('../core/MessagesController');
       const controller = MessagesController.getInstance(this.currentAccount);
       const dialogs = controller.getDialogs();
 
@@ -464,7 +463,6 @@ export class ChannelDifferenceService {
    */
   public async syncAllChannels(force: boolean = false): Promise<void> {
     try {
-      const { MessagesController } = await import('../core/MessagesController');
       const controller = MessagesController.getInstance(this.currentAccount);
       const dialogs = controller.getDialogs();
       const supergroups = dialogs.filter((d) => this.isSupergroupOrChannel(d));
