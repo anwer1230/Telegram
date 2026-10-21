@@ -18,6 +18,13 @@ import path from 'path';
 import { getApps, initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import Redis from 'ioredis';
+import {
+  setFirestoreDoc,
+  getFirestoreDoc,
+  deleteFirestoreDoc,
+  listFirestoreDocs,
+  isFirestoreConfigured,
+} from './firestoreRestClient';
 
 export interface StoredAccountSession {
   session: string;
@@ -362,18 +369,33 @@ export async function saveCloudSession(
 
     let cloudSaved = false;
 
-    // 1. Try Google Cloud Firestore
-    const db = getCloudFirestore();
-    if (db) {
+    // 1. Try Google Cloud Firestore REST (Direct API Key authenticated, obeys firestore.rules)
+    if (isFirestoreConfigured()) {
       try {
-        await db.collection('telegram_sessions').doc(docId).set(cloudDoc, { merge: true });
+        const ok = await setFirestoreDoc('telegram_sessions', docId, cloudDoc);
         if (cleanPhone) {
-          await db.collection('telegram_sessions').doc(`phone_${cleanPhone}`).set(cloudDoc, { merge: true });
+          await setFirestoreDoc('telegram_sessions', `phone_${cleanPhone}`, cloudDoc);
         }
-        cloudSaved = true;
-        console.log(`☁️ [CloudSessionStore] Saved encrypted session for Account [${accountIndex}] to Firestore.`);
+        if (ok) {
+          cloudSaved = true;
+          console.log(`☁️ [CloudSessionStore] Saved encrypted session for Account [${accountIndex}] to Firestore.`);
+        }
       } catch (fsErr: any) {
-        console.warn(`⚠️ [CloudSessionStore] Firestore save failed for Account [${accountIndex}]:`, fsErr?.message || fsErr);
+        console.warn(`⚠️ [CloudSessionStore] Firestore REST save notice for Account [${accountIndex}]:`, fsErr?.message || fsErr);
+      }
+    } else {
+      const db = getCloudFirestore();
+      if (db) {
+        try {
+          await db.collection('telegram_sessions').doc(docId).set(cloudDoc, { merge: true });
+          if (cleanPhone) {
+            await db.collection('telegram_sessions').doc(`phone_${cleanPhone}`).set(cloudDoc, { merge: true });
+          }
+          cloudSaved = true;
+          console.log(`☁️ [CloudSessionStore] Saved encrypted session for Account [${accountIndex}] to Firestore.`);
+        } catch (fsErr: any) {
+          console.warn(`⚠️ [CloudSessionStore] Firestore Admin save failed for Account [${accountIndex}]:`, fsErr?.message || fsErr);
+        }
       }
     }
 
@@ -422,44 +444,79 @@ export async function loadAllCloudSessions(): Promise<Map<number, StoredAccountS
 
   let cloudFound = false;
 
-  // 1. Try Google Cloud Firestore
-  const db = getCloudFirestore();
-  if (db) {
+  // 1. Try Google Cloud Firestore REST (Direct API Key authenticated, obeys firestore.rules)
+  if (isFirestoreConfigured()) {
     try {
-      const snapshot = await db.collection('telegram_sessions').get();
-      if (!snapshot.empty) {
-        for (const doc of snapshot.docs) {
-          const docData = doc.data() as EncryptedCloudSessionDoc;
-          // Only process primary account_* documents to avoid duplicates with phone_* aliases
-          if (doc.id.startsWith('account_') && docData.encryptedPayload) {
-            const decrypted = decryptPayload(docData.encryptedPayload);
-            if (decrypted && decrypted.session) {
-              const accountIndex = typeof docData.accountIndex === 'number' ? docData.accountIndex : parseInt(doc.id.replace('account_', ''), 10) || 0;
-              result.set(accountIndex, {
-                session: decrypted.session,
-                userId: decrypted.userId || docData.userId,
-                phone: decrypted.phone || docData.phone,
-                index: accountIndex,
-                name: docData.name,
-                username: docData.username,
-                avatar: docData.avatar,
-                isPremium: docData.isPremium,
-                pts: decrypted.pts,
-                qts: decrypted.qts,
-                date: decrypted.date,
-                seq: decrypted.seq,
-                updatedAt: docData.updatedAt,
-              });
-              cloudFound = true;
-            }
+      const docs = await listFirestoreDocs<EncryptedCloudSessionDoc>('telegram_sessions');
+      for (const item of docs) {
+        const docData = item.data;
+        if (item.id.startsWith('account_') && docData.encryptedPayload) {
+          const decrypted = decryptPayload(docData.encryptedPayload);
+          if (decrypted && decrypted.session) {
+            const accountIndex = typeof docData.accountIndex === 'number' ? docData.accountIndex : parseInt(item.id.replace('account_', ''), 10) || 0;
+            result.set(accountIndex, {
+              session: decrypted.session,
+              userId: decrypted.userId || docData.userId,
+              phone: decrypted.phone || docData.phone,
+              index: accountIndex,
+              name: docData.name,
+              username: docData.username,
+              avatar: docData.avatar,
+              isPremium: docData.isPremium,
+              pts: decrypted.pts,
+              qts: decrypted.qts,
+              date: decrypted.date,
+              seq: decrypted.seq,
+              updatedAt: docData.updatedAt,
+            });
+            cloudFound = true;
           }
         }
-        if (result.size > 0) {
-          console.log(`☁️ [CloudSessionStore] Loaded ${result.size} encrypted session(s) from Firestore.`);
-        }
+      }
+      if (result.size > 0) {
+        console.log(`☁️ [CloudSessionStore] Loaded ${result.size} encrypted session(s) from Firestore REST.`);
       }
     } catch (fsErr: any) {
-      console.warn('⚠️ [CloudSessionStore] Firestore query failed:', fsErr?.message || fsErr);
+      console.warn('⚠️ [CloudSessionStore] Firestore REST query notice:', fsErr?.message || fsErr);
+    }
+  } else {
+    const db = getCloudFirestore();
+    if (db) {
+      try {
+        const snapshot = await db.collection('telegram_sessions').get();
+        if (!snapshot.empty) {
+          for (const doc of snapshot.docs) {
+            const docData = doc.data() as EncryptedCloudSessionDoc;
+            if (doc.id.startsWith('account_') && docData.encryptedPayload) {
+              const decrypted = decryptPayload(docData.encryptedPayload);
+              if (decrypted && decrypted.session) {
+                const accountIndex = typeof docData.accountIndex === 'number' ? docData.accountIndex : parseInt(doc.id.replace('account_', ''), 10) || 0;
+                result.set(accountIndex, {
+                  session: decrypted.session,
+                  userId: decrypted.userId || docData.userId,
+                  phone: decrypted.phone || docData.phone,
+                  index: accountIndex,
+                  name: docData.name,
+                  username: docData.username,
+                  avatar: docData.avatar,
+                  isPremium: docData.isPremium,
+                  pts: decrypted.pts,
+                  qts: decrypted.qts,
+                  date: decrypted.date,
+                  seq: decrypted.seq,
+                  updatedAt: docData.updatedAt,
+                });
+                cloudFound = true;
+              }
+            }
+          }
+          if (result.size > 0) {
+            console.log(`☁️ [CloudSessionStore] Loaded ${result.size} encrypted session(s) from Firestore Admin.`);
+          }
+        }
+      } catch (fsErr: any) {
+        console.warn('⚠️ [CloudSessionStore] Firestore query failed:', fsErr?.message || fsErr);
+      }
     }
   }
 
@@ -544,16 +601,28 @@ export async function deleteCloudSession(
 
   try {
     // 1. Delete from Firestore
-    const db = getCloudFirestore();
-    if (db) {
+    if (isFirestoreConfigured()) {
       try {
-        await db.collection('telegram_sessions').doc(docId).delete();
+        await deleteFirestoreDoc('telegram_sessions', docId);
         if (cleanPhone) {
-          await db.collection('telegram_sessions').doc(`phone_${cleanPhone}`).delete();
+          await deleteFirestoreDoc('telegram_sessions', `phone_${cleanPhone}`);
         }
-        console.log(`☁️ [CloudSessionStore] Deleted Account [${accountIndex}] from Firestore.`);
+        console.log(`☁️ [CloudSessionStore] Deleted Account [${accountIndex}] from Firestore REST.`);
       } catch (fsErr: any) {
-        console.warn(`⚠️ [CloudSessionStore] Firestore delete notice:`, fsErr?.message || fsErr);
+        console.warn(`⚠️ [CloudSessionStore] Firestore REST delete notice:`, fsErr?.message || fsErr);
+      }
+    } else {
+      const db = getCloudFirestore();
+      if (db) {
+        try {
+          await db.collection('telegram_sessions').doc(docId).delete();
+          if (cleanPhone) {
+            await db.collection('telegram_sessions').doc(`phone_${cleanPhone}`).delete();
+          }
+          console.log(`☁️ [CloudSessionStore] Deleted Account [${accountIndex}] from Firestore.`);
+        } catch (fsErr: any) {
+          console.warn(`⚠️ [CloudSessionStore] Firestore delete notice:`, fsErr?.message || fsErr);
+        }
       }
     }
 
@@ -598,6 +667,7 @@ export async function deleteCloudSession(
  * Returns diagnostic metadata and sync status
  */
 export async function getCloudStorageStatus(): Promise<CloudStorageStatus> {
+  const isFirestore = isFirestoreConfigured();
   const firestore = getCloudFirestore();
   const redis = getCloudRedis();
   const disk = readDiskMirrorSessions();
@@ -605,7 +675,7 @@ export async function getCloudStorageStatus(): Promise<CloudStorageStatus> {
   let activeProvider: 'firestore' | 'redis' | 'local_mirrored' = 'local_mirrored';
   let isCloudConnected = false;
 
-  if (firestore) {
+  if (isFirestore || firestore) {
     activeProvider = 'firestore';
     isCloudConnected = true;
   } else if (redis) {

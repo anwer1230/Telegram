@@ -83,11 +83,11 @@ git push -u origin main --force
 | اسم المتغير (Key) | القيمة الافتراضية (Value) |
 | :--- | :--- |
 | `NODE_ENV` | `production` |
-| `TELEGRAM_API_ID` | `22043994` |
-| `TELEGRAM_API_HASH` | `56f64582b363d367280db96586b97801` |
-| `API_ID` | `22043994` |
-| `API_HASH` | `56f64582b363d367280db96586b97801` |
-| `TDLIB_API_HASH` | `56f64582b363d367280db96586b97801` |
+| `TELEGRAM_API_ID` | `34773007` |
+| `TELEGRAM_API_HASH` | `2a6b16abed75c3f6898ee79e9237fd25` |
+| `API_ID` | `34773007` |
+| `API_HASH` | `2a6b16abed75c3f6898ee79e9237fd25` |
+| `TDLIB_API_HASH` | `2a6b16abed75c3f6898ee79e9237fd25` |
 | `RENDER_DEPLOY_HOOK_URL` | `https://api.render.com/deploy/srv-d8rb0avavr4c73ebc2pg?key=1_fvBe3GPP8` |
 | `SESSION_SECRET` | `tg_session_anwer_foud_secure_key_2026` |
 | `VAPID_PUBLIC_KEY` | `BE36BmheMRx2GxzjWpp_4bmXq_hZg55bP_M_vNVysfnjTxns9VCI0hiCHgnRBx0URe_LoxWaAgrS9G9QZbQhOh8` |

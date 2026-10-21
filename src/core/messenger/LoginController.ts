@@ -59,8 +59,8 @@ export class LoginController {
   public async sendCode(
     phoneNumber: string,
     deliveryType: 'app' | 'sms' = 'app',
-    apiId: number = 22043994,
-    apiHash: string = '56f64582b363d367280db96586b97801'
+    apiId: number = 34773007,
+    apiHash: string = '2a6b16abed75c3f6898ee79e9237fd25'
   ): Promise<SendCodeResult> {
     try {
       const resp = await fetch('/api/telegram/auth/send-code', {

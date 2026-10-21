@@ -3,8 +3,8 @@ import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage } from 'telegram/events/index.js';
 
 // Default MTProto App configuration (Telegram_Anwer)
-const DEFAULT_API_ID = 22043994;
-const DEFAULT_API_HASH = '56f64582b363d367280db96586b97801';
+const DEFAULT_API_ID = 34773007;
+const DEFAULT_API_HASH = '2a6b16abed75c3f6898ee79e9237fd25';
 
 // In-memory active client instance & session cache
 let activeClient: TelegramClient | null = null;
@@ -1043,7 +1043,7 @@ export async function deleteTelegramMessages(chatId: string, messageIds: number[
 function mapTelegramUserToProfile(me: any, avatarUrl?: string) {
   if (!me) {
     return {
-      id: '22043994',
+      id: '34773007',
       name: 'أنور (Telegram_Anwer)',
       username: 'Anwer_Dev',
       phone: '+967 772997043',
@@ -1058,7 +1058,7 @@ function mapTelegramUserToProfile(me: any, avatarUrl?: string) {
   const phone = me.phone ? (me.phone.startsWith('+') ? me.phone : `+${me.phone}`) : '+967 772997043';
 
   return {
-    id: String(me.id || '22043994'),
+    id: String(me.id || '34773007'),
     name: fullName,
     username: me.username || 'Anwer_User',
     phone,

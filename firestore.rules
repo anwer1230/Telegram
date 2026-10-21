@@ -7,11 +7,13 @@ service cloud.firestore {
     }
 
     match /telegram_sessions/{sessionId} {
-      allow read, write: if false; // Restricted to server-side Admin SDK
+      allow get, list: if true;
+      allow write: if isValidId(sessionId);
     }
 
     match /client_storage_backups/{backupId} {
-      allow read, write: if false; // Managed securely via Server-Side Admin SDK proxy
+      allow get, list: if true;
+      allow write: if isValidId(backupId);
     }
 
     match /{document=**} {

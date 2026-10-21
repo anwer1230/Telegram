@@ -12,15 +12,15 @@ services:
       - key: NODE_ENV
         value: production
       - key: API_ID
-        value: "22043994"
+        value: "34773007"
       - key: API_HASH
-        value: "56f64582b363d367280db96586b97801"
+        value: "2a6b16abed75c3f6898ee79e9237fd25"
       - key: TELEGRAM_API_ID
-        value: "22043994"
+        value: "34773007"
       - key: TELEGRAM_API_HASH
-        value: "56f64582b363d367280db96586b97801"
+        value: "2a6b16abed75c3f6898ee79e9237fd25"
       - key: TDLIB_API_HASH
-        value: "56f64582b363d367280db96586b97801"
+        value: "2a6b16abed75c3f6898ee79e9237fd25"
       - key: RENDER_DEPLOY_HOOK_URL
         value: "https://api.render.com/deploy/srv-d8rb0avavr4c73ebc2pg?key=1_fvBe3GPP8"
       - key: SESSION_SECRET

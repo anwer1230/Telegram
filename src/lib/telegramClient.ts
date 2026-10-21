@@ -11,12 +11,12 @@ export const TELEGRAM_CONFIG = {
   apiId: Number(
     (typeof import.meta !== 'undefined' && ((import.meta as any).env?.VITE_TELEGRAM_API_ID || (import.meta as any).env?.VITE_API_ID)) ||
     (typeof process !== 'undefined' && (process.env?.TELEGRAM_API_ID || process.env?.API_ID)) ||
-    22043994
+    34773007
   ),
   apiHash:
     (typeof import.meta !== 'undefined' && ((import.meta as any).env?.VITE_TELEGRAM_API_HASH || (import.meta as any).env?.VITE_API_HASH)) ||
     (typeof process !== 'undefined' && (process.env?.TELEGRAM_API_HASH || process.env?.API_HASH)) ||
-    '56f64582b363d367280db96586b97801',
+    '2a6b16abed75c3f6898ee79e9237fd25',
   sessionStorageKey: 'tg_mtproto_session_string',
 };
 

@@ -19,8 +19,8 @@ export class BuildVars {
   // Package and API credentials
   public static readonly APPLICATION_ID = 'org.telegram.messenger.web';
   public static readonly PLAY_MARKET_PACKAGE_NAME = 'org.telegram.messenger';
-  public static readonly APP_ID = 22043994;
-  public static readonly APP_HASH = '56f64582b363d367280db96586b97801';
+  public static readonly APP_ID = 34773007;
+  public static readonly APP_HASH = '2a6b16abed75c3f6898ee79e9237fd25';
   public static readonly SMS_HASH = 'tg_sms_hash_prod';
 
   // API update channels

@@ -163,8 +163,8 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
       const result = await loginController.sendCode(
         fullPhone,
         'app',
-        Number(apiConfig.apiId) || 22043994,
-        apiConfig.apiHash || '56f64582b363d367280db96586b97801'
+        Number(apiConfig.apiId) || 34773007,
+        apiConfig.apiHash || '2a6b16abed75c3f6898ee79e9237fd25'
       );
 
       if (result.success) {
@@ -994,7 +994,7 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             <span>MTProto 2.0 (Layer 184)</span>
             <span>•</span>
-            <span>API_ID: <strong className="text-white">{apiConfig?.apiId || '22043994'}</strong></span>
+            <span>API_ID: <strong className="text-white">{apiConfig?.apiId || '34773007'}</strong></span>
           </div>
 
           <div className="text-[10px] text-gray-500">

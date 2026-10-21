@@ -9,8 +9,8 @@ export const CURRENT_USER: User = {
 };
 
 export const DEFAULT_TELEGRAM_API_CONFIG: TelegramApiConfig = {
-  apiId: '22043994',
-  apiHash: '56f64582b363d367280db96586b97801',
+  apiId: '34773007',
+  apiHash: '2a6b16abed75c3f6898ee79e9237fd25',
   dcId: 4,
   dcIp: '149.154.167.91',
   port: 443,

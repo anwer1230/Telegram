@@ -77,8 +77,8 @@ import {
 export { sqliteDatabase, redisCache };
 
 // Permanent Telegram API Credentials (Immutable System Hardcoded)
-export const PERMANENT_TELEGRAM_API_ID = 22043994;
-export const PERMANENT_TELEGRAM_API_HASH = '56f64582b363d367280db96586b97801';
+export const PERMANENT_TELEGRAM_API_ID = 34773007;
+export const PERMANENT_TELEGRAM_API_HASH = '2a6b16abed75c3f6898ee79e9237fd25';
 
 // Dynamic Environment & Credentials Resolution with Permanent Fallback
 const TELEGRAM_API_ID = process.env.TELEGRAM_API_ID || process.env.API_ID || String(PERMANENT_TELEGRAM_API_ID);
@@ -3947,8 +3947,8 @@ async function startServer() {
       console.warn('[MTProto] Error parsing phone with libphonenumber-js:', parseErr);
     }
 
-    const numericApiId = Number(apiId) || Number(TELEGRAM_API_ID) || 22043994;
-    const stringApiHash = String(apiHash || TELEGRAM_API_HASH || '56f64582b363d367280db96586b97801');
+    const numericApiId = Number(apiId) || Number(TELEGRAM_API_ID) || 34773007;
+    const stringApiHash = String(apiHash || TELEGRAM_API_HASH || '2a6b16abed75c3f6898ee79e9237fd25');
 
     console.log(
       `[MTProto] Official sendCode requested for: ${formattedPhone} (Country: ${detectedCountry || 'Unknown'}, CallingCode: ${countryCallingCode || 'N/A'}), delivery: ${deliveryType}`
@@ -10201,8 +10201,8 @@ Please provide the concise summary.`;
       status: 'configured',
     },
     buildVars: {
-      apiId: '22043994',
-      apiHash: '56f64582b363d367280db96586b97801',
+      apiId: '34773007',
+      apiHash: '2a6b16abed75c3f6898ee79e9237fd25',
       buildVarsPath: 'TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java',
       useHwAcc: true,
       debugBuild: false,
@@ -10236,7 +10236,7 @@ Please provide the concise summary.`;
 
     // Create a structured, valid binary container header representing the compiled release APK
     const magicHeader = Buffer.from('504b0304', 'hex'); // Standard Zip/APK Container Signature
-    const manifestStub = Buffer.from(`\n=== DrKLO/Telegram Android APK v12.9.2 ===\nPackage: org.telegram.messenger\nKeyAlias: Telegram_Anwer\nFirebase: telegramclone-de6f2\nAPI_ID: 22043994\nBuild: assembleRelease (arm64-v8a, SDK 35)\nBuilt with Google AI Studio & DrKLO Engine\nSignature: SHA256withRSA\n=========================================\n`);
+    const manifestStub = Buffer.from(`\n=== DrKLO/Telegram Android APK v12.9.2 ===\nPackage: org.telegram.messenger\nKeyAlias: Telegram_Anwer\nFirebase: telegramclone-de6f2\nAPI_ID: 34773007\nBuild: assembleRelease (arm64-v8a, SDK 35)\nBuilt with Google AI Studio & DrKLO Engine\nSignature: SHA256withRSA\n=========================================\n`);
     const mockBinaryPayload = crypto.randomBytes(1024 * 16); // High-density binary payload
     const apkBuffer = Buffer.concat([magicHeader, manifestStub, mockBinaryPayload]);
 
@@ -10248,7 +10248,7 @@ Please provide the concise summary.`;
     const steps = [
       { step: 1, text: 'Verifying DrKLO/Telegram Android MTProto core source...', time: '0.8s', status: 'done' },
       { step: 2, text: 'Configuring Android SDK 35 & NDK 27.2 toolchains...', time: '1.2s', status: 'done' },
-      { step: 3, text: 'Injecting BuildVars.java (api_id=22043994, api_hash=56f64582b...)', time: '0.4s', status: 'done' },
+      { step: 3, text: 'Injecting BuildVars.java (api_id=34773007, api_hash=2a6b16ab...)', time: '0.4s', status: 'done' },
       { step: 4, text: 'Binding Firebase google-services.json for telegramclone-de6f2...', time: '0.5s', status: 'done' },
       { step: 5, text: 'Loading keystore release.keystore (Alias: Telegram_Anwer)...', time: '0.3s', status: 'done' },
       { step: 6, text: 'Compiling C++ Native Core (WebRTC, BoringSSL, MTProto 2.0)...', time: '2.4s', status: 'done' },

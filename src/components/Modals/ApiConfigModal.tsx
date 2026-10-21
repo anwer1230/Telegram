@@ -153,7 +153,7 @@ export const ApiConfigModal: React.FC = () => {
               type={showKeys ? 'text' : 'password'}
               value={apiId}
               onChange={(e) => setApiId(e.target.value)}
-              placeholder="e.g. 22043994"
+              placeholder="e.g. 34773007"
               className="w-full px-3 py-2 rounded-xl bg-black/20 border border-white/10 font-mono text-sm focus:border-[#2481cc] focus:outline-none"
             />
             <span className="text-[11px] text-gray-400">
@@ -171,7 +171,7 @@ export const ApiConfigModal: React.FC = () => {
               type={showKeys ? 'text' : 'password'}
               value={apiHash}
               onChange={(e) => setApiHash(e.target.value)}
-              placeholder="e.g. 56f64582b363d367280db96586b97801"
+              placeholder="e.g. 2a6b16abed75c3f6898ee79e9237fd25"
               className="w-full px-3 py-2 rounded-xl bg-black/20 border border-white/10 font-mono text-sm focus:border-[#2481cc] focus:outline-none"
             />
             <span className="text-[11px] text-gray-400">

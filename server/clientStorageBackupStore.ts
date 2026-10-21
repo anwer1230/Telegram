@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { getCloudFirestore, encryptPayload, decryptPayload } from './cloudSessionStore';
+import {
+  setFirestoreDoc,
+  getFirestoreDoc,
+  isFirestoreConfigured,
+} from './firestoreRestClient';
 
 export interface ClientStorageBackupPayload {
   id?: string;
@@ -80,38 +85,50 @@ export async function saveClientStorageBackup(payload: ClientStorageBackupPayloa
 
   // 2. Persist to Firestore
   try {
-    const firestore = getCloudFirestore();
-    if (firestore) {
-      const collection = firestore.collection('client_storage_backups');
+    // Encrypt storageData for privacy at rest
+    const encryptedData = encryptPayload(record.storageData);
 
-      // Encrypt storageData for privacy at rest
-      const encryptedData = encryptPayload(record.storageData);
+    const firestoreDoc = {
+      id: targetId,
+      userId: record.userId || null,
+      phone: record.phone || null,
+      storageData: encryptedData,
+      keysSummary: record.keysSummary,
+      backupTimestamp: record.backupTimestamp,
+      clientVersion: record.clientVersion,
+      updatedAt: record.updatedAt,
+    };
 
-      const firestoreDoc = {
-        id: targetId,
-        userId: record.userId || null,
-        phone: record.phone || null,
-        storageData: encryptedData,
-        keysSummary: record.keysSummary,
-        backupTimestamp: record.backupTimestamp,
-        clientVersion: record.clientVersion,
-        updatedAt: record.updatedAt,
-      };
+    let savedToCloud = false;
 
-      // Save user/device specific document
-      await collection.doc(targetId).set(firestoreDoc, { merge: true });
-
-      // Also update latest_backup doc so new browser tabs or fresh devices can hydrate immediately
-      await collection.doc('latest_backup').set({
+    // A. Direct Firestore REST Client (uses project API Key and obeys firestore.rules)
+    if (isFirestoreConfigured()) {
+      const ok1 = await setFirestoreDoc('client_storage_backups', targetId, firestoreDoc);
+      const ok2 = await setFirestoreDoc('client_storage_backups', 'latest_backup', {
         ...firestoreDoc,
         id: 'latest_backup',
-      }, { merge: true });
+      });
+      if (ok1 || ok2) {
+        savedToCloud = true;
+        console.log(`☁️ [StorageBackupStore] Successfully saved backup to Firestore [${targetId}] (${keys.length} keys: ${keysSummary})`);
+      }
+    }
 
-      console.log(`☁️ [StorageBackupStore] Successfully saved backup to Firestore [${targetId}] (${keys.length} keys: ${keysSummary})`);
-      return true;
+    // B. Fallback to Admin SDK if configured with service account credentials
+    if (!savedToCloud) {
+      const firestore = getCloudFirestore();
+      if (firestore) {
+        const collection = firestore.collection('client_storage_backups');
+        await collection.doc(targetId).set(firestoreDoc, { merge: true });
+        await collection.doc('latest_backup').set({
+          ...firestoreDoc,
+          id: 'latest_backup',
+        }, { merge: true });
+        console.log(`☁️ [StorageBackupStore] Successfully saved backup to Firestore Admin SDK [${targetId}]`);
+      }
     }
   } catch (err: any) {
-    console.warn(`⚠️ [StorageBackupStore] Firestore backup failed, saved to local disk mirror:`, err?.message || err);
+    console.warn(`⚠️ [StorageBackupStore] Cloud backup notice (saved to disk mirror):`, err?.message || err);
   }
 
   return true;
@@ -126,7 +143,38 @@ export async function getClientStorageBackup(options?: {
 }): Promise<ClientStorageBackupRecord | null> {
   const targetId = options?.userId ? `user_${options.userId}` : options?.phone ? `phone_${options.phone.replace(/\D/g, '')}` : null;
 
-  // 1. Attempt Firestore fetch
+  // 1. Attempt Firestore fetch via REST Client
+  try {
+    if (isFirestoreConfigured()) {
+      let raw: any = targetId ? await getFirestoreDoc('client_storage_backups', targetId) : null;
+      if (!raw) {
+        raw = await getFirestoreDoc('client_storage_backups', 'latest_backup');
+      }
+
+      if (raw) {
+        let decryptedData = raw.storageData;
+        if (typeof raw.storageData === 'string' && raw.storageData.includes(':')) {
+          const decrypted = decryptPayload<Record<string, any>>(raw.storageData);
+          if (decrypted) decryptedData = decrypted;
+        }
+
+        return {
+          id: raw.id || 'latest_backup',
+          userId: raw.userId || undefined,
+          phone: raw.phone || undefined,
+          storageData: decryptedData,
+          keysSummary: raw.keysSummary || '',
+          backupTimestamp: raw.backupTimestamp || raw.updatedAt || new Date().toISOString(),
+          clientVersion: raw.clientVersion || '1.0.0',
+          updatedAt: raw.updatedAt || new Date().toISOString(),
+        };
+      }
+    }
+  } catch (err: any) {
+    console.warn('[StorageBackupStore] Firestore REST read notice:', err?.message || err);
+  }
+
+  // Fallback to Admin SDK if configured
   try {
     const firestore = getCloudFirestore();
     if (firestore) {
@@ -134,7 +182,6 @@ export async function getClientStorageBackup(options?: {
 
       let docSnap = targetId ? await collection.doc(targetId).get() : null;
       if (!docSnap || !docSnap.exists) {
-        // Fallback to latest_backup doc
         docSnap = await collection.doc('latest_backup').get();
       }
 
@@ -159,7 +206,7 @@ export async function getClientStorageBackup(options?: {
       }
     }
   } catch (err: any) {
-    console.warn('[StorageBackupStore] Firestore read notice:', err?.message || err);
+    console.warn('[StorageBackupStore] Firestore Admin read notice:', err?.message || err);
   }
 
   // 2. Fallback to local disk mirror
@@ -192,7 +239,7 @@ export async function getClientStorageBackupStatus(): Promise<{
   totalKeysBackedUp: number;
   availableKeys: string[];
 }> {
-  const firestore = getCloudFirestore();
+  const isCloud = isFirestoreConfigured() || !!getCloudFirestore();
   let latestTime = lastBackupTimestamp;
   let keys = lastBackupKeys;
 
@@ -206,7 +253,7 @@ export async function getClientStorageBackupStatus(): Promise<{
 
   return {
     success: true,
-    isCloudConnected: !!firestore,
+    isCloudConnected: isCloud,
     lastBackupTime: latestTime,
     totalKeysBackedUp: keys.length,
     availableKeys: keys,
