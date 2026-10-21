@@ -39,6 +39,7 @@ import {
   Activity,
   SlidersHorizontal,
   Globe,
+  Wallet,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTelegram } from '../../context/TelegramContext';
@@ -504,280 +505,27 @@ export const NavigationDrawer: React.FC = () => {
                     </motion.button>
                   );
                 })()}
-              </div>
 
-              {/* Automation & Smart Tools Suite (4 Main Functions Requested) */}
-              <div className="py-1.5 space-y-0.5 bg-sky-950/20 border-y border-sky-500/15">
-                <div className="px-4 pt-1 pb-0.5 text-[11px] font-bold text-sky-400/80 uppercase tracking-wider flex items-center justify-between">
-                  <span>{isArabic ? '⚡ الأدوات والوظائف الذكية' : '⚡ Automation & Smart Suite'}</span>
-                  <span className="text-[9px] bg-sky-500/20 text-sky-300 px-1.5 py-0.2 rounded font-mono">PRO</span>
-                </div>
-
-                {/* 1. الإرسال والمراقبة */}
+                {/* TON Web3 Wallet */}
                 {(() => {
-                  const isActive = activeModal === 'sender';
+                  const isActive = (activeModal as string) === 'ton-wallet';
                   return (
                     <motion.button
                       whileTap={{ scale: 0.98 }}
-                      id="drawer-send-monitor"
-                      onClick={() => handleItemClick(() => setActiveModal('sender'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
+                      id="drawer-ton-wallet"
+                      onClick={() => handleItemClick(() => setActiveModal('ton-wallet' as any))}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all ${
                         isActive
-                          ? 'active bg-sky-500/20 text-sky-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-sky-400'
-                          : 'hover:bg-sky-500/10 text-gray-100 hover:text-white'
+                          ? 'active bg-[#0088cc]/20 text-[#0088cc] font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-[#0088cc]'
+                          : 'hover:bg-white/5 text-gray-200 hover:text-white'
                       }`}
                     >
                       <div className="flex items-center gap-4">
-                        <Send className={`w-5 h-5 shrink-0 ${isActive ? 'text-sky-300' : 'text-sky-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'الإرسال والمراقبة' : 'Send & Monitor'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'نشر دوري ورصد فوري للكلمات' : 'Broadcast & keyword monitor'}
-                          </span>
-                        </div>
+                        <Wallet className="w-5 h-5 text-sky-400 shrink-0" />
+                        <span>{isArabic ? 'محفظة تون (TON Wallet)' : 'TON Wallet'}</span>
                       </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-sky-500/25 text-sky-200 border border-sky-400/30 rounded font-mono">
-                        TLRPC
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* 1.1 سجل نشاط السلام */}
-                {(() => {
-                  const isActive = activeModal === 'salam-activity-log';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-salam-activity-log"
-                      onClick={() => handleItemClick(() => setActiveModal('salam-activity-log'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-emerald-500/20 text-emerald-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-emerald-400'
-                          : 'hover:bg-emerald-500/10 text-gray-100 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <Radio className={`w-5 h-5 shrink-0 ${isActive ? 'text-emerald-300' : 'text-emerald-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'سجل نشاط السلام' : 'Salam Activity Log'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'رصد فوري لشفافية وضع السلام (تعديل/حذف)' : 'Real-time Salam mode status'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-emerald-500/25 text-emerald-200 border border-emerald-400/30 rounded font-mono">
-                        LIVE
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* 1.2 سجل بيانات القياس والتشخيص (Telemetry) */}
-                {(() => {
-                  const isActive = activeModal === 'telemetry-log';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-telemetry-log"
-                      onClick={() => handleItemClick(() => setActiveModal('telemetry-log'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-cyan-500/20 text-cyan-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-cyan-400'
-                          : 'hover:bg-cyan-500/10 text-gray-100 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <Activity className={`w-5 h-5 shrink-0 ${isActive ? 'text-cyan-300' : 'text-cyan-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'سجل بيانات القياس (Telemetry)' : 'Telemetry & Diagnostics'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'تشخيص أسباب تأخر المزامنة وقياس Latency' : 'Diagnose sync issues & latency'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-cyan-500/25 text-cyan-200 border border-cyan-400/30 rounded font-mono">
-                        DIAG
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* 2. رسائلي */}
-                {(() => {
-                  const isActive = activeModal === 'my-messages';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-my-messages"
-                      onClick={() => handleItemClick(() => setActiveModal('my-messages'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-amber-500/20 text-amber-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-amber-400'
-                          : 'hover:bg-amber-500/10 text-gray-100 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <Layers className={`w-5 h-5 shrink-0 ${isActive ? 'text-amber-300' : 'text-amber-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'رسائلي (سجل الدفعات)' : 'My Messages (Batches)'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'إدارة الرسائل المرسلة والمجدولة' : 'Manage sent & queued batches'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/25 text-amber-200 border border-amber-400/30 rounded font-mono">
-                        BATCH
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* 3. الردود التلقائية */}
-                {(() => {
-                  const isActive = activeModal === 'auto-responder';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-auto-responder"
-                      onClick={() => handleItemClick(() => setActiveModal('auto-responder'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-purple-500/20 text-purple-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-purple-400'
-                          : 'hover:bg-purple-500/10 text-gray-100 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <MessageSquare className={`w-5 h-5 shrink-0 ${isActive ? 'text-purple-300' : 'text-purple-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'الردود التلقائية' : 'Auto Responder'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'قواعد رد ذكية مع فلترة فورية' : 'Smart reply rules & filters'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-purple-500/25 text-purple-200 border border-purple-400/30 rounded font-mono">
-                        AUTO
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* 4. الانضمام المتقدم */}
-                {(() => {
-                  const isActive = activeModal === 'auto-joiner';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-auto-joiner"
-                      onClick={() => handleItemClick(() => setActiveModal('auto-joiner'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-emerald-500/20 text-emerald-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-emerald-400'
-                          : 'hover:bg-emerald-500/10 text-gray-100 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <UserPlus className={`w-5 h-5 shrink-0 ${isActive ? 'text-emerald-300' : 'text-emerald-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'الانضمام المتقدم' : 'Advanced Auto-Joiner'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'استخراج روابط القنوات والجروبات' : 'Extract & join links queue'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-emerald-500/25 text-emerald-200 border border-emerald-400/30 rounded font-mono">
-                        REGEX
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* 5. نظام التعلم الذكي للرسائل */}
-                {(() => {
-                  const isActive = activeModal === 'smart-ai';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-smart-ai"
-                      onClick={() => handleItemClick(() => setActiveModal('smart-ai'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-fuchsia-500/20 text-fuchsia-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-fuchsia-400'
-                          : 'hover:bg-fuchsia-500/10 text-gray-100 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <BrainCircuit className={`w-5 h-5 shrink-0 ${isActive ? 'text-fuchsia-300' : 'text-fuchsia-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'نظام التعلم الذكي (AI Bot)' : 'Smart AI Learning Bot'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'تحليل وتدريب وردود ذكية متكيفة' : 'Self-learning responses & context'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-fuchsia-500/25 text-fuchsia-200 border border-fuchsia-400/30 rounded font-mono">
-                        GROQ
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* 5.1 محلّل دولة المجموعات والبحث الجغرافي العكسي (Groq AI) */}
-                {(() => {
-                  const isActive = activeModal === 'group-country-analyzer';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-group-country-analyzer"
-                      onClick={() => handleItemClick(() => setActiveModal('group-country-analyzer'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-blue-500/20 text-blue-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-blue-400'
-                          : 'hover:bg-blue-500/10 text-gray-100 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <Globe className={`w-5 h-5 shrink-0 ${isActive ? 'text-blue-300' : 'text-blue-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'محلّل الدولة والبحث الجغرافي' : 'Country Analyzer & Geo Search'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'كشف دولة الجروبات والبحث العكسي بـ Groq AI' : 'AI Group Country Analyzer & Reverse Geo Search'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-blue-500/25 text-blue-200 border border-blue-400/30 rounded font-mono">
-                        AI GEO
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* 6. النشر الدوري المجدول (Rotator) */}
-                {(() => {
-                  const isActive = activeModal === 'scheduled-rotator';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-scheduled-rotator"
-                      onClick={() => handleItemClick(() => setActiveModal('scheduled-rotator'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-amber-500/20 text-amber-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-amber-400'
-                          : 'hover:bg-amber-500/10 text-gray-100 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <RotateCw className={`w-5 h-5 shrink-0 ${isActive ? 'text-amber-300' : 'text-amber-400'} group-hover:scale-110 transition-transform`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'النشر الدوري المجدول' : 'Scheduled Rotator'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'تدوير ونشر دوري متكرر بين القوالب' : 'Continuous rotating broadcast'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/25 text-amber-200 border border-amber-400/30 rounded font-mono">
-                        ROTATOR
+                      <span className="text-[10px] font-mono text-sky-300 font-bold bg-sky-500/20 px-1.5 py-0.5 rounded">
+                        💎 TON
                       </span>
                     </motion.button>
                   );
@@ -847,31 +595,6 @@ export const NavigationDrawer: React.FC = () => {
                   );
                 })()}
 
-                {/* Direct Install & APK Suite (DrKLO Engine) */}
-                {(() => {
-                  const isActive = activeModal === 'apk-installer';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-apk-installer"
-                      onClick={() => handleItemClick(() => setActiveModal('apk-installer'))}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-[13.5px] font-medium transition-all ${
-                        isActive
-                          ? 'active bg-emerald-500/20 text-emerald-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-emerald-500'
-                          : 'hover:bg-emerald-500/10 text-emerald-400 hover:text-emerald-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <Download className="w-5 h-5 text-emerald-400 shrink-0" />
-                        <span>{isArabic ? 'تثبيت التطبيق على الجوال' : 'Install App on Phone'}</span>
-                      </div>
-                      <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full">
-                        v12.9.2
-                      </span>
-                    </motion.button>
-                  );
-                })()}
-
                 {/* In-App PWA Quick Install Banner */}
                 <div className="px-4 py-1.5">
                   <PWAInstallButton isArabic={isArabic} className="w-full justify-center" />
@@ -893,36 +616,6 @@ export const NavigationDrawer: React.FC = () => {
                     >
                       <Settings className={`w-5 h-5 shrink-0 ${isActive ? 'text-[#5288c1]' : 'text-gray-400'}`} />
                       <span>{isArabic ? 'الإعدادات' : 'Settings'}</span>
-                    </motion.button>
-                  );
-                })()}
-
-                {/* رادار المراقبة والانضمام الفوري (تحت الإعدادات الرئيسية) */}
-                {(() => {
-                  const isActive = activeModal === 'link-monitor';
-                  return (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      id="drawer-link-radar-settings"
-                      onClick={() => handleItemClick(() => setActiveModal('link-monitor'))}
-                      className={`w-full flex items-center justify-between px-4 py-2.5 text-[13px] font-medium transition-all group ${
-                        isActive
-                          ? 'active bg-sky-500/20 text-sky-300 font-semibold border-r-4 rtl:border-r-0 rtl:border-l-4 border-sky-400'
-                          : 'hover:bg-sky-500/10 text-gray-200 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <Radio className={`w-5 h-5 shrink-0 ${isActive ? 'text-sky-300' : 'text-sky-400'} group-hover:scale-110 transition-transform animate-pulse`} />
-                        <div className="flex flex-col text-left rtl:text-right">
-                          <span className="font-semibold">{isArabic ? 'رادار المراقبة والانضمام الفوري' : 'Link Monitor Radar'}</span>
-                          <span className="text-[10px] text-gray-400 leading-none mt-0.5">
-                            {isArabic ? 'مراقبة دائمة للمجموعات العامة وتجاهل القنوات' : 'Continuous link sniffer & group joiner'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-sky-500/25 text-sky-200 border border-sky-400/30 rounded font-mono">
-                        RADAR
-                      </span>
                     </motion.button>
                   );
                 })()}
@@ -1089,10 +782,10 @@ export const NavigationDrawer: React.FC = () => {
 
                   <div className="min-w-0 flex-1">
                     <div className="font-bold text-[12.5px] text-white tracking-tight leading-tight">
-                      Telegram_anwer saif (DrKLO Official Build)
+                      Telegram Web Official Build
                     </div>
                     <div className="text-[11px] text-sky-400 font-mono font-semibold mt-0.5">
-                      v12.9.2.0 (2246) universal arm64-v8a
+                      v12.9 (Official Telegram Web)
                     </div>
                   </div>
                 </div>

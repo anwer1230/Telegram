@@ -571,22 +571,6 @@ const MainSettingsView: React.FC<{
             {isArabic ? 'إعدادات تيليجرام والميزات' : 'Telegram Settings & Features'}
           </div>
 
-          {/* رادار المراقبة والانضمام الفوري (Link Monitor & Auto-Join Radar) */}
-          <SettingsListItem
-            icon={<Radio className="w-5 h-5 text-sky-400 animate-pulse" />}
-            iconBg="bg-sky-500/20"
-            title={isArabic ? 'رادار المراقبة والانضمام الفوري' : 'Link Monitor & Auto-Join Radar'}
-            subtitle={isArabic ? 'مراقبة الروابط دائماً، انضمام فوري للمجموعات العامة، إشعار في المحفوظات، وتجاهل القنوات الخاصة' : 'Always-on radar: auto-joins public groups, ignores private channels, 1-min cooldown, max 10/hr'}
-            onClick={() => {
-              onClose();
-              setActiveModal('link-monitor');
-            }}
-            rightBadge={
-              <span className="px-2 py-0.5 text-[10px] font-bold bg-sky-500/25 text-sky-300 border border-sky-400/40 rounded-full font-mono">
-                {isArabic ? 'شغال دائماً' : 'ALWAYS ON'}
-              </span>
-            }
-          />
 
           <SettingsListItem
             icon={<Settings className="w-5 h-5 text-cyan-400" />}
@@ -942,28 +926,6 @@ const MainSettingsView: React.FC<{
           />
         </div>
 
-        {/* Direct Mobile App Installation */}
-        <div className="py-2 bg-[#17212b]">
-          <div className="px-4 py-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center justify-between">
-            <span>{isArabic ? 'تثبيت التطبيق على الجوال' : 'Install App on Phone'}</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">v12.9.2</span>
-          </div>
-
-          <SettingsListItem
-            icon={<Download className="w-5 h-5 text-emerald-400" />}
-            iconBg="bg-emerald-500/20"
-            title={isArabic ? 'تثبيت تطبيق تيليجرام' : 'Install Telegram App'}
-            subtitle={isArabic ? 'تثبيت فوري كتطبيق حقيقي على الهاتف' : 'Instant installation as real mobile app'}
-            onClick={() => {
-              setActiveModal('apk-installer');
-            }}
-            rightBadge={
-              <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-500 text-white rounded-full">
-                {isArabic ? 'تثبيت' : 'Install'}
-              </span>
-            }
-          />
-        </div>
 
         {/* Premium & Business Services */}
         <div className="py-2 bg-[#17212b]">

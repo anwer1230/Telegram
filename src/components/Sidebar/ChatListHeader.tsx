@@ -197,27 +197,6 @@ export const ChatListHeader: React.FC = () => {
                 <Search className="w-5 h-5" />
               </button>
 
-              {/* Android Notification Shade Preview Button */}
-              <button
-                id="tg-android-shade-btn"
-                onClick={() => setActiveModal('android-notification-shade' as any)}
-                className="p-2 rounded-full text-cyan-400 hover:bg-cyan-500/15 transition-colors relative"
-                title={isArabic ? 'شريط إشعارات الجوال الأندرويد (خارج التطبيق)' : 'Android Notification Shade'}
-              >
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-1 right-1 rtl:right-auto rtl:left-1 w-2 h-2 rounded-full bg-cyan-400" />
-              </button>
-
-              {/* Direct APK Install Button */}
-              <button
-                id="tg-apk-installer-btn"
-                onClick={() => setActiveModal('apk-installer')}
-                className="p-2 rounded-full text-emerald-400 hover:bg-emerald-500/15 transition-colors hidden sm:flex"
-                title={isArabic ? 'تثبيت التطبيق على الجوال' : 'Install App on Phone'}
-              >
-                <Download className="w-5 h-5" />
-              </button>
-
               {/* New Chat Button */}
               <button
                 id="tg-new-chat-button"
@@ -275,93 +254,6 @@ export const ChatListHeader: React.FC = () => {
                         </span>
                       </button>
 
-                      <button
-                        onClick={() => setActiveModal('android-notification-shade' as any)}
-                        className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-cyan-300 hover:text-cyan-200"
-                      >
-                        <Smartphone className="w-4 h-4 text-cyan-400 shrink-0" />
-                        <span>{isArabic ? 'شريط إشعارات الجوال (Android UI)' : 'Android Notification Shade'}</span>
-                      </button>
-
-                      <button
-                        onClick={() => setActiveModal('apk-installer')}
-                        className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-200 hover:text-white"
-                      >
-                        <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>{isArabic ? 'تثبيت تطبيق الجوال (APK)' : 'Install Mobile App (APK)'}</span>
-                      </button>
-                    </div>
-
-                    <div className="py-1">
-                      {/* Security & Restricted Testing Controls */}
-                      <button
-                        onClick={() => {
-                          setActiveModal('restricted-content');
-                        }}
-                        className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-rose-300 hover:text-rose-200"
-                      >
-                        <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
-                        <span>{isArabic ? 'تجربة لافتة المحتوى الحساس والمقيد' : 'Test Restricted Content Modal'}</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          triggerScreenshotBlocked();
-                        }}
-                        className="w-full px-3.5 py-2.5 hover:bg-white/5 flex items-center gap-2.5 text-left rtl:text-right text-gray-300 hover:text-white"
-                      >
-                        <CameraOff className="w-4 h-4 text-orange-400 shrink-0" />
-                        <span>{isArabic ? 'تجربة حظر لقطات الشاشة (FLAG_SECURE)' : 'Test Screenshot Block Alert'}</span>
-                      </button>
-                    </div>
-
-                    <div className="py-1">
-                      <div className="px-3.5 py-1 text-[10px] font-bold text-sky-400 font-mono uppercase tracking-wider">
-                        {isArabic ? '⚡ أدوات الأتمتة' : '⚡ Automation Suite'}
-                      </div>
-                      <button
-                        onClick={() => setActiveModal('sender')}
-                        className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center justify-between text-left rtl:text-right text-gray-200 hover:text-white"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <Send className="w-4 h-4 text-sky-400 shrink-0" />
-                          <span>{isArabic ? 'الإرسال والمراقبة' : 'Sender & Monitor'}</span>
-                        </div>
-                        <span className="text-[9px] font-bold bg-sky-500/20 text-sky-300 px-1 rounded font-mono">TLRPC</span>
-                      </button>
-
-                      <button
-                        onClick={() => setActiveModal('my-messages')}
-                        className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center justify-between text-left rtl:text-right text-gray-200 hover:text-white"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <Layers className="w-4 h-4 text-amber-400 shrink-0" />
-                          <span>{isArabic ? 'رسائلي (سجل الدفعات)' : 'My Messages'}</span>
-                        </div>
-                        <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1 rounded font-mono">BATCH</span>
-                      </button>
-
-                      <button
-                        onClick={() => setActiveModal('auto-responder')}
-                        className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center justify-between text-left rtl:text-right text-gray-200 hover:text-white"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <MessageSquare className="w-4 h-4 text-purple-400 shrink-0" />
-                          <span>{isArabic ? 'الردود التلقائية' : 'Auto Responder'}</span>
-                        </div>
-                        <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1 rounded font-mono">AUTO</span>
-                      </button>
-
-                      <button
-                        onClick={() => setActiveModal('auto-joiner')}
-                        className="w-full px-3.5 py-2 hover:bg-white/5 flex items-center justify-between text-left rtl:text-right text-gray-200 hover:text-white"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <UserPlus className="w-4 h-4 text-emerald-400 shrink-0" />
-                          <span>{isArabic ? 'الانضمام المتقدم' : 'Auto-Joiner'}</span>
-                        </div>
-                        <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-300 px-1 rounded font-mono">REGEX</span>
-                      </button>
                     </div>
                   </div>
                 )}

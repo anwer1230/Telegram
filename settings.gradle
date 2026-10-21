@@ -1,3 +1,0 @@
-// DrKLO/Telegram Official Settings
-rootProject.name = "Telegram_Anwer"
-include ':TMessagesProj'

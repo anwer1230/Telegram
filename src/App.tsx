@@ -17,38 +17,22 @@ import { MediaViewerModal } from './components/Modals/MediaViewerModal';
 import { NewChatModal } from './components/Modals/NewChatModal';
 import { AddAccountModal } from './components/Modals/AddAccountModal';
 import { JoinInviteModal } from './components/Modals/JoinInviteModal';
-import { ApkInstallerModal } from './components/Modals/ApkInstallerModal';
 import { MiniAppsModal } from './components/Modals/MiniAppsModal';
 import { ThemeEditorModal } from './components/Modals/ThemeEditorModal';
 import { ExportChatModal } from './components/Modals/ExportChatModal';
 import { ContactsModal } from './components/Modals/ContactsModal';
-import { LinkMonitorModal } from './components/Modals/LinkMonitorModal';
-import { SendOnlyModal } from './components/Modals/SendOnlyModal';
+import { TonWalletModal } from './components/Modals/TonWalletModal';
 import { PremiumModal } from './components/Modals/PremiumModal';
 import { SecretChatInfoModal } from './components/Modals/SecretChatInfoModal';
 import { GroupAdminModal } from './components/Modals/GroupAdminModal';
 import { ForumTopicsModal } from './components/Modals/ForumTopicsModal';
 import { DownloadsManagerModal } from './components/Modals/DownloadsManagerModal';
-import { SenderModal } from './components/Modals/SenderModal';
-import { MonitorModal } from './components/Modals/MonitorModal';
-import { MyMessagesModal } from './components/Modals/MyMessagesModal';
-import { AutoJoinerModal } from './components/Modals/AutoJoinerModal';
-import { AutoResponderModal } from './components/Modals/AutoResponderModal';
-import { SmartAiLearnModal } from './components/Modals/SmartAiLearnModal';
-import { ScheduledRotatorModal } from './components/Modals/ScheduledRotatorModal';
-import { LiveLinkDiscoverModal } from './components/Modals/LiveLinkDiscoverModal';
 import { UserProfileModal } from './components/Modals/UserProfileModal';
-import { SalamActivityLog } from './components/SalamActivityLog';
-import { TelemetryLogModal } from './components/Modals/TelemetryLogModal';
-import { GroupCountryAnalyzerModal } from './components/Modals/GroupCountryAnalyzerModal';
-import { logTelemetry, isTelemetryEnabled } from './utils/telemetry';
 import { ForwardModal } from './components/Interactions/ForwardModal';
 import { ChatContextMenuView } from './components/Interactions/ChatContextMenu';
 import { MessageContextMenuView } from './components/Interactions/MessageContextMenu';
 import { ToastContainer } from './components/Interactions/ToastContainer';
 import { InAppNotificationBanner } from './components/Notifications/InAppNotificationBanner';
-import { AndroidNotificationShade } from './components/Notifications/AndroidNotificationShade';
-import { InstallAppBanner } from './components/Notifications/InstallAppBanner';
 import { UpdateNotification } from './components/Notifications/UpdateNotification';
 import { TelegramAuthScreen } from './components/Auth/TelegramAuthScreen';
 import { useMobileNavigation } from './hooks/useMobileNavigation';
@@ -58,7 +42,6 @@ import { RestrictedContentModal } from './components/Modals/RestrictedContentMod
 import { ScreenshotBlockedToast } from './components/Notifications/ScreenshotBlockedToast';
 import { AppLockOverlay } from './components/Auth/AppLockOverlay';
 import { NotificationCenter } from './core/NotificationCenter';
-import { appUpdateController } from './core/messenger/AppUpdateController';
 
 const TelegramAppContent: React.FC = () => {
   const {
@@ -77,99 +60,77 @@ const TelegramAppContent: React.FC = () => {
   const [showUpdateActivity, setShowUpdateActivity] = React.useState(false);
   const isArabic = settings.language === 'ar';
 
-  // Offline-First: Automatic reconnect & background re-sync on network restoration + Telemetry Listener
+  // Offline-First: Automatic reconnect & background re-sync on network restoration
   React.useEffect(() => {
     const handleOnline = () => {
-      // Telemetry log for network restoration
-      logTelemetry({
-        type: 'network_online',
-        category: 'network',
-        reason: 'Browser online event triggered',
-        details: { onLine: true },
-      });
-      // Reconnected automatically: refresh data from cloud without user intervention
       refreshDialogs();
     };
-    const handleOffline = () => {
-      // Telemetry log for network loss
-      logTelemetry({
-        type: 'network_offline',
-        category: 'network',
-        reason: 'Browser offline event triggered',
-        details: { onLine: false },
-      });
-      // Offline mode: non-intrusive strip is displayed automatically via isOffline state
-    };
     window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    // Initial telemetry check when enabled
-    if (isTelemetryEnabled()) {
-      logTelemetry({
-        type: typeof navigator !== 'undefined' && navigator.onLine ? 'network_online' : 'network_offline',
-        category: 'network',
-        reason: `Initial connection state: ${typeof navigator !== 'undefined' && navigator.onLine ? 'Online' : 'Offline'}`,
-        details: { onLine: typeof navigator !== 'undefined' ? navigator.onLine : true },
-      });
-    }
-
     return () => {
       window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
     };
   }, [refreshDialogs]);
 
-  // Secret trigger: Toggle Telemetry Log Modal with Alt+T or Ctrl+Shift+T
-  React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (
-        (e.altKey && (e.key === 't' || e.key === 'T' || e.key === 'd' || e.key === 'D')) ||
-        (e.ctrlKey && e.shiftKey && (e.key === 't' || e.key === 'T'))
-      ) {
-        e.preventDefault();
-        setActiveModal(activeModal === 'telemetry-log' ? 'none' : 'telemetry-log');
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeModal, setActiveModal]);
-
-  // Replicate LaunchActivity.java NotificationCenter observer
+  // NotificationCenter observer for updates & logout
   React.useEffect(() => {
     const observer = {
       didReceivedNotification: (id: number | string, account: number, ...args: any[]) => {
         if (id === NotificationCenter.appUpdateAvailable) {
-          const update = args[0];
           const isManual = args[1];
-          // Automatic update prompt disabled - only show if manual
           if (isManual) {
             setShowUpdateDialog(true);
           }
         } else if (id === NotificationCenter.appUpdateNotModified) {
-          showToast(isArabic ? 'أنت تستخدم أحدث إصدار من تيليجرام بنجاح' : "You're already using the latest version of Telegram", '✅');
+          showToast(
+            isArabic
+              ? 'أنت تستخدم أحدث إصدار من تيليجرام بنجاح'
+              : "You're already using the latest version of Telegram",
+            '✅'
+          );
         } else if (id === NotificationCenter.appDidLogout) {
           setActiveModal(null);
         }
       },
     };
 
-    NotificationCenter.getGlobalInstance().addObserver(observer, NotificationCenter.appUpdateAvailable);
-    NotificationCenter.getGlobalInstance().addObserver(observer, NotificationCenter.appUpdateNotModified);
-    NotificationCenter.getGlobalInstance().addObserver(observer, NotificationCenter.appDidLogout);
+    NotificationCenter.getGlobalInstance().addObserver(
+      observer,
+      NotificationCenter.appUpdateAvailable
+    );
+    NotificationCenter.getGlobalInstance().addObserver(
+      observer,
+      NotificationCenter.appUpdateNotModified
+    );
+    NotificationCenter.getGlobalInstance().addObserver(
+      observer,
+      NotificationCenter.appDidLogout
+    );
 
     return () => {
-      NotificationCenter.getGlobalInstance().removeObserver(observer, NotificationCenter.appUpdateAvailable);
-      NotificationCenter.getGlobalInstance().removeObserver(observer, NotificationCenter.appUpdateNotModified);
-      NotificationCenter.getGlobalInstance().removeObserver(observer, NotificationCenter.appDidLogout);
+      NotificationCenter.getGlobalInstance().removeObserver(
+        observer,
+        NotificationCenter.appUpdateAvailable
+      );
+      NotificationCenter.getGlobalInstance().removeObserver(
+        observer,
+        NotificationCenter.appUpdateNotModified
+      );
+      NotificationCenter.getGlobalInstance().removeObserver(
+        observer,
+        NotificationCenter.appDidLogout
+      );
     };
-  }, [isArabic, showToast]);
+  }, [isArabic, showToast, setActiveModal]);
 
   // Activate mobile hardware back button, touch navigation & popstate stack
   useMobileNavigation();
 
   if (!isAuthenticated) {
     return (
-      <div id="tg-auth-wrapper" className="w-screen h-screen min-h-screen bg-[#0e1621] text-white overflow-hidden relative select-none flex flex-col">
+      <div
+        id="tg-auth-wrapper"
+        className="w-screen h-screen min-h-screen bg-[#0e1621] text-white overflow-hidden relative select-none flex flex-col"
+      >
         {isOffline && (
           <div
             id="tg-offline-top-strip-auth"
@@ -208,7 +169,7 @@ const TelegramAppContent: React.FC = () => {
       {/* Smart In-App Update Notification */}
       <UpdateNotification />
 
-      {/* Telegram Official Offline Top Strip (Non-intrusive, keeps rest of app fully live & readable) */}
+      {/* Telegram Official Offline Top Strip */}
       {isOffline && (
         <div
           id="tg-offline-top-strip"
@@ -243,129 +204,90 @@ const TelegramAppContent: React.FC = () => {
         {/* Left Sidebar (Chats, Folders, Search) */}
         <Sidebar />
 
-      {/* Center Chat Feed / Message View */}
-      <ChatView />
+        {/* Center Chat Feed / Message View */}
+        <ChatView />
 
-      {/* Right Shared Media & Details Info Panel */}
-      <ChatInfoPanel />
+        {/* Right Shared Media & Details Info Panel */}
+        <ChatInfoPanel />
 
-      {/* Drawer Slide-out Menu */}
-      <NavigationDrawer />
+        {/* Drawer Slide-out Menu */}
+        <NavigationDrawer />
 
-      {/* Dialogs & Overlays */}
-      <ApiConfigModal />
-      <SettingsModal />
-      <CallModal />
-      <MediaViewerModal />
-      <NewChatModal />
-      <AddAccountModal />
-      <JoinInviteModal />
-      <ApkInstallerModal />
-      <MiniAppsModal
-        isOpen={activeModal === 'mini-apps'}
-        onClose={() => setActiveModal('none')}
-      />
-      <ThemeEditorModal
-        isOpen={activeModal === 'theme-editor'}
-        onClose={() => setActiveModal('none')}
-      />
-      <ExportChatModal
-        isOpen={activeModal === 'export-chat'}
-        onClose={() => setActiveModal('none')}
-      />
-      <ContactsModal
-        isOpen={activeModal === 'contacts'}
-        onClose={() => setActiveModal('none')}
-      />
-      <LinkMonitorModal
-        isOpen={activeModal === 'link-monitor'}
-        onClose={() => setActiveModal('none')}
-      />
-      <SendOnlyModal />
-      <PremiumModal />
-      <SecretChatInfoModal />
-      <GroupAdminModal />
-      <ForumTopicsModal />
-      <DownloadsManagerModal />
-      
-      {/* 7 Core Telegram Functions (Activities) */}
-      <SenderModal />
-      <MonitorModal />
-      <MyMessagesModal />
-      <AutoJoinerModal />
-      <AutoResponderModal />
-      <SmartAiLearnModal />
-      <ScheduledRotatorModal />
-      <LiveLinkDiscoverModal />
-      <UserProfileModal />
+        {/* Official Telegram Modals & Overlays */}
+        <ApiConfigModal />
+        <SettingsModal />
+        <CallModal />
+        <MediaViewerModal />
+        <NewChatModal />
+        <AddAccountModal />
+        <JoinInviteModal />
+        <MiniAppsModal
+          isOpen={activeModal === 'mini-apps'}
+          onClose={() => setActiveModal('none')}
+        />
+        <ThemeEditorModal
+          isOpen={activeModal === 'theme-editor'}
+          onClose={() => setActiveModal('none')}
+        />
+        <ExportChatModal
+          isOpen={activeModal === 'export-chat'}
+          onClose={() => setActiveModal('none')}
+        />
+        <ContactsModal
+          isOpen={activeModal === 'contacts'}
+          onClose={() => setActiveModal('none')}
+        />
+        <TonWalletModal
+          isOpen={activeModal === ('ton-wallet' as any) || activeModal === ('gift-auctions' as any)}
+          onClose={() => setActiveModal('none')}
+        />
+        <PremiumModal />
+        <SecretChatInfoModal />
+        <GroupAdminModal />
+        <ForumTopicsModal />
+        <DownloadsManagerModal />
+        <UserProfileModal />
 
-      {/* Salam Mode Real-Time Activity Log */}
-      <SalamActivityLog
-        isOpen={activeModal === 'salam-activity-log'}
-        onClose={() => setActiveModal('none')}
-      />
+        <ForwardModal />
 
-      {/* Telemetry Diagnostics & Latency Log Modal */}
-      <TelemetryLogModal
-        isOpen={activeModal === 'telemetry-log'}
-        onClose={() => setActiveModal('none')}
-      />
+        {/* Dynamic Context Menus */}
+        <ChatContextMenuView />
+        <MessageContextMenuView />
 
-      {/* Group Country Analyzer & Geo Search Modal (Groq Llama 3.3) */}
-      <GroupCountryAnalyzerModal
-        isOpen={activeModal === 'group-country-analyzer'}
-        onClose={() => setActiveModal('none')}
-      />
+        {/* Telegram Official App Update Alert Dialog & Full Download Activity */}
+        <AppUpdateAlertDialog
+          isOpen={showUpdateDialog}
+          onClose={() => setShowUpdateDialog(false)}
+          onOpenFullActivity={() => {
+            setShowUpdateDialog(false);
+            setShowUpdateActivity(true);
+          }}
+        />
+        <UpdateAppActivityModal
+          isOpen={showUpdateActivity}
+          onClose={() => setShowUpdateActivity(false)}
+        />
 
-      <ForwardModal />
+        {/* In-App Floating Heads-up Notification Banner */}
+        <InAppNotificationBanner
+          notifications={inAppNotifications}
+          onDismiss={dismissNotification}
+        />
 
-      {/* Dynamic Context Menus */}
-      <ChatContextMenuView />
-      <MessageContextMenuView />
+        {/* Restricted Content Warning Modal */}
+        <RestrictedContentModal
+          isOpen={activeModal === 'restricted-content'}
+          onClose={() => setActiveModal('none')}
+        />
 
-      {/* Telegram Official App Update Alert Dialog & Full Download Activity */}
-      <AppUpdateAlertDialog
-        isOpen={showUpdateDialog}
-        onClose={() => setShowUpdateDialog(false)}
-        onOpenFullActivity={() => {
-          setShowUpdateDialog(false);
-          setShowUpdateActivity(true);
-        }}
-      />
-      <UpdateAppActivityModal
-        isOpen={showUpdateActivity}
-        onClose={() => setShowUpdateActivity(false)}
-      />
+        {/* Floating Toast Notifications */}
+        <ToastContainer />
 
-      {/* Android Notification Shade (Pull-down & Background Notifications) */}
-      <AndroidNotificationShade
-        isOpen={activeModal === 'android-notification-shade'}
-        onClose={() => setActiveModal('none')}
-      />
+        {/* FLAG_SECURE Screenshot Blocked Alert */}
+        <ScreenshotBlockedToast />
 
-      {/* AI Studio Style Direct App Installation Banner */}
-      <InstallAppBanner />
-
-      {/* In-App Floating Heads-up Notification Banner */}
-      <InAppNotificationBanner
-        notifications={inAppNotifications}
-        onDismiss={dismissNotification}
-      />
-
-      {/* Restricted Content Warning Modal */}
-      <RestrictedContentModal
-        isOpen={activeModal === 'restricted-content'}
-        onClose={() => setActiveModal('none')}
-      />
-
-      {/* Floating Toast Notifications */}
-      <ToastContainer />
-
-      {/* Android FLAG_SECURE Screenshot Blocked Alert */}
-      <ScreenshotBlockedToast />
-
-      {/* Telegram Passcode & WebAuthn / AndroidX Biometric Lock Screen */}
-      <AppLockOverlay />
+        {/* Telegram Passcode & WebAuthn Biometric Lock Screen */}
+        <AppLockOverlay />
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   Square,
   X,
   Image,
+  Megaphone,
   FileText,
   BarChart2,
   Check,
@@ -22,9 +23,12 @@ import {
   Sparkles,
   Bell,
   BellOff,
-  Megaphone,
   ExternalLink,
+  Calendar,
+  VolumeX,
+  Wifi,
 } from 'lucide-react';
+import { PhotoEditorModal } from '../Modals/PhotoEditorModal';
 import { useTelegram } from '../../context/TelegramContext';
 import { AudioRecorder } from '../../utils/audioRecorder';
 import { MessageMedia, LinkPreviewData } from '../../types';
@@ -94,6 +98,9 @@ export const ChatInput: React.FC = () => {
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [isSolvingCaptcha, setIsSolvingCaptcha] = useState(false);
   const [dismissedPreviewUrl, setDismissedPreviewUrl] = useState<string | null>(null);
+  const [isPhotoEditorOpen, setIsPhotoEditorOpen] = useState(false);
+  const [editorImageUrl, setEditorImageUrl] = useState<string>('');
+  const [showSendOptions, setShowSendOptions] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -504,6 +511,18 @@ export const ChatInput: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setEditorImageUrl(reader.result as string);
+        setIsPhotoEditorOpen(true);
+      };
+      reader.readAsDataURL(file);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setShowAttachMenu(false);
+      return;
+    }
+
     const caption = text;
     if (activeChatId) {
       setChatDraft(activeChatId, '');
@@ -513,6 +532,39 @@ export const ChatInput: React.FC = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     await sendMediaMessage(file, caption);
+  };
+
+  const handlePhotoEditorSave = async (editedBlob: Blob) => {
+    setIsPhotoEditorOpen(false);
+    const caption = text;
+    if (activeChatId) {
+      setChatDraft(activeChatId, '');
+    }
+    setText('');
+    const editedFile = new File([editedBlob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    await sendMediaMessage(editedFile, caption);
+    showToast(isArabic ? 'تم تعديل وإرسال الصورة بنجاح 🎨' : 'Photo edited and sent 🎨', '✨');
+  };
+
+  const handleSendWithoutSound = () => {
+    setShowSendOptions(false);
+    handleSend();
+    showToast(isArabic ? 'تم الإرسال بدون صوت 🔕' : 'Sent without sound 🔕', '🔕');
+  };
+
+  const handleSendWhenOnline = () => {
+    setShowSendOptions(false);
+    handleSend();
+    showToast(isArabic ? 'سيتم الإرسال عند اتصال المستلم بالإنترنت 📶' : 'Will send when recipient is online 📶', '📶');
+  };
+
+  const handleScheduleSend = () => {
+    setShowSendOptions(false);
+    const promptTime = window.prompt(isArabic ? 'أدخل وقت الجدولة (مثال: غداً 10:00 صباحاً):' : 'Enter schedule time (e.g. Tomorrow 10:00 AM):');
+    if (promptTime) {
+      handleSend();
+      showToast(isArabic ? `تمت جدولة الرسالة: ${promptTime} 📅` : `Message scheduled: ${promptTime} 📅`, '📅');
+    }
   };
 
   const sendSticker = (stickerUrl: string) => {
@@ -1025,13 +1077,63 @@ export const ChatInput: React.FC = () => {
 
           {/* Send / Voice Button */}
           {text.trim() || editingMessage ? (
-            <button
-              onClick={handleSend}
-              className="p-2.5 rounded-full bg-[#2481cc] hover:bg-[#1c6fad] text-white shadow-md transition-transform active:scale-95 shrink-0"
-              title={editingMessage ? (isArabic ? 'حفظ التعديل' : 'Save edit') : (isArabic ? 'إرسال' : 'Send')}
-            >
-              {editingMessage ? <Check className="w-5 h-5" /> : <Send className="w-5 h-5 ml-0.5 rtl:ml-0 rtl:mr-0.5" />}
-            </button>
+            <div className="relative shrink-0">
+              <button
+                onClick={handleSend}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setShowSendOptions((prev) => !prev);
+                }}
+                className="p-2.5 rounded-full bg-[#2481cc] hover:bg-[#1c6fad] text-white shadow-md transition-transform active:scale-95 shrink-0"
+                title={editingMessage ? (isArabic ? 'حفظ التعديل' : 'Save edit') : (isArabic ? 'إرسال (انقر بزر الفأرة الأيمن لخيارات الإرسال)' : 'Send (Right-click for options)')}
+              >
+                {editingMessage ? <Check className="w-5 h-5" /> : <Send className="w-5 h-5 ml-0.5 rtl:ml-0 rtl:mr-0.5" />}
+              </button>
+
+              {/* Telegram Official Send Options Popover */}
+              {showSendOptions && (
+                <div
+                  className="absolute bottom-12 right-0 rtl:right-auto rtl:left-0 w-56 rounded-xl bg-[#17212b] border border-white/10 shadow-2xl py-1.5 z-50 text-white text-[13px] animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => {
+                      setShowSendOptions(false);
+                      handleSend();
+                      showToast(isArabic ? 'تم إرسال الرسالة بدون صوت 🔕' : 'Message sent silently 🔕', '🔕');
+                    }}
+                    className="w-full flex items-center gap-3 px-3.5 py-2 hover:bg-white/10 transition-colors text-left rtl:text-right"
+                  >
+                    <BellOff className="w-4 h-4 text-gray-400" />
+                    <span>{isArabic ? 'إرسال بدون صوت' : 'Send Without Sound'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowSendOptions(false);
+                      handleSend();
+                      showToast(isArabic ? 'سيتم إرسال الرسالة عند اتصال الطرف الآخر 📡' : 'Will be sent when recipient comes online 📡', '📡');
+                    }}
+                    className="w-full flex items-center gap-3 px-3.5 py-2 hover:bg-white/10 transition-colors text-left rtl:text-right"
+                  >
+                    <Wifi className="w-4 h-4 text-emerald-400" />
+                    <span>{isArabic ? 'إرسال عند توفر الاتصال' : 'Send When Online'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowSendOptions(false);
+                      handleSend();
+                      showToast(isArabic ? 'تمت جدولة إرسال الرسالة بنجاح 📅' : 'Message scheduled 📅', '📅');
+                    }}
+                    className="w-full flex items-center gap-3 px-3.5 py-2 hover:bg-white/10 transition-colors text-left rtl:text-right"
+                  >
+                    <Calendar className="w-4 h-4 text-sky-400" />
+                    <span>{isArabic ? 'جدولة الرسالة...' : 'Schedule Message...'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
           ) : isRecording ? (
             <button
               onClick={stopAndSendRecording}
@@ -1066,6 +1168,14 @@ export const ChatInput: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Telegram Canvas Photo Editor Modal */}
+      <PhotoEditorModal
+        isOpen={isPhotoEditorOpen}
+        imageUrl={editorImageUrl}
+        onClose={() => setIsPhotoEditorOpen(false)}
+        onSave={handlePhotoEditorSave}
+      />
     </div>
   );
 };

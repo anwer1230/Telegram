@@ -4,7 +4,6 @@
  */
 
 import { NotificationCenter } from '../core/NotificationCenter';
-import { SalamActivityItem } from '../types';
 
 export interface TelemetryLogEntry {
   id: string;
@@ -102,7 +101,6 @@ export function recordTelemetry(
     } catch {}
   }
 
-  // 2. Transmit to server to append to local developer log file (telemetry_debug.log)
   if (typeof fetch !== 'undefined') {
     fetch('/api/developer/telemetry/log', {
       method: 'POST',
@@ -111,65 +109,10 @@ export function recordTelemetry(
     }).catch(() => {});
   }
 
-  // 3. Forward to SalamActivityLog for live monitoring and UI visibility
-  try {
-    forwardToSalamActivityLog(fullEntry);
-  } catch (err) {
-    console.warn('[Telemetry] Error forwarding to SalamActivityLog:', err);
-  }
-
   return fullEntry;
 }
 
-/**
- * Maps a telemetry entry to SalamActivityItem format and notifies SalamActivityLog
- */
-function forwardToSalamActivityLog(entry: TelemetryLogEntry) {
-  const isFailure = entry.level === 'ERROR' || entry.type === 'sync_failure';
-  const title = isFailure
-    ? '⚠️ تعثر مزامنة السحابة (Cloud Sync Delay/Failure)'
-    : entry.type === 'queue_sync'
-    ? '📤 مزامنة الرسائل المعلقة (Queue Sync)'
-    : `⚡ قياس استجابة الشبكة (Latency: ${entry.latencyMs != null ? `${entry.latencyMs}ms` : 'N/A'})`;
 
-  const statusLabel = isFailure
-    ? `فشل المزامنة: ${entry.error || entry.message}`
-    : `زمن الاستجابة: ${entry.latencyMs != null ? `${entry.latencyMs}ms` : 'N/A'} (${entry.rating})`;
-
-  const snippet = `Endpoint: ${entry.endpoint || 'sync'} | Duration: ${entry.latencyMs != null ? `${entry.latencyMs}ms` : 'N/A'} | Status: ${entry.status || (isFailure ? 'FAIL' : 'OK')}`;
-
-  const salamItem: SalamActivityItem = {
-    id: entry.id,
-    chatId: 'telemetry_sync',
-    chatTitle: title,
-    status: isFailure ? 'error' : 'greeting_sent',
-    statusLabel,
-    interactionCount: entry.latencyMs || 0,
-    requiredInteractions: 0,
-    remainingSeconds: 0,
-    totalWaitSeconds: 0,
-    timestamp: entry.timestamp,
-    decision: isFailure ? 'delete' : 'edit',
-    lastMessageSnippet: snippet,
-    details: `${entry.message} ${entry.error ? `| سبب الخطأ: ${entry.error}` : ''} ${entry.networkInfo ? `| اتصال: ${entry.networkInfo.effectiveType || 'standard'} (RTT: ${entry.networkInfo.rtt || 'N/A'}ms)` : ''}`,
-  };
-
-  // Dispatch via NotificationCenter to open SalamActivityLog views
-  NotificationCenter.getInstance().postNotificationName(
-    NotificationCenter.salamActivityReceived,
-    salamItem
-  );
-
-  // Persist directly into SalamActivityLog localStorage
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem(SALAM_STORAGE_KEY);
-      let activities: SalamActivityItem[] = stored ? JSON.parse(stored) : [];
-      activities = [salamItem, ...activities.filter((a) => a.id !== salamItem.id)].slice(0, 100);
-      localStorage.setItem(SALAM_STORAGE_KEY, JSON.stringify(activities));
-    } catch {}
-  }
-}
 
 /**
  * Measures instantaneous network latency against a health check probe

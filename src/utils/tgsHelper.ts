@@ -9,7 +9,7 @@ export async function decompressTgsBuffer(buffer: ArrayBuffer | Uint8Array): Pro
     try {
       const ds = new DecompressionStream('gzip');
       const writer = ds.writable.getWriter();
-      writer.write(buffer);
+      writer.write(buffer as any);
       writer.close();
       const response = new Response(ds.readable);
       const text = await response.text();

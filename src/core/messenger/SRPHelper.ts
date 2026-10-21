@@ -50,7 +50,7 @@ export class SRPHelper {
   public static async sha256(data: Uint8Array | string): Promise<Uint8Array> {
     const input = this.toUint8Array(data);
     if (typeof crypto !== 'undefined' && crypto.subtle) {
-      const hashBuffer = await crypto.subtle.digest('SHA-256', input);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', input as any);
       return new Uint8Array(hashBuffer);
     }
     // Fallback simple bitwise implementation if SubtleCrypto is unavailable
@@ -92,7 +92,7 @@ export class SRPHelper {
     if (typeof crypto !== 'undefined' && crypto.subtle) {
       const keyMaterial = await crypto.subtle.importKey(
         'raw',
-        hash2,
+        hash2 as any,
         { name: 'PBKDF2' },
         false,
         ['deriveBits']
@@ -100,7 +100,7 @@ export class SRPHelper {
       const derivedBits = await crypto.subtle.deriveBits(
         {
           name: 'PBKDF2',
-          salt: s1,
+          salt: s1 as any,
           iterations: 100000,
           hash: 'SHA-512',
         },

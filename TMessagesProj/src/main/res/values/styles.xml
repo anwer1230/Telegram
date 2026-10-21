@@ -1,8 +1,0 @@
-<resources>
-    <style name="Theme.TMessages" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
-        <item name="colorPrimary">#2481cc</item>
-        <item name="colorPrimaryDark">#1c68a4</item>
-        <item name="colorAccent">#2481cc</item>
-    </style>
-</resources>
