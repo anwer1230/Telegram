@@ -1,6 +1,6 @@
 {
   "name": "Telegram Web Plus",
-  "description": "تطبيق تيليجرام ويب بلاس الرسمي مع ربط سحابي حقيقي وتشفير متكامل للبيانات",
+  "description": "تطبيق تيليجرام ويب بلاس الرسمي مع ربط سحابي حقيقي وتشفير متكامل للبيانات وتعدد الحسابات",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
