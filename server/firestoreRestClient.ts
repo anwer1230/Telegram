@@ -9,21 +9,39 @@ interface FirebaseAppletConfig {
   storageBucket?: string;
 }
 
+export const PERMANENT_FIREBASE_CONFIG: FirebaseAppletConfig = {
+  projectId: 'gen-lang-client-0731655503',
+  apiKey: 'AIzaSyDSO42SHD8dD2EMUUeBkUfIWdZ4ZA5--4s',
+  firestoreDatabaseId: 'ai-studio-telegramcustomcl-102d010a-1b3d-4a8c-b84a-d6fc694c1dd9',
+  authDomain: 'gen-lang-client-0731655503.firebaseapp.com',
+  storageBucket: 'gen-lang-client-0731655503.firebasestorage.app',
+};
+
 let cachedConfig: FirebaseAppletConfig | null = null;
 
-function loadConfig(): FirebaseAppletConfig | null {
+function loadConfig(): FirebaseAppletConfig {
   if (cachedConfig) return cachedConfig;
   try {
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
     if (fs.existsSync(configPath)) {
       const raw = fs.readFileSync(configPath, 'utf-8');
-      cachedConfig = JSON.parse(raw);
-      return cachedConfig;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.projectId && parsed.apiKey) {
+        cachedConfig = {
+          projectId: parsed.projectId,
+          apiKey: parsed.apiKey,
+          firestoreDatabaseId: parsed.firestoreDatabaseId || PERMANENT_FIREBASE_CONFIG.firestoreDatabaseId,
+          authDomain: parsed.authDomain || PERMANENT_FIREBASE_CONFIG.authDomain,
+          storageBucket: parsed.storageBucket || PERMANENT_FIREBASE_CONFIG.storageBucket,
+        };
+        return cachedConfig;
+      }
     }
   } catch (err: any) {
-    console.warn('[FirestoreRestClient] Failed to read firebase-applet-config.json:', err?.message || err);
+    console.warn('[FirestoreRestClient] Notice reading firebase-applet-config.json, using permanent config:', err?.message || err);
   }
-  return null;
+  cachedConfig = { ...PERMANENT_FIREBASE_CONFIG };
+  return cachedConfig;
 }
 
 function getBaseUrl(collection: string, docId?: string): string | null {

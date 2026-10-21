@@ -11,9 +11,6 @@
       "DOM.Iterable"
     ],
     "skipLibCheck": true,
-    "strict": false,
-    "strictNullChecks": false,
-    "noImplicitAny": false,
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "moduleDetection": "force",
@@ -24,6 +21,8 @@
         "./*"
       ]
     },
+    "strict": false,
+    "strictNullChecks": false,
     "allowImportingTsExtensions": true,
     "noEmit": true
   },

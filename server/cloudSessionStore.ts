@@ -156,8 +156,8 @@ export function getCloudFirestore(): Firestore | null {
   firestoreInitAttempted = true;
 
   try {
-    let projectId = 'tidal-venture-7xctm';
-    let databaseId: string | undefined = undefined;
+    let projectId = 'gen-lang-client-0731655503';
+    let databaseId: string | undefined = 'ai-studio-telegramcustomcl-102d010a-1b3d-4a8c-b84a-d6fc694c1dd9';
 
     const configFile = path.join(process.cwd(), 'firebase-applet-config.json');
     if (fs.existsSync(configFile)) {

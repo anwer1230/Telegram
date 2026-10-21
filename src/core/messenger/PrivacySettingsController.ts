@@ -36,11 +36,16 @@ export interface PrivacySettingsState {
   // Privacy
   phoneNumber: PrivacyOption;
   lastSeen: PrivacyOption;
+  last_seen?: PrivacyOption;
   profilePhotos: PrivacyOption;
+  profile_photos?: PrivacyOption;
   forwards: PrivacyOption;
   calls: PrivacyOption;
   voiceMessages: PrivacyOption;
+  voice_messages?: PrivacyOption;
   bio: PrivacyOption;
+
+  [key: string]: any;
 
   // Sessions
   sessions: TLRPC.TL_authorization[];
