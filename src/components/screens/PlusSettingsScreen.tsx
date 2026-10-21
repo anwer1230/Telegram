@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   ArrowRight, Search, Settings, Users, PlayCircle, MessageSquare, 
   List, Menu, User, Bell, Lock, Grid, Download, ShieldAlert,
@@ -19,6 +19,7 @@ interface Props {
 export const PlusSettingsScreen: React.FC<Props> = ({ onBack, onOpenColorTheme }) => {
   const theme = telegramService.getThemeSettings();
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -26,30 +27,92 @@ export const PlusSettingsScreen: React.FC<Props> = ({ onBack, onOpenColorTheme }
   };
 
   const handleBackupSettings = () => {
-    showToast("تم حفظ إعدادات بلاس السحابية في مجلد Telegram بنجاح!");
+    try {
+      const backupData = {
+        app: "Telegram Web Plus",
+        version: "13.0.2",
+        exportedAt: new Date().toISOString(),
+        theme: telegramService.getThemeSettings(),
+        folders: telegramService.getFolders(),
+        generalSettings: telegramService.getGeneralSettings(),
+      };
+
+      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Telegram_Plus_Settings_${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showToast("تم تصدير وحفظ ملف إعدادات بلاس بنجاح!");
+    } catch (e) {
+      showToast("حدث خطأ أثناء حفظ الإعدادات");
+    }
   };
 
-  const handleRestoreSettings = () => {
-    showToast("تمت استعادة الإعدادات بنجاح من التخزين السحابي!");
+  const handleRestoreClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed = JSON.parse(content);
+        if (parsed.theme) {
+          telegramService.saveThemeSettings(parsed.theme);
+        }
+        if (parsed.folders && Array.isArray(parsed.folders)) {
+          localStorage.setItem('tg_folders_v2', JSON.stringify(parsed.folders));
+        }
+        if (parsed.generalSettings) {
+          telegramService.saveGeneralSettings(parsed.generalSettings);
+        }
+        showToast("تمت استعادة الإعدادات بنجاح! جاري التحديث...");
+        setTimeout(() => window.location.reload(), 1200);
+      } catch (err) {
+        showToast("الملف المحدد غير صالح للإعدادات");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const items = [
-    { title: 'عام', icon: Settings, action: onOpenColorTheme },
-    { title: 'المحادثات', icon: Users, action: () => showToast("تم فتح إعدادات المحادثات المتقدمة") },
-    { title: 'القصص', icon: PlayCircle, action: () => showToast("إعدادات قصص تيليجرام مفعلة") },
-    { title: 'الرسائل', icon: MessageSquare, action: () => showToast("خيارات تحكم الرسائل المتقدمة") },
-    { title: 'Topics', icon: List, action: () => showToast("خيارات المواضيع Topics مفعلة") },
+    { title: 'عام (الألوان والتخصيص)', icon: Settings, action: onOpenColorTheme },
+    { title: 'المحادثات', icon: Users, action: () => showToast("خيارات المحادثات المتقدمة مفعلة") },
+    { title: 'القصص', icon: PlayCircle, action: () => showToast("قصص تيليجرام مفعلة تلقائياً") },
+    { title: 'الرسائل', icon: MessageSquare, action: () => showToast("خيارات تحكم الرسائل المتقدمة مفعلة") },
+    { title: 'Topics', icon: List, action: () => showToast("خيارات المواضيع مفعلة") },
     { title: 'درج التصفح', icon: Menu, action: () => showToast("تخصيص بنود وقوائم درج التصفح") },
     { title: 'الملف الشخصي', icon: User, action: () => showToast("تخصيص واجهة الملف الشخصي") },
     { title: 'الإشعارات', icon: Bell, action: () => showToast("إعدادات الإشعارات المخصصة لبلاس") },
     { title: 'الخصوصية والأمان', icon: Lock, action: () => showToast("ميزات حماية إضافية وتشفير متقدم") },
     { title: 'الوسائط المتبادلة', icon: Grid, action: () => showToast("عرض وتصنيف الوسائط المشتركة") },
     { title: 'التحميلات', icon: Download, action: () => showToast("مدير التنزيلات السحابي فائق السرعة") },
-    { title: 'Ads', icon: ShieldAlert, action: () => showToast("تم حظر إعلانات القنوات بنجاح") },
+    { title: 'Ads', icon: ShieldAlert, action: () => showToast("تم حظر إعلانات القنوات تلقائياً") },
   ];
 
   return (
     <div className="flex flex-col h-full bg-[#0e1621] text-white">
+      {/* Hidden file input for restore */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept=".json"
+        className="hidden"
+      />
+
       {/* Header */}
       <div 
         className="flex items-center justify-between px-4 py-3.5 shadow-md transition-colors"
@@ -100,12 +163,12 @@ export const PlusSettingsScreen: React.FC<Props> = ({ onBack, onOpenColorTheme }
               <Save className="w-4 h-4 text-teal-400" />
             </div>
             <div className="text-xs text-gray-400 mt-1">
-              مجلد حفظ الإعدادات هي (المفضلات أيضاً) 'Telegram'
+              تصدير ملف JSON للإعدادات إلى جهازك أو السحابة
             </div>
           </div>
 
           <div 
-            onClick={handleRestoreSettings}
+            onClick={handleRestoreClick}
             className="cursor-pointer hover:bg-white/5 p-2 rounded-xl transition-colors text-right border-t border-[#242f3d] pt-3"
           >
             <div className="flex items-center justify-end gap-2 text-sm font-semibold text-gray-100">
@@ -113,7 +176,7 @@ export const PlusSettingsScreen: React.FC<Props> = ({ onBack, onOpenColorTheme }
               <RotateCcw className="w-4 h-4 text-teal-400" />
             </div>
             <div className="text-xs text-gray-400 mt-1">
-              إستعادة الإعدادات من الجهاز أو السحابة
+              استيراد الإعدادات من ملف JSON محفوظ
             </div>
           </div>
         </div>

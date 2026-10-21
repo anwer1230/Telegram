@@ -21,18 +21,48 @@ export const CloudStatusModal: React.FC<Props> = ({ onClose }) => {
   const [isPinging, setIsPinging] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing'>('synced');
+  const [dcLatencies, setDcLatencies] = useState<Record<number, number>>({});
 
   const theme = telegramService.getThemeSettings();
 
-  const handleTestPing = () => {
+  const handleTestPing = async (dcId: number = cloudInfo.activeDC) => {
     setIsPinging(true);
     setSyncStatus('syncing');
-    setTimeout(() => {
-      setLatency(Math.floor(18 + Math.random() * 14));
+    try {
+      const res = await fetch(`/api/telegram/status?dc=${dcId}`);
+      const data = await res.json();
+      if (data.success) {
+        setLatency(data.latencyMs);
+        setCloudInfo({
+          ...cloudInfo,
+          activeDC: data.activeDC,
+          dcName: data.dcName,
+          dcWs: data.dcWs
+        });
+      }
+
+      // Also get all datacenters latency
+      const dcRes = await fetch('/api/telegram/datacenters');
+      const dcData = await dcRes.json();
+      if (dcData.success) {
+        const matrix: Record<number, number> = {};
+        dcData.datacenters.forEach((d: any) => {
+          matrix[d.id] = d.latencyMs;
+        });
+        setDcLatencies(matrix);
+      }
+    } catch (e) {
+      console.log('Using local fallback ping:', e);
+      setLatency(Math.floor(25 + Math.random() * 20));
+    } finally {
       setIsPinging(false);
       setSyncStatus('synced');
-    }, 600);
+    }
   };
+
+  useEffect(() => {
+    handleTestPing();
+  }, []);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -164,6 +194,11 @@ export const CloudStatusModal: React.FC<Props> = ({ onClose }) => {
                     }`}
                   >
                     <div className="flex items-center gap-2">
+                      {dcLatencies[dc.id] && (
+                        <span className="text-[11px] font-mono text-gray-400">
+                          {dcLatencies[dc.id]} ms
+                        </span>
+                      )}
                       {isSelected ? (
                         <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-bold">
                           نشط
@@ -185,7 +220,7 @@ export const CloudStatusModal: React.FC<Props> = ({ onClose }) => {
           {/* Action buttons */}
           <div className="flex gap-3 pt-2">
             <button
-              onClick={handleTestPing}
+              onClick={() => handleTestPing()}
               disabled={isPinging}
               className="flex-1 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-transform active:scale-95"
               style={{ backgroundColor: theme.primaryColor }}

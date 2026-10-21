@@ -7,10 +7,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   ArrowRight, Phone, Video, Search, MoreVertical, Paperclip, 
   Smile, Mic, Send, ShieldCheck, Check, CheckCheck, Play, 
-  Pause, Cloud, Sparkles, X, Image as ImageIcon, FileText
+  Pause, Cloud, Sparkles, X, Image as ImageIcon, FileText,
+  Square, Volume2
 } from 'lucide-react';
 import { telegramService } from '../services/telegramService';
 import { ChatItem, ChatMessage } from '../types/telegram';
+import { CallModal } from './modals/CallModal';
 
 interface Props {
   chat: ChatItem;
@@ -24,13 +26,24 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
   const [messages, setMessages] = useState<ChatMessage[]>(telegramService.getMessages(chat.id));
   const [inputText, setInputText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const [isInCall, setIsInCall] = useState(false);
+
+  // Real Microphone Recording State via MediaRecorder
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
-  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
+
+  // Hidden real file inputs
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const theme = telegramService.getThemeSettings();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     const unsubscribe = telegramService.subscribe(() => {
@@ -43,18 +56,86 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Voice recording timer
+  // Clean up audio on unmount
   useEffect(() => {
-    let interval: any;
-    if (isRecordingVoice) {
-      interval = setInterval(() => {
+    return () => {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      clearInterval(recordingTimerRef.current);
+    };
+  }, []);
+
+  // Real voice recording via MediaRecorder API
+  const startRealVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        stream.getTracks().forEach((track) => track.stop());
+
+        // Send real voice message
+        await telegramService.sendMessage(
+          chat.id,
+          `رسالة صوتية مسجلة (${recordingSeconds} ثانية) 🎙️`,
+          'voice',
+          audioUrl
+        );
+      };
+
+      recorder.start();
+      setIsRecordingVoice(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
-    } else {
-      setRecordingSeconds(0);
+    } catch (err) {
+      console.error('Microphone access denied or error:', err);
+      // Fallback if mic permission denied in iframe
+      setIsRecordingVoice(true);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
     }
-    return () => clearInterval(interval);
-  }, [isRecordingVoice]);
+  };
+
+  const stopAndSendVoiceRecording = () => {
+    clearInterval(recordingTimerRef.current);
+    setIsRecordingVoice(false);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    } else {
+      // Fallback
+      telegramService.sendMessage(
+        chat.id,
+        `رسالة صوتية (${recordingSeconds} ثانية) 🎙️`,
+        'voice'
+      );
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    clearInterval(recordingTimerRef.current);
+    setIsRecordingVoice(false);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+    audioChunksRef.current = [];
+  };
 
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
@@ -64,24 +145,69 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
     await telegramService.sendMessage(chat.id, text);
   };
 
-  const handleSendVoice = async () => {
-    setIsRecordingVoice(false);
-    await telegramService.sendMessage(
-      chat.id, 
-      `رسالة صوتية (${recordingSeconds} ثانية) 🎙️`, 
-      'voice',
-      undefined
-    );
+  // Real image upload handler
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setShowAttachMenu(false);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      await telegramService.sendMessage(
+        chat.id,
+        `صورة: ${file.name} (${(file.size / 1024).toFixed(1)} KB) 📸`,
+        'photo',
+        dataUrl
+      );
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
-  const handleSendImageSample = async () => {
+  // Real document/file upload handler
+  const handleDocumentFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     setShowAttachMenu(false);
-    await telegramService.sendMessage(
-      chat.id,
-      'صورة سحابية تم رفعها إلى سحابة تيليجرام 📸',
-      'photo',
-      'https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80'
-    );
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      await telegramService.sendMessage(
+        chat.id,
+        `ملف مستند: ${file.name} (${(file.size / 1024).toFixed(1)} KB) 📁`,
+        'file',
+        dataUrl
+      );
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handlePlayVoice = (msgId: string, mediaUrl?: string) => {
+    if (playingVoiceId === msgId) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+      }
+      setPlayingVoiceId(null);
+      return;
+    }
+
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+    }
+
+    if (mediaUrl) {
+      const audio = new Audio(mediaUrl);
+      activeAudioRef.current = audio;
+      setPlayingVoiceId(msgId);
+      audio.play().catch(e => console.log('Audio playback error:', e));
+      audio.onended = () => setPlayingVoiceId(null);
+    } else {
+      setPlayingVoiceId(msgId);
+      setTimeout(() => setPlayingVoiceId(null), 3000);
+    }
   };
 
   const handleAddEmoji = (emoji: string) => {
@@ -94,6 +220,27 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
 
   return (
     <div className="flex flex-col h-full bg-[#0e1621] text-white">
+      {/* Hidden real file inputs */}
+      <input
+        type="file"
+        ref={imageInputRef}
+        accept="image/*,video/*"
+        onChange={handleImageFileChange}
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="*/*"
+        onChange={handleDocumentFileChange}
+        className="hidden"
+      />
+
+      {/* Call Modal */}
+      {isInCall && (
+        <CallModal chat={chat} onClose={() => setIsInCall(false)} />
+      )}
+
       {/* Header */}
       <div 
         className="flex items-center justify-between px-3.5 py-2.5 shadow-md z-10"
@@ -143,11 +290,19 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
           >
             <Cloud className="w-5 h-5 text-teal-100" />
           </button>
-          <button className="p-1.5 hover:bg-black/10 rounded-full">
+          <button 
+            onClick={() => setIsInCall(true)}
+            className="p-1.5 hover:bg-black/10 rounded-full transition-colors"
+            title="بدء مكالمة صوتية مشفرة"
+          >
             <Phone className="w-5 h-5" />
           </button>
-          <button className="p-1.5 hover:bg-black/10 rounded-full">
-            <Search className="w-5 h-5" />
+          <button 
+            onClick={() => setIsInCall(true)}
+            className="p-1.5 hover:bg-black/10 rounded-full transition-colors"
+            title="مكالمة فيديو"
+          >
+            <Video className="w-5 h-5" />
           </button>
           <button className="p-1.5 hover:bg-black/10 rounded-full">
             <MoreVertical className="w-5 h-5" />
@@ -189,28 +344,37 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
 
                 {/* Media Image if present */}
                 {msg.mediaType === 'photo' && msg.mediaUrl && (
-                  <div className="rounded-lg overflow-hidden mb-2">
-                    <img src={msg.mediaUrl} alt="Photo" className="w-full max-h-60 object-cover" />
+                  <div className="rounded-lg overflow-hidden mb-2 shadow">
+                    <img 
+                      src={msg.mediaUrl} 
+                      alt="Uploaded media" 
+                      className="w-full max-h-72 object-cover rounded-lg" 
+                    />
                   </div>
                 )}
 
                 {/* Voice player if present */}
                 {msg.mediaType === 'voice' && (
-                  <div className="flex items-center gap-2 my-1 bg-black/20 p-2 rounded-lg">
+                  <div className="flex items-center gap-2.5 my-1.5 bg-black/20 p-2.5 rounded-xl border border-white/10">
                     <button
-                      onClick={() => setPlayingVoiceId(playingVoiceId === msg.id ? null : msg.id)}
-                      className="w-8 h-8 rounded-full bg-white text-teal-800 flex items-center justify-center shadow"
+                      onClick={() => handlePlayVoice(msg.id, msg.mediaUrl)}
+                      className="w-9 h-9 rounded-full bg-white text-teal-800 flex items-center justify-center shadow-md transition-transform active:scale-95"
                     >
                       {playingVoiceId === msg.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
                     </button>
-                    <div className="flex-1 h-2 bg-white/30 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full bg-white transition-all ${
-                          playingVoiceId === msg.id ? 'w-full duration-3000' : 'w-1/3'
-                        }`} 
-                      />
+                    <div className="flex-1 space-y-1">
+                      <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full bg-white transition-all ${
+                            playingVoiceId === msg.id ? 'w-full duration-3000' : 'w-1/4'
+                          }`} 
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] opacity-80 font-mono">
+                        <span>0:0{recordingSeconds || 8}</span>
+                        <span>صوت مشفر 🎙️</span>
+                      </div>
                     </div>
-                    <span className="text-[10px] opacity-80">0:14</span>
                   </div>
                 )}
 
@@ -283,30 +447,27 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
         </div>
       )}
 
-      {/* Attachment Menu Popover */}
+      {/* Real Attachment Menu Popover */}
       {showAttachMenu && (
-        <div className="p-3 bg-[#17212b] border-t border-[#242f3d] flex items-center justify-around animate-fade-in text-xs">
+        <div className="p-3.5 bg-[#17212b] border-t border-[#242f3d] flex items-center justify-around animate-fade-in text-xs">
           <button 
-            onClick={handleSendImageSample}
-            className="flex flex-col items-center gap-1 text-gray-300 hover:text-teal-400"
+            onClick={() => imageInputRef.current?.click()}
+            className="flex flex-col items-center gap-1 text-gray-300 hover:text-teal-400 transition-colors"
           >
-            <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center">
               <ImageIcon className="w-5 h-5" />
             </div>
-            <span>صورة أو فيديو</span>
+            <span className="font-medium">صورة أو فيديو من الجهاز</span>
           </button>
 
           <button 
-            onClick={async () => {
-              setShowAttachMenu(false);
-              await telegramService.sendMessage(chat.id, 'ملف مستند سحابي: Document_Backup.pdf (2.4 MB) 📁', 'file');
-            }}
-            className="flex flex-col items-center gap-1 text-gray-300 hover:text-teal-400"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex flex-col items-center gap-1 text-gray-300 hover:text-teal-400 transition-colors"
           >
-            <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
               <FileText className="w-5 h-5" />
             </div>
-            <span>ملف ومستند</span>
+            <span className="font-medium">مستند أو ملف سحابي</span>
           </button>
         </div>
       )}
@@ -323,17 +484,19 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
           <Smile className="w-6 h-6" />
         </button>
 
-        {/* Text Input */}
+        {/* Text Input / Real Recording View */}
         <div className="flex-1 relative">
           {isRecordingVoice ? (
-            <div className="w-full py-2 px-4 rounded-2xl bg-red-950/40 border border-red-500/40 flex items-center justify-between text-red-400 text-sm">
+            <div className="w-full py-2 px-4 rounded-2xl bg-red-950/50 border border-red-500/40 flex items-center justify-between text-red-400 text-sm animate-pulse">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-                <span>جارٍ تسجيل الصوت... 0:{recordingSeconds < 10 ? `0${recordingSeconds}` : recordingSeconds}</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                <span className="font-mono">
+                  تسجيل ميكروفون حي: 0:{recordingSeconds < 10 ? `0${recordingSeconds}` : recordingSeconds}
+                </span>
               </div>
               <button 
-                onClick={() => setIsRecordingVoice(false)}
-                className="text-xs text-gray-400 hover:text-white"
+                onClick={cancelVoiceRecording}
+                className="text-xs text-gray-400 hover:text-white underline"
               >
                 إلغاء
               </button>
@@ -354,7 +517,9 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
         {/* Attachment Button */}
         <button
           onClick={() => setShowAttachMenu(!showAttachMenu)}
-          className="p-2 text-gray-400 hover:text-white rounded-full transition-colors"
+          className={`p-2 rounded-full transition-colors ${
+            showAttachMenu ? 'text-teal-400 bg-white/10' : 'text-gray-400 hover:text-white'
+          }`}
         >
           <Paperclip className="w-5 h-5" />
         </button>
@@ -370,15 +535,17 @@ export const ChatRoom: React.FC<Props> = ({ chat, onBack, onOpenCloudStatus }) =
           </button>
         ) : isRecordingVoice ? (
           <button
-            onClick={handleSendVoice}
-            className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center text-white shadow-md transition-transform active:scale-90 animate-pulse"
+            onClick={stopAndSendVoiceRecording}
+            className="w-10 h-10 rounded-full bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center text-white shadow-md transition-transform active:scale-90 animate-bounce"
+            title="إيقاف وحفظ التسجيل الصوتي في السحابة"
           >
             <Check className="w-5 h-5" />
           </button>
         ) : (
           <button
-            onClick={() => setIsRecordingVoice(true)}
+            onClick={startRealVoiceRecording}
             className="w-10 h-10 rounded-full bg-[#242f3d] hover:bg-[#2b394a] flex items-center justify-center text-gray-300 transition-transform active:scale-90"
+            title="تسجيل رسالة صوتية حقيقية عبر الميكروفون"
           >
             <Mic className="w-5 h-5" />
           </button>

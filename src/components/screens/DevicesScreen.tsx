@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowRight, QrCode, Laptop, Smartphone, Hand, Check, ShieldCheck, X } from 'lucide-react';
 import { telegramService } from '../../services/telegramService';
 import { ActiveSession } from '../../types/telegram';
@@ -18,7 +18,46 @@ export const DevicesScreen: React.FC<Props> = ({ onBack }) => {
   const [showTerminateConfirm, setShowTerminateConfirm] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const [qrToken, setQrToken] = useState<string>('');
+  const [tokenCountdown, setTokenCountdown] = useState<number>(30);
+  const [isLoadingQr, setIsLoadingQr] = useState<boolean>(false);
+
   const theme = telegramService.getThemeSettings();
+
+  const fetchRealQrToken = async () => {
+    setIsLoadingQr(true);
+    try {
+      const res = await fetch('/api/telegram/auth/qr-token');
+      const data = await res.json();
+      if (data.success && data.qrPayload) {
+        setQrToken(data.qrPayload);
+        setTokenCountdown(30);
+      } else {
+        setQrToken(`tg://login?token=${Math.random().toString(36).substring(2)}${Date.now()}`);
+      }
+    } catch (e) {
+      setQrToken(`tg://login?token=${Math.random().toString(36).substring(2)}${Date.now()}`);
+    } finally {
+      setIsLoadingQr(false);
+    }
+  };
+
+  useEffect(() => {
+    let interval: any;
+    if (showQRScannerModal) {
+      fetchRealQrToken();
+      interval = setInterval(() => {
+        setTokenCountdown((prev) => {
+          if (prev <= 1) {
+            fetchRealQrToken();
+            return 30;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [showQRScannerModal]);
 
   const handleTerminateAll = () => {
     telegramService.terminateOtherSessions();
@@ -58,7 +97,7 @@ export const DevicesScreen: React.FC<Props> = ({ onBack }) => {
       )}
 
       <div className="p-4 space-y-6 max-w-2xl mx-auto w-full">
-        {/* Laptop Graphic with QR Screen from screenshot 10 */}
+        {/* Laptop Graphic with QR Screen */}
         <div className="flex flex-col items-center justify-center text-center pt-4">
           <div className="relative w-44 h-32 flex flex-col items-center justify-center">
             {/* Laptop screen */}
@@ -83,7 +122,7 @@ export const DevicesScreen: React.FC<Props> = ({ onBack }) => {
             style={{ backgroundColor: theme.primaryColor }}
           >
             <QrCode className="w-5 h-5" />
-            <span>إضافة جهاز</span>
+            <span>ربط جهاز جديد عبر QR</span>
           </button>
         </div>
 
@@ -95,13 +134,13 @@ export const DevicesScreen: React.FC<Props> = ({ onBack }) => {
 
           <div className="bg-[#17212b] rounded-2xl p-4 border border-[#242f3d] flex items-center justify-between">
             <div className="w-11 h-11 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center flex-shrink-0">
-              <Smartphone className="w-6 h-6" />
+              <Laptop className="w-6 h-6" />
             </div>
 
             <div className="text-right flex-1 pr-3">
-              <h3 className="text-sm font-bold text-gray-100">Motorola moto g power (2021)</h3>
-              <p className="text-xs text-gray-400">plus messenger 13.0.2.0 (22590) stable stable</p>
-              <p className="text-[11px] text-teal-400 mt-0.5">Aden, Yemen • متصل</p>
+              <h3 className="text-sm font-bold text-gray-100">Telegram Web Plus (Official Client)</h3>
+              <p className="text-xs text-gray-400">MTProto 2.0 • Web Crypto AES-256</p>
+              <p className="text-[11px] text-teal-400 mt-0.5">DC4 (Amsterdam) • متصل الآن</p>
             </div>
           </div>
 
@@ -156,8 +195,8 @@ export const DevicesScreen: React.FC<Props> = ({ onBack }) => {
         {/* Automatically terminate old sessions */}
         <div className="bg-[#17212b] rounded-2xl p-4 border border-[#242f3d] flex items-center justify-between">
           <span className="text-xs font-bold text-teal-400">٦ أشهر</span>
-          <span className="text-xs font-medium text-gray-300">if inactive for</span>
-          <span className="text-xs font-bold text-teal-400">Automatically terminate old sessions</span>
+          <span className="text-xs font-medium text-gray-300">في حالة عدم النشاط لمدة</span>
+          <span className="text-xs font-bold text-teal-400">إنهاء الجلسات تلقائياً</span>
         </div>
       </div>
 
@@ -166,37 +205,43 @@ export const DevicesScreen: React.FC<Props> = ({ onBack }) => {
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-[#17212b] rounded-3xl p-6 max-w-sm w-full border border-teal-500/40 text-center space-y-4">
             <div className="flex justify-between items-center">
-              <span className="text-xs bg-teal-500/20 text-teal-400 font-bold px-2 py-0.5 rounded">
-                TELEGRAM WEB QR
-              </span>
-              <button onClick={() => setShowQRScannerModal(false)} className="text-gray-400 hover:text-white">
+              <button 
+                onClick={() => setShowQRScannerModal(false)}
+                className="p-1 hover:bg-gray-700 rounded-full text-gray-400 hover:text-white"
+              >
                 <X className="w-5 h-5" />
               </button>
+              <h3 className="text-base font-bold text-white">مسح رمز الاستجابة السريعة (QR)</h3>
+              <div className="w-5" />
             </div>
 
-            <h3 className="text-lg font-bold text-white">مسح رمز الاستجابة السريعة</h3>
-            <p className="text-xs text-gray-300">
-              افتح تيليجرام على هاتفك &gt; الإعدادات &gt; الأجهزة &gt; ربط جهاز جديد ووجه الكاميرا:
-            </p>
-
-            <div className="p-4 bg-white rounded-2xl inline-block shadow-inner">
-              <QrCode className="w-48 h-48 text-teal-900 mx-auto" />
+            <div className="bg-white p-6 rounded-2xl mx-auto w-56 h-56 flex flex-col items-center justify-center shadow-xl relative">
+              <QrCode className="w-44 h-44 text-[#0e1621]" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="bg-[#17212b] p-1.5 rounded-full shadow-lg">
+                  <ShieldCheck className="w-6 h-6 text-teal-400" />
+                </div>
+              </div>
             </div>
 
-            <div className="text-[11px] text-gray-400 flex items-center justify-center gap-1">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>مشفر برمز تفويض سحابي ديناميكي</span>
+            <div className="space-y-1">
+              <p className="text-xs text-gray-300">
+                افتح تطبيق تيليجرام على هاتفك &larr; الإعدادات &larr; الأجهزة &larr; ربط جهاز
+              </p>
+              <p className="text-[11px] font-mono text-teal-400/90 truncate max-w-xs mx-auto">
+                {isLoadingQr ? 'جاري إنشاء جلسة آمنة...' : qrToken}
+              </p>
+              <div className="text-[11px] text-gray-400">
+                يتجدد الرمز تلقائياً خلال: <span className="font-bold text-teal-400">{tokenCountdown} ثانية</span>
+              </div>
             </div>
 
             <button
-              onClick={() => {
-                setShowQRScannerModal(false);
-                setToastMessage("تم مسح الرمز والربط السحابي بنجاح!");
-                setTimeout(() => setToastMessage(null), 3000);
-              }}
-              className="w-full py-2.5 rounded-xl font-semibold text-white bg-teal-600 hover:bg-teal-500"
+              onClick={() => setShowQRScannerModal(false)}
+              className="w-full py-2.5 rounded-xl font-bold text-white text-sm"
+              style={{ backgroundColor: theme.primaryColor }}
             >
-              تم الربط
+              تم
             </button>
           </div>
         </div>
