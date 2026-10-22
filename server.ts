@@ -3182,17 +3182,32 @@ async function startServer() {
         if (existing && existing.client) {
           try {
             if (!existing.client.connected) {
-              const ok = await connectWithTimeout(existing.client, 2000);
-              if (!ok) return null;
+              const ok = await connectWithTimeout(existing.client, 3500);
+              if (!ok) return existing.client; // keep existing client for retry
             }
-            const isAuth = await existing.client.checkAuthorization().catch(() => false);
+            let explicitRevoke = false;
+            const isAuth = await existing.client.checkAuthorization().catch((e: any) => {
+              const msg = e?.message || e?.errorMessage || String(e);
+              if (
+                msg.includes('SESSION_REVOKED') ||
+                msg.includes('AUTH_KEY_UNREGISTERED') ||
+                msg.includes('SESSION_EXPIRED') ||
+                msg.includes('USER_DEACTIVATED')
+              ) {
+                explicitRevoke = true;
+              }
+              return false;
+            });
             if (isAuth) {
               return existing.client;
-            } else {
-              console.warn('[MTProto] Active phone session no longer authorized, triggering revocation.');
+            } else if (explicitRevoke) {
+              console.warn('[MTProto] Active phone session explicitly revoked by Telegram server.');
               await handleSessionRevocation(formatted, 'AUTH_KEY_UNREGISTERED');
               try { await existing.client.disconnect().catch(() => {}); } catch (_) {}
               realTelegramSessions.delete(formatted);
+            } else {
+              // Network hiccup or reconnecting: keep client in memory
+              return existing.client;
             }
           } catch (e: any) {
             console.warn('[MTProto] Active session reconnect notice:', e?.message || e);
@@ -3208,32 +3223,39 @@ async function startServer() {
         const cachedClient = authenticatedTelegramClients.get(cleanSessionStr)!;
         try {
           if (!cachedClient.connected) {
-            const ok = await connectWithTimeout(cachedClient, 2000);
+            const ok = await connectWithTimeout(cachedClient, 3500);
             if (!ok) {
-              authenticatedTelegramClients.delete(cleanSessionStr);
+              // Do NOT revoke or delete on transient connection delay
               sessionFailureCooldowns.set(cleanSessionStr, Date.now());
-              return null;
+              return cachedClient;
             }
           }
+          let explicitRevoke = false;
           const isAuth = await cachedClient.checkAuthorization().catch((e: any) => {
             const msg = e?.message || e?.errorMessage || String(e);
-            if (msg.includes('SESSION_REVOKED') || msg.includes('AUTH_KEY_UNREGISTERED') || msg.includes('401')) {
-              handleSessionRevocation(cleanSessionStr, 'AUTH_KEY_UNREGISTERED');
-              return false;
+            if (
+              msg.includes('SESSION_REVOKED') ||
+              msg.includes('AUTH_KEY_UNREGISTERED') ||
+              msg.includes('SESSION_EXPIRED') ||
+              msg.includes('USER_DEACTIVATED')
+            ) {
+              explicitRevoke = true;
             }
             return false;
           });
           if (isAuth) {
             return cachedClient;
-          } else {
-            console.warn('[MTProto] Cached client is no longer authorized (revoked or expired), clearing.');
+          } else if (explicitRevoke) {
+            console.warn('[MTProto] Cached client is explicitly revoked by Telegram MTProto, clearing.');
             await handleSessionRevocation(cleanSessionStr, 'AUTH_KEY_UNREGISTERED');
             try { await cachedClient.disconnect().catch(() => {}); } catch (_) {}
             authenticatedTelegramClients.delete(cleanSessionStr);
+          } else {
+            console.warn('[MTProto] Cached client checkAuthorization transient notice, keeping session.');
+            return cachedClient;
           }
         } catch (e: any) {
           console.warn('[MTProto] Cached client connect notice:', e?.message || e);
-          authenticatedTelegramClients.delete(cleanSessionStr);
         }
       }
 
@@ -3251,25 +3273,34 @@ async function startServer() {
           systemLangCode: 'ar',
         });
         configureTelegramClient(client, cleanSessionStr);
-        const ok = await connectWithTimeout(client, 3500);
+        const ok = await connectWithTimeout(client, 4000);
         if (ok) {
+          let explicitRevoke = false;
           const isAuth = await client.checkAuthorization().catch((e: any) => {
             const msg = e?.message || e?.errorMessage || String(e);
-            if (msg.includes('SESSION_REVOKED') || msg.includes('AUTH_KEY_UNREGISTERED')) {
-              handleSessionRevocation(cleanSessionStr, 'AUTH_KEY_UNREGISTERED');
+            if (
+              msg.includes('SESSION_REVOKED') ||
+              msg.includes('AUTH_KEY_UNREGISTERED') ||
+              msg.includes('SESSION_EXPIRED') ||
+              msg.includes('USER_DEACTIVATED')
+            ) {
+              explicitRevoke = true;
             }
             return false;
           });
           if (isAuth) {
             authenticatedTelegramClients.set(cleanSessionStr, client);
             return client;
-          } else {
-            console.warn('[MTProto] Fresh client unauthorized, triggering revocation.');
+          } else if (explicitRevoke) {
+            console.warn('[MTProto] Fresh client explicitly revoked by Telegram, triggering revocation.');
             await handleSessionRevocation(cleanSessionStr, 'AUTH_KEY_UNREGISTERED');
             try { await client.disconnect().catch(() => {}); } catch (_) {}
             authenticatedTelegramClients.delete(cleanSessionStr);
             sessionFailureCooldowns.set(cleanSessionStr, Date.now());
             return null;
+          } else {
+            authenticatedTelegramClients.set(cleanSessionStr, client);
+            return client;
           }
         }
       } catch (tcpErr: any) {
@@ -3287,29 +3318,37 @@ async function startServer() {
             systemLangCode: 'ar',
           });
           configureTelegramClient(client, cleanSessionStr);
-          const ok = await connectWithTimeout(client, 3500);
+          const ok = await connectWithTimeout(client, 4000);
           if (ok) {
+            let explicitRevoke = false;
             const isAuth = await client.checkAuthorization().catch((e: any) => {
               const msg = e?.message || e?.errorMessage || String(e);
-              if (msg.includes('SESSION_REVOKED') || msg.includes('AUTH_KEY_UNREGISTERED')) {
-                handleSessionRevocation(cleanSessionStr, 'AUTH_KEY_UNREGISTERED');
+              if (
+                msg.includes('SESSION_REVOKED') ||
+                msg.includes('AUTH_KEY_UNREGISTERED') ||
+                msg.includes('SESSION_EXPIRED') ||
+                msg.includes('USER_DEACTIVATED')
+              ) {
+                explicitRevoke = true;
               }
               return false;
             });
             if (isAuth) {
               authenticatedTelegramClients.set(cleanSessionStr, client);
               return client;
-            } else {
-              console.warn('[MTProto] Fresh WSS client unauthorized, triggering revocation.');
+            } else if (explicitRevoke) {
+              console.warn('[MTProto] Fresh WSS client explicitly revoked by Telegram, triggering revocation.');
               await handleSessionRevocation(cleanSessionStr, 'AUTH_KEY_UNREGISTERED');
               try { await client.disconnect().catch(() => {}); } catch (_) {}
               authenticatedTelegramClients.delete(cleanSessionStr);
               sessionFailureCooldowns.set(cleanSessionStr, Date.now());
               return null;
+            } else {
+              authenticatedTelegramClients.set(cleanSessionStr, client);
+              return client;
             }
           }
         } catch (wssErr: any) {
-          authenticatedTelegramClients.delete(cleanSessionStr);
           sessionFailureCooldowns.set(cleanSessionStr, Date.now());
         }
       }
@@ -3356,11 +3395,16 @@ async function startServer() {
 
     let me: any = null;
     try {
-      me = await withTimeout(client.getMe(), 3000, null);
+      me = await withTimeout(client.getMe(), 12000, null);
     } catch (meErr: any) {
       const errMsg = meErr?.message || meErr?.errorMessage || String(meErr);
       console.warn('[MTProto] getMe error:', errMsg);
-      if (errMsg.includes('SESSION_REVOKED') || errMsg.includes('AUTH_KEY_UNREGISTERED') || errMsg.includes('401')) {
+      if (
+        errMsg.includes('SESSION_REVOKED') ||
+        errMsg.includes('AUTH_KEY_UNREGISTERED') ||
+        errMsg.includes('SESSION_EXPIRED') ||
+        errMsg.includes('USER_DEACTIVATED')
+      ) {
         const err = new Error('SESSION_REVOKED');
         (err as any).code = 'SESSION_REVOKED';
         throw err;
@@ -3368,8 +3412,8 @@ async function startServer() {
       throw meErr;
     }
     if (!me) {
-      const err = new Error('AUTH_KEY_UNREGISTERED');
-      (err as any).code = 'AUTH_KEY_UNREGISTERED';
+      const err = new Error('TEMPORARY_NETWORK_TIMEOUT');
+      (err as any).code = 'TIMEOUT';
       throw err;
     }
     const myIdStr = String(me.id);
@@ -6647,35 +6691,48 @@ async function startServer() {
       const client = await getClientForSession(cleanSession, cleanPhone);
 
       if (!client || !client.connected) {
-        const revokeKey = cleanSession || (cleanPhone ? formatE164Phone(cleanPhone) : '');
-        if (revokeKey) {
-          await handleSessionRevocation(revokeKey, 'AUTH_KEY_UNREGISTERED');
-        }
-        return res.status(401).json({
-          valid: false,
-          revoked: true,
-          reason: 'AUTH_KEY_UNREGISTERED',
-          message: 'Unable to establish MTProto connection with provided auth_key (unregistered or invalid).',
+        console.log('[MTProto] Client is still connecting or reconnecting. Preserving session without revoking.');
+        return res.json({
+          valid: true,
+          isConnecting: true,
+          message: 'MTProto connection is establishing in background. Session preserved.',
         });
       }
 
       // Check authorization state directly on Telegram servers
+      let explicitRevocationReason: string | null = null;
       const isAuth = await client.checkAuthorization().catch((authErr: any) => {
         const msg = authErr?.message || authErr?.errorMessage || String(authErr);
-        console.warn('[MTProto] checkAuthorization failed during validation:', msg);
+        console.warn('[MTProto] checkAuthorization note during validation:', msg);
+        if (
+          msg.includes('AUTH_KEY_UNREGISTERED') ||
+          msg.includes('SESSION_REVOKED') ||
+          msg.includes('SESSION_EXPIRED') ||
+          msg.includes('USER_DEACTIVATED')
+        ) {
+          explicitRevocationReason = 'AUTH_KEY_UNREGISTERED';
+        }
         return false;
       });
 
       if (!isAuth) {
-        const revokeKey = cleanSession || (cleanPhone ? formatE164Phone(cleanPhone) : '');
-        if (revokeKey) {
-          await handleSessionRevocation(revokeKey, 'AUTH_KEY_UNREGISTERED');
+        if (explicitRevocationReason) {
+          const revokeKey = cleanSession || (cleanPhone ? formatE164Phone(cleanPhone) : '');
+          if (revokeKey) {
+            await handleSessionRevocation(revokeKey, 'AUTH_KEY_UNREGISTERED');
+          }
+          return res.status(401).json({
+            valid: false,
+            revoked: true,
+            reason: 'AUTH_KEY_UNREGISTERED',
+            message: 'The Telegram MTProto server explicitly rejected the authorization key (AUTH_KEY_UNREGISTERED).',
+          });
         }
-        return res.status(401).json({
-          valid: false,
-          revoked: true,
-          reason: 'AUTH_KEY_UNREGISTERED',
-          message: 'The Telegram MTProto server rejected the authorization key (AUTH_KEY_UNREGISTERED).',
+        // Non-fatal or transient network status, do NOT revoke
+        return res.json({
+          valid: true,
+          isConnecting: true,
+          message: 'MTProto authorization check pending or reconnecting. Session preserved.',
         });
       }
 
@@ -6685,7 +6742,12 @@ async function startServer() {
         me = await client.getMe();
       } catch (meErr: any) {
         const errMsg = meErr?.message || meErr?.errorMessage || String(meErr);
-        if (errMsg.includes('AUTH_KEY_UNREGISTERED') || errMsg.includes('SESSION_REVOKED') || errMsg.includes('401')) {
+        if (
+          errMsg.includes('AUTH_KEY_UNREGISTERED') ||
+          errMsg.includes('SESSION_REVOKED') ||
+          errMsg.includes('SESSION_EXPIRED') ||
+          errMsg.includes('USER_DEACTIVATED')
+        ) {
           const revokeKey = cleanSession || (cleanPhone ? formatE164Phone(cleanPhone) : '');
           if (revokeKey) {
             await handleSessionRevocation(revokeKey, 'AUTH_KEY_UNREGISTERED');

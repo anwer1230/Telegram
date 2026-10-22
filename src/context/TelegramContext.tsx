@@ -1007,10 +1007,21 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [activeChatId]);
 
   const [isSessionValidating, setIsSessionValidating] = useState<boolean>(false);
+  const isPurgingSessionRef = useRef<boolean>(false);
+  const recentToastsRef = useRef<Map<string, number>>(new Map());
 
   // Complete cleanup on auth_key revocation to prevent background automation stalls
   const performSessionPurge = (reason: string = 'AUTH_KEY_UNREGISTERED') => {
-    console.warn(`[TelegramContext] Performing full session purge due to ${reason}`);
+    if (isPurgingSessionRef.current) {
+      console.log('[TelegramContext] Session purge already executed, skipping re-entrant call.');
+      return;
+    }
+    isPurgingSessionRef.current = true;
+    setTimeout(() => {
+      isPurgingSessionRef.current = false;
+    }, 6000);
+
+    console.warn(`[TelegramContext] Performing single unified session purge due to ${reason}`);
     
     // Stop any active flood retry timers to prevent infinite reconnect loops
     if (floodRetryTimerRef.current) {
@@ -1057,17 +1068,14 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.warn('[TelegramContext] Background services cleanup note:', svcErr);
     }
 
-    // 3. Dispatch global window event and notification center event
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('telegram:session_revoked', { detail: { reason } }));
-    }
+    // 3. Dispatch Notification Center event safely (without circular DOM event loop)
     CoreNotificationCenter.getGlobalInstance().postNotificationName(
       CoreNotificationCenter.appDidLogout,
       0,
       reason
     );
 
-    // Display required user notification
+    // Display ONE single clean notification to the user
     showToast(
       settings.language === 'ar'
         ? 'انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى'
@@ -1110,8 +1118,8 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         accountId: activeAccountId,
       });
 
-      // Crucial: If server signals AUTH_KEY_UNREGISTERED or session revocation, purge immediately
-      if (checkResult.revoked || (!checkResult.valid && checkResult.reason === 'AUTH_KEY_UNREGISTERED')) {
+      // Crucial: Only purge if server explicitly revoked or confirmed AUTH_KEY_UNREGISTERED
+      if (checkResult.revoked === true && checkResult.reason === 'AUTH_KEY_UNREGISTERED') {
         console.warn('[SessionValidator] MTProto server confirmed session revocation / AUTH_KEY_UNREGISTERED.');
         logTelemetry({
           type: 'sync_error',
@@ -1120,12 +1128,6 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           details: { action: 'validateSessionProactively' },
         });
         performSessionPurge('AUTH_KEY_UNREGISTERED');
-        showToast(
-          settings.language === 'ar'
-            ? 'انتهت صلاحية الجلسة أو تم إلغاء مفتاح المصادقة (AUTH_KEY_UNREGISTERED). تم إيقاف الخدمات التلقائية وتسجيل الخروج بأمان.'
-            : 'Session was revoked on server (AUTH_KEY_UNREGISTERED). Background services halted safely.',
-          '⚠️'
-        );
         return false;
       }
 
@@ -1384,21 +1386,19 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             SecureSessionStorage.removeItem('tg_user');
             SecureSessionStorage.removeItem('tg_phone');
           } catch {}
-          showToast(
-            settings.language === 'ar'
-              ? 'تم إلغاء الجلسة عن بُعد أو تسجيل الخروج'
-              : 'Session was revoked remotely or logged out',
-            '🔒'
-          );
+          if (!isPurgingSessionRef.current) {
+            showToast(
+              settings.language === 'ar'
+                ? 'تم إلغاء الجلسة عن بُعد أو تسجيل الخروج'
+                : 'Session was revoked remotely or logged out',
+              '🔒'
+            );
+          }
         }
       },
     };
 
     CoreNotificationCenter.getGlobalInstance().addObserver(
-      handleLogoutNotification,
-      CoreNotificationCenter.appDidLogout
-    );
-    CoreNotificationCenter.getInstance(0).addObserver(
       handleLogoutNotification,
       CoreNotificationCenter.appDidLogout
     );
@@ -1409,10 +1409,6 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         CoreNotificationCenter.dialogsNeedReload
       );
       CoreNotificationCenter.getGlobalInstance().removeObserver(
-        handleLogoutNotification,
-        CoreNotificationCenter.appDidLogout
-      );
-      CoreNotificationCenter.getInstance(0).removeObserver(
         handleLogoutNotification,
         CoreNotificationCenter.appDidLogout
       );
@@ -2241,13 +2237,40 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [chats]);
 
-  // Toast Helper
+  // Toast Helper with Strict Deduplication & Overflow Protection
   const showToast = (text: string, icon?: string) => {
-    const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    setToasts((prev) => [...prev, { id, text, icon }]);
+    if (!text) return;
+    const cleanText = text.trim();
+    const now = Date.now();
+    const lastShown = recentToastsRef.current.get(cleanText) || 0;
+
+    // Suppress duplicate toasts shown within 4000ms
+    if (now - lastShown < 4000) {
+      return;
+    }
+    recentToastsRef.current.set(cleanText, now);
+
+    // Garbage-collect old toast timestamps
+    if (recentToastsRef.current.size > 50) {
+      for (const [k, ts] of recentToastsRef.current.entries()) {
+        if (now - ts > 10000) recentToastsRef.current.delete(k);
+      }
+    }
+
+    const id = `toast_${now}_${Math.random().toString(36).substring(2, 6)}`;
+    setToasts((prev) => {
+      // Don't append if already in current queue
+      if (prev.some((t) => t.text === cleanText)) {
+        return prev;
+      }
+      // Keep at most 2 items
+      const trimmed = prev.slice(-1);
+      return [...trimmed, { id, text: cleanText, icon }];
+    });
+
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 2800);
+    }, 3200);
   };
 
   // Close context menus on global click

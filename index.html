@@ -108,22 +108,11 @@
             }
           }
 
-          // Immediately purge any stale mock stories or fake accounts left in browser storage
+          // Stale mock stories cleanup (safe)
           try {
             var stories = localStorage.getItem('tg_user_stories_v1');
             if (stories && (stories.includes('st_tg_news') || stories.includes('st_durov') || stories.includes('st_ton_web3') || stories.includes('user_tg_news'))) {
               localStorage.removeItem('tg_user_stories_v1');
-            }
-            var accs = localStorage.getItem('tg_multi_accounts_v3') || localStorage.getItem('tg_accounts');
-            var uConfig0 = localStorage.getItem('tg_user_config_0');
-            var hasSession = !!localStorage.getItem('tg_session_string');
-            if ((accs && (accs.includes('anwer_dev') || accs.includes('أنور فؤاد') || accs.includes('user_anwer_main') || !hasSession)) ||
-                (uConfig0 && (uConfig0.includes('anwer_dev') || uConfig0.includes('أنور فؤاد') || !hasSession))) {
-              localStorage.removeItem('tg_multi_accounts_v3');
-              localStorage.removeItem('tg_accounts');
-              localStorage.removeItem('tg_user_config_0');
-              localStorage.removeItem('tg_auth_session_active');
-              localStorage.removeItem('tg_active_account_id_v3');
             }
           } catch(e) {}
         } catch(err) {

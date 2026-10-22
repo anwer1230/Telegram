@@ -67,18 +67,9 @@ export class UserConfig {
       if (!u) return false;
       const isMock =
         !u.id ||
-        u.id === 'user_anwer_main' ||
-        u.id === 'user_primary' ||
-        u.id === 'user_self' ||
-        u.id.startsWith('mock_') ||
-        u.username === 'anwer_dev' ||
-        u.name === 'أنور فؤاد' ||
-        u.phone === '+967 770 123 456' ||
-        u.phone === '+967770123456' ||
-        u.phone === '0000000000' ||
-        u.phone?.startsWith('+999') ||
-        u.phone?.includes('test') ||
-        (u as any).isDummy === true;
+        (u as any).isDummy === true ||
+        u.id === 'mock_dummy_user' ||
+        u.id === 'test_mock_placeholder';
       const hasSession = !!(a.sessionString || hasGlobalSession);
       return !isMock && a.isActive !== false && hasSession;
     });
@@ -147,18 +138,9 @@ export class UserConfig {
               if (!u) return false;
               const isMock =
                 !u.id ||
-                u.id === 'user_anwer_main' ||
-                u.id === 'user_primary' ||
-                u.id === 'user_self' ||
-                u.id.startsWith('mock_') ||
-                u.username === 'anwer_dev' ||
-                u.name === 'أنور فؤاد' ||
-                u.phone === '+967 770 123 456' ||
-                u.phone === '+967770123456' ||
-                u.phone === '0000000000' ||
-                u.phone?.startsWith('+999') ||
-                u.phone?.includes('test') ||
-                (u as any).isDummy === true;
+                (u as any).isDummy === true ||
+                u.id === 'mock_dummy_user' ||
+                u.id === 'test_mock_placeholder';
               return !isMock;
             })
             .slice(0, this.MAX_ACCOUNT_COUNT);

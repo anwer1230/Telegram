@@ -89,24 +89,9 @@ export class UserConfig {
   public static isMockUser(user: User | null | undefined): boolean {
     if (!user) return true;
     const id = String(user.id || '');
-    const phone = String(user.phone || '').replace(/\s+/g, '');
-    const username = String(user.username || '').toLowerCase();
-    const name = String(user.name || '');
-
-    return (
-      !id ||
-      id === 'user_anwer_main' ||
-      id === 'user_primary' ||
-      id === 'user_self' ||
-      id.startsWith('mock_') ||
-      username === 'anwer_dev' ||
-      name === 'أنور فؤاد' ||
-      phone === '+967770123456' ||
-      phone === '0000000000' ||
-      phone.startsWith('+999') ||
-      phone.includes('test') ||
-      (user as any).isDummy === true
-    );
+    if ((user as any).isDummy === true) return true;
+    if (id === 'mock_dummy_user' || id === 'test_mock_placeholder') return true;
+    return !id;
   }
 
   /**
