@@ -1025,9 +1025,17 @@ const SettingsListItem: React.FC<{
   rightBadge?: React.ReactNode;
 }> = ({ icon, iconBg, title, subtitle, onClick, rightBadge }) => {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors text-left rtl:text-right"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors text-left rtl:text-right cursor-pointer select-none focus:outline-none"
     >
       <div className="flex items-center gap-3.5 min-w-0">
         <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${iconBg}`}>
@@ -1039,8 +1047,8 @@ const SettingsListItem: React.FC<{
         </div>
       </div>
 
-      {rightBadge && <div>{rightBadge}</div>}
-    </button>
+      {rightBadge && <div className="shrink-0">{rightBadge}</div>}
+    </div>
   );
 };
 
