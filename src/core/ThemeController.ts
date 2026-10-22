@@ -179,6 +179,7 @@ export class ThemeController {
 
   /**
    * Calculates merged bubble border radius classes based on grouping flags
+   * Replicated from Telegram Web K & Z styling standards
    */
   public getBubbleRadiusStyle(isOutgoing: boolean, group: {
     isGroupStart?: boolean;
@@ -188,21 +189,28 @@ export class ThemeController {
   }): string {
     const r = `${this.metrics.bubbleRadius}px`;
     const smR = '4px';
+    const tailR = '2px';
 
     if (group.isSingle) {
-      return `${r}`;
+      if (isOutgoing) {
+        return `${r} ${r} ${tailR} ${r}`;
+      } else {
+        return `${r} ${r} ${r} ${tailR}`;
+      }
     }
 
     if (isOutgoing) {
       // Outgoing message (right aligned)
+      // CSS border-radius: top-left top-right bottom-right bottom-left
       if (group.isGroupStart) return `${r} ${r} ${smR} ${r}`;
       if (group.isGroupMiddle) return `${r} ${smR} ${smR} ${r}`;
-      if (group.isGroupEnd) return `${r} ${smR} ${r} ${r}`;
+      if (group.isGroupEnd) return `${r} ${smR} ${tailR} ${r}`;
     } else {
       // Incoming message (left aligned)
+      // CSS border-radius: top-left top-right bottom-right bottom-left
       if (group.isGroupStart) return `${r} ${r} ${r} ${smR}`;
       if (group.isGroupMiddle) return `${smR} ${r} ${r} ${smR}`;
-      if (group.isGroupEnd) return `${smR} ${r} ${r} ${r}`;
+      if (group.isGroupEnd) return `${smR} ${r} ${r} ${tailR}`;
     }
 
     return `${r}`;

@@ -499,16 +499,34 @@ export class MessagesController {
   ): GroupedMessageItem[] {
     if (!messages || messages.length === 0) return [];
 
-    const sorted = [...messages].sort((a, b) => {
+    // 1. Deduplicate by unique message id
+    const uniqueMap = new Map<string, Message>();
+    for (const m of messages) {
+      if (!m || m.id === undefined || m.id === null) continue;
+      const key = String(m.id);
+      const existing = uniqueMap.get(key);
+      if (!existing) {
+        uniqueMap.set(key, m);
+      } else {
+        uniqueMap.set(key, { ...existing, ...m });
+      }
+    }
+
+    // 2. Sort ascending strictly chronologically and by numeric ID
+    const sorted = Array.from(uniqueMap.values()).sort((a, b) => {
       const epochA = this.getMessageEpoch(a);
       const epochB = this.getMessageEpoch(b);
       if (epochA !== epochB) return epochA - epochB;
-      return (a.id || '').localeCompare(b.id || '');
+      const numA = Number(String(a.id).replace(/\D/g, '')) || 0;
+      const numB = Number(String(b.id).replace(/\D/g, '')) || 0;
+      if (numA !== numB) return numA - numB;
+      return String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true });
     });
 
     const result: GroupedMessageItem[] = [];
     let lastDateStr = '';
     let hasInsertedUnread = false;
+    const numReadMaxId = readInboxMaxId ? (Number(String(readInboxMaxId).replace(/\D/g, '')) || 0) : 0;
 
     for (let i = 0; i < sorted.length; i++) {
       const msg = sorted[i];
@@ -517,7 +535,8 @@ export class MessagesController {
 
       const msgEpoch = this.getMessageEpoch(msg);
       const dateStr = this.formatDateDivider(new Date(msgEpoch > 0 ? msgEpoch : Date.now()));
-      if (dateStr !== lastDateStr) {
+      const dateChanged = dateStr !== lastDateStr;
+      if (dateChanged) {
         result.push({
           type: 'date_divider',
           id: `divider_date_${dateStr}_${msg.id}`,
@@ -526,11 +545,13 @@ export class MessagesController {
         lastDateStr = dateStr;
       }
 
+      const numMsgId = Number(String(msg.id).replace(/\D/g, '')) || 0;
+      let insertedUnreadNow = false;
       if (
         readInboxMaxId &&
         !hasInsertedUnread &&
         !msg.isOutgoing &&
-        msg.id > readInboxMaxId
+        (numReadMaxId > 0 ? numMsgId > numReadMaxId : String(msg.id) > String(readInboxMaxId))
       ) {
         result.push({
           type: 'unread_divider',
@@ -538,25 +559,48 @@ export class MessagesController {
           dateText: 'رسائل غير مقروءة',
         });
         hasInsertedUnread = true;
+        insertedUnreadNow = true;
       }
 
       const epochMsg = this.getMessageEpoch(msg);
       const epochPrev = prevMsg ? this.getMessageEpoch(prevMsg) : 0;
       const epochNext = nextMsg ? this.getMessageEpoch(nextMsg) : 0;
 
+      // Check if next message will trigger an unread divider
+      let nextWillHaveUnreadDivider = false;
+      if (
+        nextMsg &&
+        readInboxMaxId &&
+        !hasInsertedUnread &&
+        !nextMsg.isOutgoing
+      ) {
+        const numNextId = Number(String(nextMsg.id).replace(/\D/g, '')) || 0;
+        if (numReadMaxId > 0 ? numNextId > numReadMaxId : String(nextMsg.id) > String(readInboxMaxId)) {
+          nextWillHaveUnreadDivider = true;
+        }
+      }
+
+      // Check if next message will trigger a date divider
+      const nextDateStr = nextMsg ? this.formatDateDivider(new Date(epochNext > 0 ? epochNext : Date.now())) : '';
+      const nextDateChanged = nextMsg ? nextDateStr !== dateStr : true;
+
+      // Grouping rules replicated from official Telegram Web K & Z:
+      // Cluster consecutive messages from same sender within 300 seconds (5 mins) without date or unread breaks
       const samePrev =
-        prevMsg &&
-        prevMsg.senderId === msg.senderId &&
-        prevMsg.isOutgoing === msg.isOutgoing &&
-        Math.abs(epochMsg - epochPrev) < 300000 &&
-        (prevMsg.date || dateStr) === dateStr;
+        !dateChanged &&
+        !insertedUnreadNow &&
+        prevMsg !== null &&
+        Boolean(prevMsg.isOutgoing) === Boolean(msg.isOutgoing) &&
+        (prevMsg.isOutgoing || String(prevMsg.senderId || prevMsg.senderName) === String(msg.senderId || msg.senderName)) &&
+        Math.abs(epochMsg - epochPrev) < 300000;
 
       const sameNext =
-        nextMsg &&
-        nextMsg.senderId === msg.senderId &&
-        nextMsg.isOutgoing === msg.isOutgoing &&
-        Math.abs(epochNext - epochMsg) < 300000 &&
-        (nextMsg.date || dateStr) === dateStr;
+        !nextDateChanged &&
+        !nextWillHaveUnreadDivider &&
+        nextMsg !== null &&
+        Boolean(nextMsg.isOutgoing) === Boolean(msg.isOutgoing) &&
+        (nextMsg.isOutgoing || String(nextMsg.senderId || nextMsg.senderName) === String(msg.senderId || msg.senderName)) &&
+        Math.abs(epochNext - epochMsg) < 300000;
 
       let isGroupStart = false;
       let isGroupMiddle = false;
@@ -575,7 +619,7 @@ export class MessagesController {
 
       result.push({
         type: 'message',
-        id: msg.id,
+        id: String(msg.id),
         message: msg,
         isGroupStart,
         isGroupMiddle,

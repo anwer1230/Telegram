@@ -501,7 +501,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
             {isEndMessage && !isStandaloneSticker && !isStandaloneBigEmoji && (
               isOutgoing ? (
                 <svg
-                  className={`absolute -bottom-[0.5px] ${isArabic ? '-left-[7px] scale-x-[-1]' : '-right-[7px]'} w-[9px] h-[16px] pointer-events-none z-0`}
+                  className="absolute -bottom-[0.5px] -right-[7px] w-[9px] h-[16px] pointer-events-none z-0"
                   viewBox="0 0 9 16"
                   aria-hidden="true"
                 >
@@ -512,7 +512,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
                 </svg>
               ) : (
                 <svg
-                  className={`absolute -bottom-[0.5px] ${isArabic ? '-right-[7px] scale-x-[-1]' : '-left-[7px]'} w-[9px] h-[16px] pointer-events-none z-0`}
+                  className="absolute -bottom-[0.5px] -left-[7px] w-[9px] h-[16px] pointer-events-none z-0"
                   viewBox="0 0 9 16"
                   aria-hidden="true"
                 >

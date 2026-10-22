@@ -4869,9 +4869,15 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           };
         }
 
-        const merged = [...existing, { ...msg, isOutgoing: isOut, chatId: targetChatId }].sort(
-          (a, b) => getTelegramEpoch(a) - getTelegramEpoch(b)
-        );
+        const merged = [...existing, { ...msg, isOutgoing: isOut, chatId: targetChatId }].sort((a, b) => {
+          const epochA = getTelegramEpoch(a);
+          const epochB = getTelegramEpoch(b);
+          if (epochA !== epochB) return epochA - epochB;
+          const numA = Number(String(a.id).replace(/\D/g, '')) || 0;
+          const numB = Number(String(b.id).replace(/\D/g, '')) || 0;
+          if (numA !== numB) return numA - numB;
+          return String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true });
+        });
 
         return {
           ...prev,

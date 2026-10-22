@@ -192,7 +192,7 @@ const MessageRow = React.memo(({
           className="px-2 sm:px-4 py-0.5 w-full"
         >
           <div
-            id={`msg-bubble-container-${msg.id}`}
+            id={`msg-row-container-${msg.id}`}
             className={`transition-all duration-300 rounded-2xl w-full ${
               highlightedMessageId === msg.id
                 ? 'ring-2 ring-amber-400 bg-amber-500/20 p-1 shadow-lg shadow-amber-500/20 animate-pulse'
@@ -777,7 +777,9 @@ export const MessageList: React.FC<MessageListProps> = ({
         setHighlightedMessageId(targetMsgId);
 
         setTimeout(() => {
-          const el = document.getElementById(`msg-bubble-container-${targetMsgId}`);
+          const el =
+            document.getElementById(`msg-bubble-container-${targetMsgId}`) ||
+            document.getElementById(`msg-row-container-${targetMsgId}`);
           if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
