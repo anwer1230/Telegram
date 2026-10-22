@@ -11,9 +11,12 @@ import {
   ChatFolder, GeneralWebSettings
 } from '../types/telegram';
 import { cryptoService } from './cryptoService';
+import { indexedDbService } from './indexedDbService';
+import { notificationService } from './notificationService';
 
 const STORAGE_KEYS = {
   MASTER_REGISTRY: 'tg_accounts_master_registry_v1',
+  PTS_CURSOR: 'tg_pts_cursor_v1',
   CURRENT_USER: 'tg_current_user_v2',
   ACCOUNTS: 'tg_accounts_v2',
   CHATS: 'tg_chats_v2',
@@ -331,10 +334,59 @@ class TelegramService {
     }
   }
 
+  private currentPts = 1000;
+
+  // استدراك الفارق السحابي الفعلي (MTProto updates.getDifference)
+  async syncDifference(): Promise<void> {
+    try {
+      const res = await fetch('/api/telegram/updates/difference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pts: this.currentPts })
+      });
+      const data = await res.json();
+      if (data.success && data.pts) {
+        this.currentPts = data.pts;
+        localStorage.setItem(STORAGE_KEYS.PTS_CURSOR, String(this.currentPts));
+        indexedDbService.savePtsCursor('main_pts', this.currentPts);
+
+        if (data.new_messages && data.new_messages.length > 0) {
+          const raw = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+          const all = raw ? JSON.parse(raw) : DEFAULT_MESSAGES;
+          let hasChanges = false;
+
+          data.new_messages.forEach((msg: ChatMessage) => {
+            if (msg.chatId && !all[msg.chatId]?.some((m: ChatMessage) => m.id === msg.id)) {
+              if (!all[msg.chatId]) all[msg.chatId] = [];
+              all[msg.chatId].push(msg);
+              hasChanges = true;
+
+              notificationService.showNotification(
+                msg.senderName || 'رسالة تيليجرام جديدة',
+                msg.text || 'وسائط مرفقة',
+                undefined,
+                msg.chatId
+              );
+            }
+          });
+
+          if (hasChanges) {
+            localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(all));
+            this.notify();
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
   // عامل النبض السحابي الدائم لمنع فقدان الجلسات أو الخروج العشوائي
   private startKeepAliveWorker() {
     if (typeof window === 'undefined') return;
     if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
+
+    // استرجاع مؤشر pts المحفوظ
+    const savedPts = localStorage.getItem(STORAGE_KEYS.PTS_CURSOR);
+    if (savedPts) this.currentPts = Number(savedPts) || 1000;
 
     this.keepAliveTimer = setInterval(async () => {
       try {
@@ -342,6 +394,7 @@ class TelegramService {
         const data = await res.json();
         if (data.isAlive) {
           this.isConnectedToCloud = true;
+          await this.syncDifference();
         }
       } catch (e) {
         // الاتصال غير متوفر مؤقتاً، لا تقم بتسجيل الخروج إطلاقاً
@@ -358,7 +411,16 @@ class TelegramService {
   }
 
   private notify() {
+    this.updateBadgeCount();
     this.listeners.forEach(l => l());
+  }
+
+  private updateBadgeCount() {
+    try {
+      const accounts = this.getAccounts();
+      const totalUnread = accounts.reduce((acc, a) => acc + (a.unreadTotal || 0), 0);
+      notificationService.updateAppBadge(totalUnread);
+    } catch (e) {}
   }
 
   // --- حسابات المستخدمين وإدارتها ---
@@ -397,6 +459,7 @@ class TelegramService {
     const accounts = this.getAccounts().map(a => a.id === current.id ? updated : a);
     localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
     localStorage.setItem(STORAGE_KEYS.MASTER_REGISTRY, JSON.stringify(accounts));
+    indexedDbService.saveAccount(updated);
 
     this.notify();
     return updated;
@@ -417,6 +480,7 @@ class TelegramService {
     accounts.push(created);
     localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
     localStorage.setItem(STORAGE_KEYS.MASTER_REGISTRY, JSON.stringify(accounts));
+    indexedDbService.saveAccount(created);
     this.notify();
     return created;
   }
@@ -429,6 +493,7 @@ class TelegramService {
     const filtered = accounts.filter(a => a.id !== userId);
     localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(filtered));
     localStorage.setItem(STORAGE_KEYS.MASTER_REGISTRY, JSON.stringify(filtered));
+    indexedDbService.deleteAccount(userId);
     const current = this.getCurrentUser();
     if (current.id === userId) {
       filtered[0].isActive = true;

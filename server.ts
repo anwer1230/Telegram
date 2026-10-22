@@ -257,9 +257,56 @@ async function startServer() {
     });
   });
 
+  // نظام مؤشرات المزامنة السحابية الدقيقة (MTProto Difference & PTS Cursor)
+  let cloudPtsCounter = 1000;
+  let cloudQtsCounter = 500;
+  let cloudSeqCounter = 1;
+  const cloudMessageUpdates: any[] = [];
+
+  // مسار الحصول على حالة التزامن السحابي (updates.getState)
+  app.get('/api/telegram/updates/state', (req: Request, res: Response) => {
+    res.json({
+      success: true,
+      pts: cloudPtsCounter,
+      qts: cloudQtsCounter,
+      date: Math.floor(Date.now() / 1000),
+      seq: cloudSeqCounter
+    });
+  });
+
+  // مسار استدراك الفارق السحابي عند انقطاع الاتصال (updates.getDifference)
+  app.post('/api/telegram/updates/difference', (req: Request, res: Response) => {
+    const { pts } = req.body;
+    const clientPts = Number(pts) || 0;
+    const newUpdates = cloudMessageUpdates.filter(u => u.pts > clientPts);
+
+    res.json({
+      success: true,
+      is_slice: false,
+      pts: cloudPtsCounter,
+      date: Math.floor(Date.now() / 1000),
+      seq: cloudSeqCounter,
+      new_messages: newUpdates.map(u => u.message),
+      other_updates: []
+    });
+  });
+
   // 6. مسار تخزين ومزامنة الرسائل مع سحابة تيليجرام المشفرة
   app.post('/api/telegram/messages/sync', (req: Request, res: Response) => {
-    const { messages, chatId, userId } = req.body;
+    const { messages, chatId, userId, message } = req.body;
+    cloudPtsCounter += 1;
+    cloudSeqCounter += 1;
+
+    if (message) {
+      cloudMessageUpdates.push({
+        pts: cloudPtsCounter,
+        chatId,
+        message
+      });
+      // الاحتفاظ بآخر 200 رسالة فارقة
+      if (cloudMessageUpdates.length > 200) cloudMessageUpdates.shift();
+    }
+
     // التحقق من سلامة البيانات
     const checksum = crypto.createHash('sha256').update(JSON.stringify(messages || '')).digest('hex');
 
@@ -268,6 +315,7 @@ async function startServer() {
       syncedCount: Array.isArray(messages) ? messages.length : 1,
       chatId,
       userId,
+      pts: cloudPtsCounter,
       checksum,
       syncedAt: new Date().toISOString()
     });

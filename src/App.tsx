@@ -30,6 +30,7 @@ import { NewGroupModal } from './components/modals/NewGroupModal';
 import { NewChannelModal } from './components/modals/NewChannelModal';
 import { ContactsModal } from './components/modals/ContactsModal';
 import { hapticFeedback } from './utils/haptics';
+import { notificationService, InAppToast } from './services/notificationService';
 
 type CurrentView = 
   | 'chat' 
@@ -63,17 +64,38 @@ export default function App() {
   const [isNewGroupOpen, setIsNewGroupOpen] = useState(false);
   const [isNewChannelOpen, setIsNewChannelOpen] = useState(false);
   const [isContactsOpen, setIsContactsOpen] = useState(false);
+  const [activeToast, setActiveToast] = useState<InAppToast | null>(null);
 
   useEffect(() => {
     // Initial theme styling setup
     const theme = telegramService.getThemeSettings();
     telegramService.saveThemeSettings(theme);
 
+    // طلب إذن الإشعارات السحابية رسمياً
+    notificationService.requestPermission();
+
     const unsubscribe = telegramService.subscribe(() => {
       setCurrentUser(telegramService.getCurrentUser());
       setChats(telegramService.getChats());
     });
-    return () => unsubscribe();
+
+    const unsubToast = notificationService.subscribeInAppToasts((toast) => {
+      setActiveToast(toast);
+      setTimeout(() => setActiveToast(null), 4500);
+    });
+
+    const handleCustomOpenChat = (e: any) => {
+      if (e.detail?.chatId) {
+        handleSelectChatById(e.detail.chatId);
+      }
+    };
+    window.addEventListener('tg:open-chat', handleCustomOpenChat);
+
+    return () => {
+      unsubscribe();
+      unsubToast();
+      window.removeEventListener('tg:open-chat', handleCustomOpenChat);
+    };
   }, []);
 
   // التعامل الفعلي مع أزرار الجوال (زر الرجوع في نظام أندرويد والمتصفحات)
@@ -159,7 +181,34 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#0e1621] text-white" dir="rtl">
+    <div className="flex h-screen w-screen overflow-hidden bg-[#0e1621] text-white relative" dir="rtl">
+      {/* Floating In-App Telegram Toast Notification */}
+      {activeToast && (
+        <div 
+          onClick={() => {
+            handleSelectChatById(activeToast.chatId);
+            setActiveToast(null);
+          }}
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#17212b] border border-teal-500/50 shadow-2xl rounded-2xl p-3 pr-4 flex items-center gap-3 cursor-pointer hover:bg-[#1f2b38] transition-all max-w-sm w-[92vw] animate-fade-in backdrop-blur-md"
+        >
+          <img 
+            src={activeToast.senderAvatar || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100'} 
+            alt={activeToast.senderName} 
+            className="w-10 h-10 rounded-full object-cover border border-teal-400 flex-shrink-0"
+          />
+          <div className="flex-1 min-w-0 text-right">
+            <span className="text-xs font-bold text-teal-300 block truncate">{activeToast.senderName}</span>
+            <span className="text-xs text-gray-300 truncate block">{activeToast.text}</span>
+          </div>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setActiveToast(null); }}
+            className="p-1 hover:bg-white/10 rounded-full text-gray-400 hover:text-white flex-shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Navigation Drawer matching Screenshot 1 */}
       <NavigationDrawer
         isOpen={isDrawerOpen}
