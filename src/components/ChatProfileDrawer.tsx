@@ -51,41 +51,42 @@ export const ChatProfileDrawer: React.FC<Props> = ({
     setIsMuted(newState);
   };
 
-  // Mock members for group/channel
-  const membersList = [
-    { id: 'm1', name: 'أنت (مالك المجموعة)', role: 'owner', isOnline: true, avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' },
-    { id: 'm2', name: 'Telegram Service Bot', role: 'admin', isOnline: true, avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100' },
-    { id: 'm3', name: 'مهندس السحابة MTProto', role: 'admin', isOnline: true, avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100' },
-    { id: 'm4', name: 'عبدالله السعدي', role: 'member', isOnline: false, avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100' },
-    { id: 'm5', name: 'سارة الأحمد', role: 'member', isOnline: true, avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' },
-    { id: 'm6', name: 'فهد التميمي', role: 'member', isOnline: false, avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100' },
+  // استخراج الوسائط والملفات والروابط الحقيقية من رسائل المحادثة الفعلية
+  const chatMessages = telegramService.getMessages(chat.id);
+  const actualMedia = chatMessages
+    .filter(m => m.mediaType === 'photo' && m.mediaUrl)
+    .map(m => m.mediaUrl as string);
+
+  const actualFiles = chatMessages
+    .filter(m => m.mediaType === 'file')
+    .map(m => ({
+      name: m.mediaName || 'ملف مرفق',
+      size: m.mediaSize || '1.2 MB',
+      date: m.timestamp
+    }));
+
+  const actualLinks = chatMessages
+    .filter(m => m.text && (m.text.includes('http://') || m.text.includes('https://')))
+    .map(m => {
+      const match = m.text.match(/(https?:\/\/[^\s]+)/g);
+      return match ? { url: match[0], title: match[0].replace(/https?:\/\//, '').split('/')[0], date: m.timestamp } : null;
+    })
+    .filter(Boolean) as { url: string; title: string; date: string }[];
+
+  const currentUser = telegramService.getCurrentUser();
+  const actualMembers = [
+    {
+      id: currentUser.id,
+      name: currentUser.name || `${currentUser.firstName} ${currentUser.lastName || ''}`.trim(),
+      role: 'owner',
+      isOnline: true,
+      avatar: currentUser.avatar
+    }
   ];
 
-  const filteredMembers = membersList.filter(m => 
+  const filteredMembers = actualMembers.filter(m => 
     m.name.toLowerCase().includes(memberSearch.toLowerCase())
   );
-
-  // Mock media files for Shared Media Tabs
-  const mockMedia = [
-    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=300',
-    'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=300',
-    'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=300',
-    'https://images.unsplash.com/photo-1614680376593-902f749f7ffc?w=300',
-    'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=300',
-    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300',
-  ];
-
-  const mockFiles = [
-    { name: 'MTProto_Client_Configuration.json', size: '24.5 KB', date: '21 أكتوبر 2026' },
-    { name: 'telegram_api_keys_34773007.pem', size: '4.2 KB', date: '20 أكتوبر 2026' },
-    { name: 'Render_Deployment_Guide.pdf', size: '1.2 MB', date: '19 أكتوبر 2026' },
-  ];
-
-  const mockLinks = [
-    { title: 'مستودع تيليجرام الرسمي', url: 'https://github.com/anwer1230/Telegram', date: 'أمس' },
-    { title: 'بوابة مطوري تيليجرام الرسمية', url: 'https://core.telegram.org/api', date: 'منذ 3 أيام' },
-    { title: 'Telegram Web Application', url: 'https://web.telegram.org/k', date: 'الأسبوع الماضي' },
-  ];
 
   return (
     <div className="fixed inset-0 z-50 md:relative md:z-20 md:w-[380px] lg:w-[420px] md:flex-shrink-0 h-full bg-[#17212b] md:border-r border-[#242f3d] flex flex-col shadow-2xl animate-fade-in select-none overflow-hidden" dir="rtl">
@@ -304,51 +305,69 @@ export const ChatProfileDrawer: React.FC<Props> = ({
           {/* Tab Panes */}
           <div className="p-4">
             {activeTab === 'media' && (
-              <div className="grid grid-cols-3 gap-1.5">
-                {mockMedia.map((img, i) => (
-                  <div key={i} className="aspect-square rounded-lg overflow-hidden border border-white/10 group relative cursor-pointer">
-                    <img src={img} alt="media" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  </div>
-                ))}
-              </div>
+              actualMedia.length > 0 ? (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {actualMedia.map((img, i) => (
+                    <div key={i} className="aspect-square rounded-lg overflow-hidden border border-white/10 group relative cursor-pointer">
+                      <img src={img} alt="media" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-xs text-gray-400">
+                  لا توجد وسائط مرسلة في هذه المحادثة حتى الآن
+                </div>
+              )
             )}
 
             {activeTab === 'files' && (
-              <div className="space-y-2">
-                {mockFiles.map((file, i) => (
-                  <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/5 transition-colors cursor-pointer">
-                    <div className="w-10 h-10 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center flex-shrink-0">
-                      <FileText className="w-5 h-5" />
+              actualFiles.length > 0 ? (
+                <div className="space-y-2">
+                  {actualFiles.map((file, i) => (
+                    <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/5 transition-colors cursor-pointer">
+                      <div className="w-10 h-10 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0 text-right">
+                        <p className="text-xs font-semibold text-gray-200 truncate">{file.name}</p>
+                        <span className="text-[10px] text-gray-400">{file.size} • {file.date}</span>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0 text-right">
-                      <p className="text-xs font-semibold text-gray-200 truncate">{file.name}</p>
-                      <span className="text-[10px] text-gray-400">{file.size} • {file.date}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-xs text-gray-400">
+                  لا توجد ملفات مرفقة في هذه المحادثة حتى الآن
+                </div>
+              )
             )}
 
             {activeTab === 'links' && (
-              <div className="space-y-2">
-                {mockLinks.map((link, i) => (
-                  <a 
-                    key={i} 
-                    href={link.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/5 transition-colors block text-right"
-                  >
-                    <div className="w-10 h-10 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0">
-                      <Link2 className="w-5 h-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-teal-400 truncate">{link.title}</p>
-                      <span className="text-[10px] text-gray-400 truncate block">{link.url}</span>
-                    </div>
-                  </a>
-                ))}
-              </div>
+              actualLinks.length > 0 ? (
+                <div className="space-y-2">
+                  {actualLinks.map((link, i) => (
+                    <a 
+                      key={i} 
+                      href={link.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/5 transition-colors block text-right"
+                    >
+                      <div className="w-10 h-10 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0">
+                        <Link2 className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-teal-400 truncate">{link.title}</p>
+                        <span className="text-[10px] text-gray-400 truncate block">{link.url}</span>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-xs text-gray-400">
+                  لا توجد روابط مشتركة في هذه المحادثة حتى الآن
+                </div>
+              )
             )}
 
             {activeTab === 'members' && chat.type === 'group' && (

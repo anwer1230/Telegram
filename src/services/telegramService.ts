@@ -53,208 +53,40 @@ const DEFAULT_ACCOUNTS: TelegramUser[] = [
   }
 ];
 
-// الجلسات النشطة الرسمية
+// الجلسات النشطة الرسمية الفعالة (تم حذف الجلسات الوهمية)
 const DEFAULT_SESSIONS: ActiveSession[] = [
   {
     id: 'sess_current',
     device: 'Telegram Web Plus Client',
     appVersion: 'Web Client 13.0.2.0 (Official Build)',
-    location: 'الرياض، المملكة العربية السعودية',
+    location: 'جلسة سحابية نشطة',
     date: 'متصل الآن',
     isCurrent: true,
     ip: '185.107.56.24',
     iconType: 'browser'
-  },
-  {
-    id: 'sess_desktop',
-    device: 'Telegram Desktop (Windows 11)',
-    appVersion: 'Telegram Desktop v5.2.1 x64',
-    location: 'جدة، المملكة العربية السعودية',
-    date: 'أمس 04:20 م',
-    isCurrent: false,
-    ip: '82.114.160.10',
-    iconType: 'desktop'
-  },
-  {
-    id: 'sess_mobile',
-    device: 'Telegram for Android',
-    appVersion: 'Telegram Android v10.9.0',
-    location: 'دبي، الإمارات العربية المتحدة',
-    date: 'منذ 3 أيام',
-    isCurrent: false,
-    ip: '178.80.12.98',
-    iconType: 'mobile'
   }
 ];
 
-// المحادثات والقنوات الرسمية العامة لتيليجرام
+// المحادثة السحابية الحقيقية المعتمدة (الرسائل المحفوظة) - تم حذف كافة المحادثات الوهمية والتجريبية
 const DEFAULT_CHATS: ChatItem[] = [
   {
     id: 'saved_messages',
     title: 'الرسائل المحفوظة',
     type: 'saved',
     avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80',
-    lastMessage: 'سحابة تيليجرام التخزينية الرسمية - مساحة تخزين مشفرة وغير محدودة ☁️',
-    lastMessageTime: '04:06 م',
+    lastMessage: 'سحابة تيليجرام التخزينية الرسمية المشفرة ☁️',
+    lastMessageTime: 'الآن',
     unreadCount: 0,
     isPinned: true,
     isVerified: true,
     isOnline: true,
     folder: 'saved'
-  },
-  {
-    id: 'chat_telegram',
-    title: 'Telegram Service Notifications',
-    type: 'user',
-    avatar: 'https://images.unsplash.com/photo-1614680376593-902f749f7ffc?w=150&auto=format&fit=crop&q=80',
-    lastMessage: 'رمز تسجيل الدخول السحابي: 84920. لا تشاركه مع أي شخص.',
-    lastMessageTime: '04:05 م',
-    unreadCount: 1,
-    isPinned: true,
-    isVerified: true,
-    isOnline: true,
-    folder: 'personal'
-  },
-  {
-    id: 'chat_official_news',
-    title: 'Telegram News',
-    type: 'channel',
-    avatar: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=150&auto=format&fit=crop&q=80',
-    lastMessage: 'تحديث تيليجرام ويب الجديد: دعم كامل للأجهزة المتعددة وتخصيص الأنماط السحابية 🚀',
-    lastMessageTime: '02:30 م',
-    unreadCount: 3,
-    isVerified: true,
-    membersCount: 8940000,
-    folder: 'channels'
-  },
-  {
-    id: 'chat_tips',
-    title: 'Telegram Tips',
-    type: 'channel',
-    avatar: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=150&auto=format&fit=crop&q=80',
-    lastMessage: 'نصيحة: يمكنك تثبيت المحادثات وتنظيمها في مجلدات مخصصة عبر قائمة الإعدادات.',
-    lastMessageTime: '01:15 م',
-    unreadCount: 0,
-    isVerified: true,
-    membersCount: 5200000,
-    folder: 'channels'
-  },
-  {
-    id: 'chat_support',
-    title: 'مساعد الدعم الفني (Telegram Support)',
-    type: 'user',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    lastMessage: 'مرحباً بك! فريق الدعم الفني لتيليجرام جاهز للإجابة عن جميع استفساراتك.',
-    lastMessageTime: '11:45 ص',
-    unreadCount: 0,
-    isVerified: true,
-    isOnline: true,
-    folder: 'personal'
-  },
-  {
-    id: 'chat_group_community',
-    title: 'مجتمع مطوري تيليجرام ويب (Telegram Web Community)',
-    type: 'group',
-    avatar: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80',
-    lastMessage: 'تم تفعيل التشفير السحابي المباشر عبر API_ID: 34773007 بنجاح',
-    lastMessageTime: '10:00 ص',
-    unreadCount: 15,
-    membersCount: 14820,
-    folder: 'groups'
-  },
-  {
-    id: 'chat_ai_bot',
-    title: 'المحادثة الآلية Bot',
-    type: 'bot',
-    avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80',
-    lastMessage: 'أهلاً بك! أنا البوت المساعد التلقائي لتيليجرام ويب، كيف يمكنني خدمتك اليوم؟',
-    lastMessageTime: 'أمس',
-    unreadCount: 0,
-    isVerified: true,
-    folder: 'bots'
   }
 ];
 
-// الرسائل الأولية الرسمية
+// الرسائل الفعلية (تم تفريغ كافة الرسائل الوهمية والتجريبية)
 const DEFAULT_MESSAGES: Record<string, ChatMessage[]> = {
-  'saved_messages': [
-    {
-      id: 'msg_s1',
-      chatId: 'saved_messages',
-      senderId: 'user_primary',
-      senderName: 'حسابي',
-      text: 'سحابة تيليجرام التخزينية الرسمية: يمكنك حفظ الرسائل، الملفات، والصور مع مزامنة فورية على جميع أجهزتك.',
-      timestamp: '03:10 م',
-      isOutgoing: true,
-      status: 'read',
-      isEncrypted: true
-    },
-    {
-      id: 'msg_s2',
-      chatId: 'saved_messages',
-      senderId: 'user_primary',
-      senderName: 'حسابي',
-      text: 'بيانات الاعتماد السحابية:\nTELEGRAM_API_ID = 34773007\nTELEGRAM_API_HASH = 2a6b16abed75c3f6898ee79e9237fd25',
-      timestamp: '03:15 م',
-      isOutgoing: true,
-      status: 'read',
-      isEncrypted: true
-    }
-  ],
-  'chat_telegram': [
-    {
-      id: 'msg_t1',
-      chatId: 'chat_telegram',
-      senderId: 'telegram_service',
-      senderName: 'Telegram',
-      text: 'تم تسجيل دخول جديد إلى حسابك في تيليجرام ويب.\nالأجهزة: Telegram Web Plus Client\nالموقع: الرياض، المملكة العربية السعودية\n\nإذا لم تكن أنت، يمكنك إنهاء هذه الجلسة فوراً من الإعدادات > الأجهزة.',
-      timestamp: '04:00 م',
-      isOutgoing: false,
-      status: 'read'
-    },
-    {
-      id: 'msg_t2',
-      chatId: 'chat_telegram',
-      senderId: 'telegram_service',
-      senderName: 'Telegram',
-      text: 'رمز تسجيل الدخول السحابي: 84920. لا تشاركه مع أي شخص لأمان حسابك.',
-      timestamp: '04:05 م',
-      isOutgoing: false,
-      status: 'read'
-    }
-  ],
-  'chat_support': [
-    {
-      id: 'msg_sup1',
-      chatId: 'chat_support',
-      senderId: 'chat_support',
-      senderName: 'Telegram Support',
-      text: 'مرحباً بك! فريق الدعم الفني الرسمي لتيليجرام في خدمتك دائماً.',
-      timestamp: '11:40 ص',
-      isOutgoing: false,
-      status: 'read'
-    },
-    {
-      id: 'msg_sup2',
-      chatId: 'chat_support',
-      senderId: 'user_primary',
-      senderName: 'حسابي',
-      text: 'شكراً لكم، تم التحقق من ربط مفاتيح API بنجاح.',
-      timestamp: '11:42 ص',
-      isOutgoing: true,
-      status: 'read'
-    },
-    {
-      id: 'msg_sup3',
-      chatId: 'chat_support',
-      senderId: 'chat_support',
-      senderName: 'Telegram Support',
-      text: 'رائع جداً! استمتع بتجربة سريعة وآمنة ومشفرة بالكامل 🚀',
-      timestamp: '11:45 ص',
-      isOutgoing: false,
-      status: 'read'
-    }
-  ]
+  'saved_messages': []
 };
 
 const DEFAULT_FOLDERS: ChatFolder[] = [
@@ -317,12 +149,38 @@ class TelegramService {
       const active = masterAccounts.find(a => a.isActive) || masterAccounts[0];
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(active));
     }
-    if (!localStorage.getItem(STORAGE_KEYS.CHATS)) {
+
+    // تنظيف المحادثات والرسائل الوهمية والتجريبية السابقة
+    try {
+      const storedChats = localStorage.getItem(STORAGE_KEYS.CHATS);
+      if (storedChats) {
+        const parsed: ChatItem[] = JSON.parse(storedChats);
+        const filtered = parsed.filter(c => !['chat_telegram', 'chat_official_news', 'chat_tips', 'chat_support', 'chat_group_community', 'chat_ai_bot'].includes(c.id));
+        localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(filtered.length > 0 ? filtered : DEFAULT_CHATS));
+      } else {
+        localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(DEFAULT_CHATS));
+      }
+    } catch (e) {
       localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(DEFAULT_CHATS));
     }
-    if (!localStorage.getItem(STORAGE_KEYS.MESSAGES)) {
+
+    try {
+      const storedMsgs = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+      if (storedMsgs) {
+        const parsed = JSON.parse(storedMsgs);
+        delete parsed['chat_telegram'];
+        delete parsed['chat_support'];
+        delete parsed['chat_official_news'];
+        delete parsed['chat_group_community'];
+        delete parsed['chat_ai_bot'];
+        localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(parsed));
+      } else {
+        localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(DEFAULT_MESSAGES));
+      }
+    } catch (e) {
       localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(DEFAULT_MESSAGES));
     }
+
     if (!localStorage.getItem(STORAGE_KEYS.SESSIONS)) {
       localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(DEFAULT_SESSIONS));
     }

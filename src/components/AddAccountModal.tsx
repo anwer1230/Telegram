@@ -43,7 +43,6 @@ export const AddAccountModal: React.FC<Props> = ({ onClose, onSuccess }) => {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [phoneCodeHash, setPhoneCodeHash] = useState<string>('');
-  const [suggestedCode, setSuggestedCode] = useState<string | null>(null);
   
   // QR state
   const [qrToken, setQrToken] = useState<string>('tg_' + Math.random().toString(36).substring(2));
@@ -154,16 +153,12 @@ export const AddAccountModal: React.FC<Props> = ({ onClose, onSuccess }) => {
       const data = await response.json();
       if (data.success) {
         setPhoneCodeHash(data.phoneCodeHash || '');
-        if (data.simulatedCodeForTesting) {
-          setSuggestedCode(data.simulatedCodeForTesting);
-        }
         setStep('code');
       } else {
         setError(data.error || 'فشل الاتصال بخادم تيليجرام لإرسال الرمز');
       }
     } catch (err: any) {
-      setSuggestedCode('78912');
-      setStep('code');
+      setError('تعذر الاتصال ببوابة MTProto السحابية');
     } finally {
       setIsLoading(false);
     }
@@ -475,19 +470,6 @@ export const AddAccountModal: React.FC<Props> = ({ onClose, onSuccess }) => {
                   تم إرسال رمز تسجيل الدخول عبر تطبيق تيليجرام إلى <br />
                   <span className="text-teal-400 font-mono dir-ltr font-bold">{selectedCountry.code} {phoneDigits}</span>
                 </p>
-
-                {suggestedCode && (
-                  <div 
-                    onClick={() => setCode(suggestedCode)}
-                    className="p-2.5 bg-teal-950/40 border border-teal-500/30 rounded-xl text-xs text-teal-300 flex items-center justify-between cursor-pointer hover:bg-teal-950/70 transition-colors"
-                  >
-                    <span className="font-mono font-bold bg-teal-800/60 px-2 py-0.5 rounded text-white">{suggestedCode}</span>
-                    <span className="flex items-center gap-1 text-[11px]">
-                      <Info className="w-3.5 h-3.5" />
-                      انقر للاستخدام الفوري:
-                    </span>
-                  </div>
-                )}
 
                 <div>
                   <label className="text-xs text-teal-400 font-semibold block text-right mb-1">
