@@ -617,6 +617,23 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const typingTimersRef = useRef<Record<string, any>>({});
   const [onlineCounts, setOnlineCounts] = useState<Record<string, number>>({});
 
+  // Automatic Real Telegram Cloud Read History Sync on Chat Activation
+  useEffect(() => {
+    if (!activeChatId) return;
+    const sessionString = localStorage.getItem('tg_session_string') || '';
+    const phone = currentUser.phone || '';
+    fetch('/api/telegram/messages/read-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatId: activeChatId,
+        maxId: 'max',
+        sessionString,
+        phone,
+      }),
+    }).catch(() => {});
+  }, [activeChatId, currentUser.phone]);
+
   // Live Telegram Chat & Online Members Info fetcher on active chat change
   useEffect(() => {
     if (!activeChatId) return;

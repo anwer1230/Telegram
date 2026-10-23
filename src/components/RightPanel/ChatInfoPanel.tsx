@@ -205,23 +205,62 @@ export const ChatInfoPanel: React.FC = () => {
     };
   }, [activeChatId]);
 
+  // Real-time Cloud Shared Media State (Telegram MTProto InputMessagesFilter)
+  const [cloudMedia, setCloudMedia] = useState<Record<string, Message[]>>({});
+  const [isLoadingCloudMedia, setIsLoadingCloudMedia] = useState<boolean>(false);
+
+  const fetchCloudMedia = async (tab: 'media' | 'files' | 'voice' | 'links') => {
+    if (!activeChatId) return;
+    setIsLoadingCloudMedia(true);
+    try {
+      const sessionString = localStorage.getItem('tg_session_string') || '';
+      const phone = localStorage.getItem('tg_phone') || '';
+      const filterType = tab === 'media' ? 'photos' : tab === 'files' ? 'documents' : tab === 'voice' ? 'voice' : 'links';
+      const res = await fetch(`/api/telegram/chat/${activeChatId}/media?type=${filterType}&limit=50`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionString, phone }),
+      });
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.media)) {
+        setCloudMedia((prev) => ({
+          ...prev,
+          [tab]: data.media,
+        }));
+      }
+    } catch (err) {
+      console.warn('[ChatInfoPanel] Cloud media fetch error:', err);
+    } finally {
+      setIsLoadingCloudMedia(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeMediaTab !== 'members' && activeChatId) {
+      fetchCloudMedia(activeMediaTab);
+    }
+  }, [activeMediaTab, activeChatId]);
+
   if (!isRightPanelOpen || !activeChat) return null;
 
   const currentMessages = (activeChatId && messages[activeChatId]) || [];
 
-  const mergeMedia = (cached: Message[], memFilter: (m: Message) => boolean) => {
+  const mergeMedia = (cached: Message[], memFilter: (m: Message) => boolean, cloudKey?: 'media' | 'files' | 'voice' | 'links') => {
     const map = new Map<string, Message>();
     cached.forEach((m) => map.set(String(m.id), m));
+    if (cloudKey && cloudMedia[cloudKey]) {
+      cloudMedia[cloudKey].forEach((m) => map.set(String(m.id), m));
+    }
     currentMessages.filter(memFilter).forEach((m) => map.set(String(m.id), m));
     return Array.from(map.values()).sort(
       (a, b) => (b.epoch || b.rawDate || 0) - (a.epoch || a.rawDate || 0)
     );
   };
 
-  const photoMessages = mergeMedia(cachedPhotos, (m) => m.media?.type === 'photo' && !!m.media?.url);
-  const fileMessages = mergeMedia(cachedFiles, (m) => m.media?.type === 'document');
-  const voiceMessages = mergeMedia(cachedVoice, (m) => m.media?.type === 'voice');
-  const linkMessages = mergeMedia(cachedLinks, (m) => deriveIndexedMediaType(m) === 'link');
+  const photoMessages = mergeMedia(cachedPhotos, (m) => m.media?.type === 'photo' && !!m.media?.url, 'media');
+  const fileMessages = mergeMedia(cachedFiles, (m) => m.media?.type === 'document' || (m.media as any)?.type === 'file', 'files');
+  const voiceMessages = mergeMedia(cachedVoice, (m) => m.media?.type === 'voice' || m.media?.type === 'audio', 'voice');
+  const linkMessages = mergeMedia(cachedLinks, (m) => deriveIndexedMediaType(m) === 'link' || (m.text ? /https?:\/\/[^\s]+/.test(m.text) : false), 'links');
 
   const isSavedMessages = activeChat.type === 'saved';
 

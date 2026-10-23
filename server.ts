@@ -5865,6 +5865,224 @@ async function startServer() {
   });
 
   // ==========================================
+  // 1. REAL CLOUD READ HISTORY SYNC (Api.messages.ReadHistory & Api.channels.ReadHistory)
+  // Synchronizes read state with official Telegram MTProto cloud servers
+  // ==========================================
+  app.post(['/api/telegram/messages/read-history', '/api/telegram/chat/:peerId/read', '/api/telegram/messages/read'], async (req, res) => {
+    try {
+      const peerId = req.params.peerId || req.body.chatId || req.body.peerId;
+      const rawMaxId = req.body.maxId;
+      const { sessionString, phone } = req.body;
+
+      if (!peerId) {
+        return res.status(400).json({ success: false, error: 'chatId or peerId is required' });
+      }
+
+      const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
+      if (!client || !client.connected) {
+        return res.json({ success: false, error: 'Client not connected' });
+      }
+
+      const cleanId = String(peerId).replace(/^chat_/, '');
+      const peerTarget = await resolvePeerTarget(client, cleanId).catch(() => cleanId);
+      const inputPeer = await client.getInputEntity(peerTarget).catch(() => null);
+      if (!inputPeer) {
+        return res.json({ success: false, error: 'Could not resolve input entity' });
+      }
+
+      let maxId = 0;
+      if (rawMaxId && rawMaxId !== 'max' && !isNaN(Number(rawMaxId))) {
+        maxId = Number(rawMaxId);
+      } else {
+        // Fetch the latest message id for this peer
+        try {
+          const recentMsgs = await client.getMessages(peerTarget, { limit: 1 });
+          if (recentMsgs && recentMsgs.length > 0 && recentMsgs[0]?.id) {
+            maxId = recentMsgs[0].id;
+          }
+        } catch (_) {}
+      }
+
+      const entity: any = await client.getEntity(peerTarget).catch(() => null);
+
+      if (entity && (entity.className === 'Channel' || entity.broadcast || entity.megagroup)) {
+        await client.invoke(
+          new Api.channels.ReadHistory({
+            channel: inputPeer,
+            maxId: maxId || 0,
+          })
+        ).catch((err: any) => {
+          console.warn('[channels.ReadHistory] warning:', err?.message || err);
+        });
+      } else {
+        await client.invoke(
+          new Api.messages.ReadHistory({
+            peer: inputPeer,
+            maxId: maxId || 0,
+          })
+        ).catch((err: any) => {
+          console.warn('[messages.ReadHistory] warning:', err?.message || err);
+        });
+      }
+
+      const canonicalChatId = String(peerId).startsWith('chat_') ? String(peerId) : `chat_${peerId}`;
+      broadcastTelegramUpdate({
+        type: 'dialog_read',
+        chatId: canonicalChatId,
+        maxId,
+        timestamp: Date.now(),
+      });
+
+      return res.json({ success: true, isRealTelegramMTProto: true, chatId: canonicalChatId, maxId });
+    } catch (err: any) {
+      console.warn('[MTProto ReadHistory] error:', err?.message || err);
+      return res.json({ success: false, error: err?.message || String(err) });
+    }
+  });
+
+  // ==========================================
+  // 2. CLOUD SHARED MEDIA ENGINE (Api.InputMessagesFilter)
+  // Direct server-side pagination for historical media stored on Telegram Cloud
+  // ==========================================
+  app.all(['/api/telegram/chat/:peerId/media', '/api/telegram/chat/media'], async (req, res) => {
+    try {
+      const peerId = req.params.peerId || req.query.chatId || req.body.chatId;
+      const type = (req.query.type || req.body.type || 'media') as string;
+      const offsetId = Number(req.query.offsetId || req.body.offsetId) || 0;
+      const limit = Math.min(Number(req.query.limit || req.body.limit) || 30, 100);
+      const { sessionString, phone } = req.body || req.query || {};
+
+      if (!peerId) {
+        return res.status(400).json({ success: false, error: 'chatId or peerId is required' });
+      }
+
+      const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
+      if (!client || !client.connected) {
+        return res.json({ success: false, media: [], error: 'NOT_CONNECTED' });
+      }
+
+      const cleanId = String(peerId).replace(/^chat_/, '');
+      const peerTarget = await resolvePeerTarget(client, cleanId).catch(() => cleanId);
+
+      let filter: any;
+      switch (type) {
+        case 'media':
+        case 'photo':
+        case 'photos':
+          filter = new Api.InputMessagesFilterPhotos();
+          break;
+        case 'files':
+        case 'document':
+        case 'documents':
+          filter = new Api.InputMessagesFilterDocument();
+          break;
+        case 'voice':
+        case 'audio':
+          filter = new Api.InputMessagesFilterVoice();
+          break;
+        case 'links':
+        case 'url':
+        case 'urls':
+          filter = new Api.InputMessagesFilterUrl();
+          break;
+        case 'music':
+          filter = new Api.InputMessagesFilterMusic();
+          break;
+        default:
+          filter = new Api.InputMessagesFilterEmpty();
+      }
+
+      const rawMessages: any[] = await client.getMessages(peerTarget, {
+        limit,
+        offsetId,
+        filter,
+      }).catch((err: any) => {
+        console.warn('[getMessages shared media] warning:', err?.message || err);
+        return [];
+      });
+
+      const mediaItems = rawMessages.map((m: any) => {
+        let mediaObj: any = null;
+        if (m.media) {
+          if (m.media.photo) {
+            mediaObj = {
+              type: 'photo',
+              url: `/api/telegram/avatar/${m.id}?media=1&chatId=${cleanId}`,
+              width: 800,
+              height: 600,
+            };
+          } else if (m.media.document) {
+            const doc = m.media.document;
+            const mimeType = doc.mimeType || 'application/octet-stream';
+            let docType: 'file' | 'audio' | 'voice' | 'video' = 'file';
+            if (mimeType.startsWith('audio/ogg') || mimeType.includes('voice')) docType = 'voice';
+            else if (mimeType.startsWith('audio/')) docType = 'audio';
+            else if (mimeType.startsWith('video/')) docType = 'video';
+
+            let fileName = 'file';
+            const nameAttr = (doc.attributes || []).find((a: any) => a.fileName);
+            if (nameAttr) fileName = nameAttr.fileName;
+
+            mediaObj = {
+              type: docType,
+              url: `/api/telegram/download/${cleanId}/${m.id}`,
+              name: fileName,
+              size: Number(doc.size) || 0,
+              mimeType,
+            };
+          }
+        }
+
+        return {
+          id: String(m.id),
+          date: m.date ? new Date(m.date * 1000).toISOString() : new Date().toISOString(),
+          timestamp: m.date ? new Date(m.date * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          senderId: m.senderId ? String(m.senderId) : '',
+          senderName: m.postAuthor || '',
+          text: m.message || '',
+          media: mediaObj,
+        };
+      });
+
+      return res.json({
+        success: true,
+        media: mediaItems,
+        count: mediaItems.length,
+        hasMore: mediaItems.length >= limit,
+      });
+    } catch (err: any) {
+      console.warn('[Shared Media API] error:', err?.message || err);
+      return res.json({ success: false, media: [], error: err?.message || String(err) });
+    }
+  });
+
+  // ==========================================
+  // 3. LIVE GROUP ONLINES (Api.messages.GetOnlines)
+  // Returns real-time active users count in supergroups/channels
+  // ==========================================
+  app.all(['/api/telegram/group/:peerId/onlines', '/api/telegram/group/onlines'], async (req, res) => {
+    try {
+      const peerId = req.params.peerId || req.body.chatId || req.query.chatId;
+      const { sessionString, phone } = req.body || req.query || {};
+      const client = (await getClientForSession(sessionString, phone)) || mainTelegramClient;
+      if (!client || !client.connected) {
+        return res.json({ success: false, onlines: 0, error: 'NOT_CONNECTED' });
+      }
+      const cleanId = String(peerId).replace(/^chat_/, '');
+      const peerTarget = await resolvePeerTarget(client, cleanId).catch(() => cleanId);
+      const inputPeer = await client.getInputEntity(peerTarget).catch(() => null);
+      if (!inputPeer) {
+        return res.json({ success: false, onlines: 0 });
+      }
+      const onlinesRes: any = await client.invoke(new Api.messages.GetOnlines({ peer: inputPeer })).catch(() => null);
+      const onlines = (onlinesRes && typeof onlinesRes.onlines === 'number') ? onlinesRes.onlines : 0;
+      return res.json({ success: true, onlines });
+    } catch (err: any) {
+      return res.json({ success: false, onlines: 0, error: err?.message || String(err) });
+    }
+  });
+
+  // ==========================================
   // REAL TELEGRAM CHANNEL & GROUP CREATION (Api.channels.CreateChannel)
   // Resolves FAB functionality (Channel/Megagroup/Chat creation via MTProto)
   // ==========================================
