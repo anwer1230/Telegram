@@ -3094,6 +3094,24 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           )
         );
 
+        // 5. Synchronize user settings from official Telegram Web cloud servers
+        fetch(`/api/telegram/account/settings?phone=${encodeURIComponent(activePhone)}&sessionString=${encodeURIComponent(activeSessionStr)}`)
+          .then((r) => r.json())
+          .then((settingsData) => {
+            if (settingsData && settingsData.success) {
+              if (settingsData.user) {
+                setCurrentUser((u: any) => ({ ...u, ...settingsData.user }));
+              }
+              if (settingsData.privacy) {
+                PrivacySettingsController.getInstance().loadPrivacySettings().catch(() => {});
+              }
+              if (settingsData.cloudSettings) {
+                updateSettings(settingsData.cloudSettings);
+              }
+            }
+          })
+          .catch((e) => console.warn('[MTProto Settings Sync] Notice:', e));
+
         showToast(
           settings.language === 'ar'
             ? 'تمت المزامنة السحابية بنجاح عبر MTProto 2.0 (Layer 184)'

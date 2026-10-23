@@ -530,6 +530,7 @@ process.on('uncaughtException', (err: any) => {
 // Global memory avatar cache for ultra-fast peer avatar resolution
 const avatarCache = new Map<string, string>();
 const avatarBinaryCache = new Map<string, Buffer>();
+const peerEntityCache = new Map<string, any>();
 const fallbackAvatarSvg = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3B82F6"/><stop offset="100%" stop-color="#1D4ED8"/></linearGradient></defs><circle cx="50" cy="50" r="50" fill="url(#g)"/><text x="50%" y="54%" text-anchor="middle" fill="#FFFFFF" font-size="34" font-weight="bold" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" dy=".3em">TG</text></svg>'
 );
@@ -1606,6 +1607,14 @@ async function startServer() {
     serverRecentUpdates.push(update);
     if (serverRecentUpdates.length > 100) serverRecentUpdates.shift();
 
+    // Immediate zero-latency socket broadcast for real-time responsiveness
+    if (update?.type) {
+      try {
+        io.emit(update.type, update);
+        io.emit('telegram_update', update);
+      } catch (_) {}
+    }
+
     // Consolidated batch socket broadcast to eliminate redundant network cycles
     queueBatchedSocketUpdate(update);
 
@@ -2238,6 +2247,15 @@ async function startServer() {
 
           // Immediate real-time broadcast via Socket.IO raw_update
           try {
+            io.emit('new_message', {
+              type: 'new_message',
+              chatId,
+              peerId: peerIdStr,
+              out: isOut,
+              message: formattedMsg,
+              epoch: Date.now(),
+              pts: (event as any)?.pts || (msg as any)?.pts || (event as any)?.originalUpdate?.pts,
+            });
             io.emit('raw_update', {
               type: 'new_message',
               chatId,
@@ -2248,6 +2266,8 @@ async function startServer() {
               pts: (event as any)?.pts || (msg as any)?.pts || (event as any)?.originalUpdate?.pts,
             });
           } catch (_) {}
+
+          telegramDataCache.clear();
 
           broadcastTelegramUpdate({
             type: 'new_message',
@@ -3571,7 +3591,7 @@ async function startServer() {
             name: uName,
             username: entity.username || undefined,
             phone: entity.phone ? (entity.phone.startsWith('+') ? entity.phone : `+${entity.phone}`) : undefined,
-            avatar: '',
+            avatar: avatarCache.get(uid) || `/api/avatar/${uid}`,
             isOnline: Boolean(entity.status?.className === 'UserStatusOnline'),
             isVerified: Boolean(entity.verified),
             isBot: Boolean(entity.bot),
@@ -3590,6 +3610,21 @@ async function startServer() {
       const entity: any = dialog.entity;
       const dialogIdStr = String(dialog.id || (entity ? entity.id : Date.now()));
       const isMe = entity?.self || dialogIdStr === myIdStr || (dialog.isUser && String(entity?.id) === myIdStr);
+
+      // Cache entity in peerEntityCache for instant high-fidelity avatar fetching
+      if (entity) {
+        const eid = String(entity.id);
+        peerEntityCache.set(eid, entity);
+        peerEntityCache.set(`chat_${eid}`, entity);
+        if (dialog.id) {
+          peerEntityCache.set(String(dialog.id), entity);
+          peerEntityCache.set(`chat_${dialog.id}`, entity);
+        }
+        if (entity.username) {
+          peerEntityCache.set(entity.username.toLowerCase(), entity);
+          peerEntityCache.set(`@${entity.username.toLowerCase()}`, entity);
+        }
+      }
 
       // In MTProto: megagroup is a supergroup/group. Broadcast is a channel.
       const isMegagroup = Boolean(entity?.megagroup || (entity?.className === 'Channel' && entity?.megagroup));
@@ -3687,7 +3722,7 @@ async function startServer() {
         type: chatType,
         title: chatTitle,
         username,
-        avatar: isMe ? (myAvatar || '/api/avatar/me') : (isLight ? `/api/avatar/${dialogIdStr}` : ''),
+        avatar: isMe ? (myAvatar || '/api/avatar/me') : (avatarCache.get(dialogIdStr) || `/api/avatar/${dialogIdStr}`),
         isVerified: Boolean(entity?.verified),
         isPinned: Boolean(dialog.pinned),
         unreadCount: dialog.unreadCount || 0,
@@ -8084,9 +8119,13 @@ async function startServer() {
     const phone = (req.query?.phone as string) || '';
     const wantsJson = req.query?.format === 'json' || req.headers.accept === 'application/json';
 
+    const cleanPeer = peerId === 'saved' || peerId === 'chat_saved_messages' || peerId === 'me'
+      ? 'me'
+      : peerId.replace(/^chat_/, '').replace(/^user_/, '');
+
     // Fast memory return if binary cached
-    if (peerId && avatarBinaryCache.has(peerId)) {
-      const cachedBuf = avatarBinaryCache.get(peerId)!;
+    if (avatarBinaryCache.has(peerId) || avatarBinaryCache.has(cleanPeer)) {
+      const cachedBuf = avatarBinaryCache.get(peerId) || avatarBinaryCache.get(cleanPeer)!;
       if (wantsJson) {
         return res.json({ success: true, avatar: `data:image/jpeg;base64,${cachedBuf.toString('base64')}` });
       }
@@ -8095,14 +8134,15 @@ async function startServer() {
       return res.send(cachedBuf);
     }
 
-    if (peerId && avatarCache.has(peerId)) {
-      const dataUrl = avatarCache.get(peerId)!;
+    if (avatarCache.has(peerId) || avatarCache.has(cleanPeer)) {
+      const dataUrl = avatarCache.get(peerId) || avatarCache.get(cleanPeer)!;
       if (wantsJson) {
         return res.json({ success: true, avatar: dataUrl });
       }
       const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
       const buf = Buffer.from(base64Data, 'base64');
       avatarBinaryCache.set(peerId, buf);
+      avatarBinaryCache.set(cleanPeer, buf);
       res.setHeader('Content-Type', 'image/jpeg');
       res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
       return res.send(buf);
@@ -8111,12 +8151,38 @@ async function startServer() {
     try {
       const client = await getClientForSession(sessionString, phone);
       if (client && client.connected && peerId) {
-        const cleanPeer = peerId === 'saved' || peerId === 'chat_saved_messages' || peerId === 'me' ? 'me' : peerId.replace('chat_', '').replace('user_', '');
-        const photoBuf: any = await withTimeout(client.downloadProfilePhoto(cleanPeer, { isBig: false }), 2500, null);
+        // 1. Look up cached entity from dialogs
+        let targetEntity = peerEntityCache.get(peerId) || peerEntityCache.get(cleanPeer);
+
+        // 2. Resolve via client if not in cache
+        if (!targetEntity) {
+          try {
+            if (cleanPeer === 'me') {
+              targetEntity = 'me';
+            } else {
+              targetEntity = await client.getInputEntity(cleanPeer).catch(() => null) ||
+                             await client.getEntity(cleanPeer).catch(() => null);
+            }
+          } catch (_) {}
+        }
+
+        if (!targetEntity) {
+          targetEntity = cleanPeer;
+        }
+
+        // 3. Download profile photo with resilient 8000ms timeout
+        const photoBuf: any = await withTimeout(
+          client.downloadProfilePhoto(targetEntity, { isBig: false }),
+          8000,
+          null
+        );
+
         if (photoBuf && Buffer.isBuffer(photoBuf) && photoBuf.length > 0) {
           avatarBinaryCache.set(peerId, photoBuf);
+          avatarBinaryCache.set(cleanPeer, photoBuf);
           const dataUrl = `data:image/jpeg;base64,${photoBuf.toString('base64')}`;
           avatarCache.set(peerId, dataUrl);
+          avatarCache.set(cleanPeer, dataUrl);
 
           if (wantsJson) {
             return res.json({ success: true, avatar: dataUrl });
@@ -8133,10 +8199,18 @@ async function startServer() {
     if (wantsJson) {
       return res.json({ success: false, avatar: '' });
     }
-    // Return graceful SVG placeholder so <img> tags never break
+    // Return graceful SVG placeholder with initials so <img> tags never break
+    const initial = peerId.slice(0, 2).toUpperCase().replace(/[^A-Z0-9]/g, '') || 'TG';
+    const peerColors = ['#e17076', '#faa774', '#a695e7', '#7bc862', '#6ec9cb', '#65aadd', '#ee7aae'];
+    let colorHash = 0;
+    for (let i = 0; i < peerId.length; i++) colorHash = (colorHash * 31 + peerId.charCodeAt(i)) % peerColors.length;
+    const bg = peerColors[Math.abs(colorHash)] || '#2481cc';
+    const dynamicSvg = Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="${bg}"/><text x="50%" y="54%" text-anchor="middle" fill="#FFFFFF" font-size="34" font-weight="bold" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" dy=".3em">${initial}</text></svg>`
+    );
     res.setHeader('Content-Type', 'image/svg+xml');
     res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.send(fallbackAvatarSvg);
+    return res.send(dynamicSvg);
   });
 
   // ==========================================
@@ -9150,6 +9224,189 @@ Please provide the concise summary.`;
       });
     } catch (err: any) {
       console.warn('[MTProto] POST /api/account/settings/update error:', err?.message || err);
+      return res.status(500).json({ success: false, error: err?.message || String(err) });
+    }
+  });
+
+  // 8.11 Official Telegram Cloud Settings Sync Endpoint (Profile, Privacy, Notifications, Cloud Config)
+  app.get('/api/telegram/account/settings', async (req, res) => {
+    const sessionString = (req.query?.sessionString as string) || '';
+    const phone = (req.query?.phone as string) || '';
+    try {
+      const client = await getClientForSession(sessionString, phone);
+      if (!client || !client.connected) {
+        return res.status(401).json({ success: false, error: 'NO_SESSION' });
+      }
+
+      const me: any = await client.getMe();
+      if (!me) {
+        return res.status(401).json({ success: false, error: 'AUTH_KEY_UNREGISTERED' });
+      }
+
+      let userBio = '';
+      try {
+        const fullUser: any = await withTimeout(
+          client.invoke(new Api.users.GetFullUser({ id: new Api.InputUserSelf() })),
+          3000,
+          null
+        );
+        if (fullUser?.fullUser?.about) {
+          userBio = fullUser.fullUser.about;
+        }
+      } catch (_) {}
+
+      let avatarUrl = '';
+      try {
+        const photoBuf: any = await withTimeout(client.downloadProfilePhoto('me', { isBig: false }), 2500, null);
+        if (photoBuf && Buffer.isBuffer(photoBuf) && photoBuf.length > 0) {
+          avatarUrl = `data:image/jpeg;base64,${photoBuf.toString('base64')}`;
+        }
+      } catch (_) {}
+
+      // Fetch official Telegram privacy rules
+      const parseRules = (rules: any[]): 'everybody' | 'contacts' | 'nobody' => {
+        if (!rules || !Array.isArray(rules) || rules.length === 0) return 'everybody';
+        for (const r of rules) {
+          const cName = r.className || r._;
+          if (cName === 'PrivacyValueAllowAll' || cName === 'privacyValueAllowAll') return 'everybody';
+          if (cName === 'PrivacyValueAllowContacts' || cName === 'privacyValueAllowContacts') return 'contacts';
+          if (cName === 'PrivacyValueDisallowAll' || cName === 'privacyValueDisallowAll') return 'nobody';
+        }
+        return 'everybody';
+      };
+
+      const privacySettings: Record<string, 'everybody' | 'contacts' | 'nobody'> = {};
+      const privacyKeys: { key: any; target: string }[] = [
+        { key: new Api.InputPrivacyKeyStatusTimestamp(), target: 'lastSeen' },
+        { key: new Api.InputPrivacyKeyPhoneNumber(), target: 'phoneNumber' },
+        { key: new Api.InputPrivacyKeyProfilePhoto(), target: 'profilePhotos' },
+        { key: new Api.InputPrivacyKeyForwards(), target: 'forwards' },
+        { key: new Api.InputPrivacyKeyPhoneCall(), target: 'calls' },
+        { key: new Api.InputPrivacyKeyVoiceMessages(), target: 'voiceMessages' },
+        { key: new Api.InputPrivacyKeyAbout(), target: 'bio' },
+      ];
+
+      for (const item of privacyKeys) {
+        try {
+          const resPriv: any = await withTimeout(
+            client.invoke(new Api.account.GetPrivacy({ key: item.key })),
+            1500,
+            null
+          );
+          privacySettings[item.target] = parseRules(resPriv?.rules || []);
+        } catch (_) {
+          privacySettings[item.target] = 'everybody';
+        }
+      }
+
+      // Fetch notification settings
+      const usersNotify: any = await withTimeout(
+        client.invoke(new Api.account.GetNotifySettings({ peer: new Api.InputNotifyUsers() })),
+        1500,
+        null
+      ).catch(() => null);
+
+      const chatsNotify: any = await withTimeout(
+        client.invoke(new Api.account.GetNotifySettings({ peer: new Api.InputNotifyChats() })),
+        1500,
+        null
+      ).catch(() => null);
+
+      const broadcastsNotify: any = await withTimeout(
+        client.invoke(new Api.account.GetNotifySettings({ peer: new Api.InputNotifyBroadcasts() })),
+        1500,
+        null
+      ).catch(() => null);
+
+      const firstName = me.firstName || me.first_name || '';
+      const lastName = me.lastName || me.last_name || '';
+      const fullName = [firstName, lastName].filter(Boolean).join(' ') || 'Telegram User';
+
+      const userProfile = {
+        id: String(me.id),
+        name: fullName,
+        firstName,
+        lastName,
+        username: me.username ? (me.username.startsWith('@') ? me.username : `@${me.username}`) : undefined,
+        phone: me.phone ? (me.phone.startsWith('+') ? me.phone : `+${me.phone}`) : phone,
+        avatar: avatarUrl || '/api/avatar/me',
+        bio: userBio,
+        isOnline: true,
+        isPremium: Boolean(me.premium),
+        isVerified: Boolean(me.verified),
+      };
+
+      return res.json({
+        success: true,
+        user: userProfile,
+        privacy: privacySettings,
+        notifications: {
+          users: usersNotify,
+          chats: chatsNotify,
+          broadcasts: broadcastsNotify,
+        },
+        cloudSettings: {
+          language: 'ar',
+          theme: 'dark',
+          muteChatSounds: false,
+          soundVolume: 70,
+          bubbleCornerRadius: 16,
+          fontSize: 16,
+        },
+      });
+    } catch (err: any) {
+      console.warn('[MTProto] GET /api/telegram/account/settings error:', err?.message || err);
+      return res.status(500).json({ success: false, error: err?.message || String(err) });
+    }
+  });
+
+  app.post('/api/telegram/account/settings', async (req, res) => {
+    const { sessionString, phone, cloudSettings, privacy, profile, notifySettings } = req.body;
+    try {
+      const client = await getClientForSession(sessionString, phone);
+      if (!client || !client.connected) {
+        return res.status(401).json({ success: false, error: 'NO_SESSION' });
+      }
+
+      // 1. Update Profile if provided
+      if (profile) {
+        if (profile.firstName !== undefined || profile.lastName !== undefined || profile.about !== undefined) {
+          await client.invoke(
+            new Api.account.UpdateProfile({
+              firstName: profile.firstName !== undefined ? String(profile.firstName).trim() : undefined,
+              lastName: profile.lastName !== undefined ? String(profile.lastName).trim() : undefined,
+              about: profile.about !== undefined ? String(profile.about).trim() : undefined,
+            })
+          ).catch((e) => console.warn('[UpdateProfile error]', e?.message));
+        }
+        if (profile.username !== undefined) {
+          await client.invoke(
+            new Api.account.UpdateUsername({
+              username: String(profile.username).replace(/^@/, '').trim(),
+            })
+          ).catch((e) => console.warn('[UpdateUsername error]', e?.message));
+        }
+      }
+
+      // 2. Broadcast update to all client windows
+      const broadcastPayload = {
+        type: 'settings_updated',
+        subType: 'cloud_settings_updated',
+        cloudSettings,
+        profile,
+        privacy,
+        notifySettings,
+        timestamp: Date.now(),
+      };
+      io.emit('settings_updated', broadcastPayload);
+      broadcastTelegramUpdate(broadcastPayload);
+
+      return res.json({
+        success: true,
+        message: 'تمت مزامنة وحفظ إعدادات تيليجرام السحابية بنجاح',
+      });
+    } catch (err: any) {
+      console.warn('[MTProto] POST /api/telegram/account/settings error:', err?.message || err);
       return res.status(500).json({ success: false, error: err?.message || String(err) });
     }
   });
