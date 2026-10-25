@@ -15,7 +15,9 @@ import {
   ExternalLink,
   Flame,
   ArrowRight,
+  ArrowLeft,
   EyeOff,
+  RotateCcw,
 } from 'lucide-react';
 import { InAppNotification } from '../../types';
 import { useTelegram } from '../../context/TelegramContext';
@@ -41,6 +43,7 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     resolveTelegramLink,
     settings,
     showToast,
+    restoreNotification,
   } = useTelegram();
 
   const isArabic = settings.language === 'ar';
@@ -55,15 +58,17 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     }
   });
 
-  // Swipe / Drag gesture state
+  // Swipe / Drag gesture state & Slide-out animation
   const [dragOffset, setDragOffset] = useState<number>(0);
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [isSwipingOut, setIsSwipingOut] = useState<boolean>(false);
+  const [slideOutDirection, setSlideOutDirection] = useState<'right' | 'left' | 'up' | null>(null);
   const startXRef = useRef<number | null>(null);
   const currentDragOffsetRef = useRef<number>(0);
 
   // Sync ref with state
   currentDragOffsetRef.current = dragOffset;
+
+  const isSwipingOut = slideOutDirection !== null;
 
   // If already reached 3 right-swipes in this session, do not render notifications at all
   if (sessionRightSwipes >= SWIPE_LIMIT_FOR_SESSION) {
@@ -96,36 +101,68 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     }
   };
 
-  const handleSuccessfulRightSwipe = useCallback(() => {
-    setIsSwipingOut(true);
-    const nextCount = sessionRightSwipes + 1;
-    setSessionRightSwipes(nextCount);
-    try {
-      sessionStorage.setItem(SESSION_SWIPE_KEY, nextCount.toString());
-    } catch {}
+  /**
+   * Triggers a subtle slide-out animation in the specified direction,
+   * dismisses the notification after the transition completes, and displays
+   * an interactive 'Undo' toast notification so the user can restore it.
+   */
+  const dismissWithSlideOut = useCallback(
+    (direction: 'right' | 'left' | 'up') => {
+      if (slideOutDirection !== null) return;
+      setSlideOutDirection(direction);
 
-    setTimeout(() => {
-      onDismiss(current.id);
-      setIsSwipingOut(false);
-      setDragOffset(0);
+      const dismissedNotif = current;
+      const isRightSwipe = direction === 'right';
 
-      if (nextCount >= SWIPE_LIMIT_FOR_SESSION) {
-        showToast(
-          isArabic
-            ? 'تم إيقاف ظهور الإشعارات لهذه الجلسة بعد تمريرها لليمين 3 مرات. ستعود للظهور تلقائياً عند إعادة الدخول.'
-            : 'Notifications paused for this session (swiped right 3 times). They will reappear on next session.',
-          '🔕'
-        );
-      } else {
-        showToast(
-          isArabic
-            ? `مررت لليمين (${nextCount}/${SWIPE_LIMIT_FOR_SESSION}). عند 3 مرات ستتوقف الإشعارات لهذه الجلسة.`
-            : `Swiped right (${nextCount}/${SWIPE_LIMIT_FOR_SESSION}). 3 swipes pause notifications for this session.`,
-          '👉'
-        );
+      let nextCount = sessionRightSwipes;
+      if (isRightSwipe) {
+        nextCount = sessionRightSwipes + 1;
+        setSessionRightSwipes(nextCount);
+        try {
+          sessionStorage.setItem(SESSION_SWIPE_KEY, nextCount.toString());
+        } catch {}
       }
-    }, 220);
-  }, [sessionRightSwipes, current.id, onDismiss, showToast, isArabic]);
+
+      // Allow subtle slide-out animation to complete smoothly (280ms)
+      setTimeout(() => {
+        onDismiss(dismissedNotif.id);
+        setSlideOutDirection(null);
+        setDragOffset(0);
+
+        // Display interactive 'Undo' toast notification
+        const undoToastText = isArabic ? 'تم إخفاء الإشعار' : 'Notification dismissed';
+        const undoButtonLabel = isArabic ? 'تراجع' : 'Undo';
+        const restoredToastText = isArabic ? 'تمت استعادة الإشعار' : 'Notification restored';
+
+        showToast(
+          undoToastText,
+          '🔔',
+          {
+            label: undoButtonLabel,
+            onClick: () => {
+              // Restore notification banner
+              restoreNotification(dismissedNotif);
+
+              // Revert session right swipe count if applicable
+              if (isRightSwipe) {
+                setSessionRightSwipes((prev) => {
+                  const dec = Math.max(0, prev - 1);
+                  try {
+                    sessionStorage.setItem(SESSION_SWIPE_KEY, dec.toString());
+                  } catch {}
+                  return dec;
+                });
+              }
+
+              showToast(restoredToastText, '↩️');
+            },
+          },
+          6000
+        );
+      }, 280);
+    },
+    [slideOutDirection, current, sessionRightSwipes, onDismiss, showToast, restoreNotification, isArabic]
+  );
 
   // Touch gesture handlers for mobile
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -137,12 +174,7 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isDragging || startXRef.current === null || isSwipingOut) return;
     const diff = e.touches[0].clientX - startXRef.current;
-    // We only react to rightward swipes (diff > 0)
-    if (diff > 0) {
-      setDragOffset(diff);
-    } else {
-      setDragOffset(diff * 0.15); // gentle rubber-band left resistance
-    }
+    setDragOffset(diff);
   };
 
   const handleTouchEnd = () => {
@@ -150,8 +182,10 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     setIsDragging(false);
     startXRef.current = null;
     const finalOffset = currentDragOffsetRef.current;
-    if (finalOffset > 75) {
-      handleSuccessfulRightSwipe();
+    if (finalOffset > 65) {
+      dismissWithSlideOut('right');
+    } else if (finalOffset < -65) {
+      dismissWithSlideOut('left');
     } else {
       setDragOffset(0);
     }
@@ -167,11 +201,7 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || startXRef.current === null || isSwipingOut) return;
     const diff = e.clientX - startXRef.current;
-    if (diff > 0) {
-      setDragOffset(diff);
-    } else {
-      setDragOffset(diff * 0.15);
-    }
+    setDragOffset(diff);
   };
 
   const handleMouseUp = () => {
@@ -179,8 +209,10 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     setIsDragging(false);
     startXRef.current = null;
     const finalOffset = currentDragOffsetRef.current;
-    if (finalOffset > 75) {
-      handleSuccessfulRightSwipe();
+    if (finalOffset > 65) {
+      dismissWithSlideOut('right');
+    } else if (finalOffset < -65) {
+      dismissWithSlideOut('left');
     } else {
       setDragOffset(0);
     }
@@ -243,20 +275,23 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
     onDismiss(current.id);
   };
 
-  // Calculate dynamic transform & opacity
-  const bannerTransform = isSwipingOut
-    ? 'translateX(120vw)'
-    : dragOffset > 0
-    ? `translateX(${dragOffset}px)`
-    : dragOffset < 0
-    ? `translateX(${dragOffset}px)`
-    : 'translateX(0)';
+  // Calculate dynamic transform & opacity with subtle slide-out animation
+  let bannerTransform = 'translate3d(0, 0, 0)';
+  let bannerOpacity = 1;
 
-  const bannerOpacity = isSwipingOut
-    ? 0
-    : dragOffset > 0
-    ? Math.max(0.2, 1 - dragOffset / 280)
-    : 1;
+  if (slideOutDirection === 'right') {
+    bannerTransform = 'translate3d(115%, 0, 0) scale(0.96)';
+    bannerOpacity = 0;
+  } else if (slideOutDirection === 'left') {
+    bannerTransform = 'translate3d(-115%, 0, 0) scale(0.96)';
+    bannerOpacity = 0;
+  } else if (slideOutDirection === 'up') {
+    bannerTransform = 'translate3d(0, -32px, 0) scale(0.95)';
+    bannerOpacity = 0;
+  } else if (dragOffset !== 0) {
+    bannerTransform = `translate3d(${dragOffset}px, 0, 0)`;
+    bannerOpacity = Math.max(0.25, 1 - Math.abs(dragOffset) / 260);
+  }
 
   return (
     <div
@@ -279,7 +314,11 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
         style={{
           transform: bannerTransform,
           opacity: bannerOpacity,
-          transition: isDragging ? 'none' : 'transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.25s ease',
+          transition: isDragging
+            ? 'none'
+            : isSwipingOut
+            ? 'transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease'
+            : 'transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.22s ease',
           boxShadow: isKeywordAlert
             ? '0 16px 40px -6px rgba(245, 158, 11, 0.25), 0 0 0 1px rgba(245, 158, 11, 0.3)'
             : '0 16px 40px -6px rgba(0, 0, 0, 0.65)',
@@ -299,9 +338,9 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
           }`}
         />
 
-        {/* Right-Swipe Feedback Pill (Appears while dragging to the right) */}
+        {/* Swipe Feedback Pill (Appears while dragging right or left) */}
         {dragOffset > 25 && (
-          <div className="absolute top-2 left-4 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#2481cc]/90 text-white text-[11px] font-bold shadow-md animate-in fade-in">
+          <div className="absolute top-2 left-4 rtl:left-auto rtl:right-4 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#2481cc]/90 text-white text-[11px] font-bold shadow-md animate-in fade-in">
             <ArrowRight className="w-3.5 h-3.5 animate-pulse" />
             <span>
               {isArabic
@@ -311,6 +350,12 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
             {sessionRightSwipes + 1 >= SWIPE_LIMIT_FOR_SESSION && (
               <EyeOff className="w-3 h-3 text-amber-300 ml-1" />
             )}
+          </div>
+        )}
+        {dragOffset < -25 && (
+          <div className="absolute top-2 right-4 rtl:right-auto rtl:left-4 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#2481cc]/90 text-white text-[11px] font-bold shadow-md animate-in fade-in">
+            <ArrowLeft className="w-3.5 h-3.5 animate-pulse" />
+            <span>{isArabic ? 'إخفاء الإشعار' : 'Swipe to dismiss'}</span>
           </div>
         )}
 
@@ -460,20 +505,20 @@ export const InAppNotificationBanner: React.FC<InAppNotificationBannerProps> = (
             </div>
 
             {/* Gesture Hint Footnote */}
-            <div className="mt-1.5 text-[10px] text-gray-400/70 flex items-center gap-1">
-              <span>{isArabic ? '💡 مرر لليمين للإخفاء' : '💡 Swipe right to dismiss'}</span>
+            <div className="mt-1.5 text-[10px] text-gray-400/70 flex items-center gap-1.5">
+              <span>{isArabic ? '💡 مرر لإخفاء الإشعار' : '💡 Swipe to dismiss'}</span>
               <span className="font-mono text-[#2481cc]">
                 ({sessionRightSwipes}/{SWIPE_LIMIT_FOR_SESSION})
               </span>
             </div>
           </div>
 
-          {/* Dismiss button */}
+          {/* Dismiss button with subtle slide-out */}
           <button
             id="tg-notif-banner-dismiss"
             onClick={(e) => {
               e.stopPropagation();
-              onDismiss(current.id);
+              dismissWithSlideOut('up');
             }}
             className="shrink-0 p-1.5 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
             title={isArabic ? 'إغلاق' : 'Dismiss'}

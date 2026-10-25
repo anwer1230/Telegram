@@ -144,6 +144,7 @@ interface TelegramContextType {
   toasts: ToastItem[];
   inAppNotifications: InAppNotification[];
   dismissNotification: (id: string) => void;
+  restoreNotification: (notif: InAppNotification) => void;
   triggerNotification: (notif: Omit<InAppNotification, 'id' | 'timestamp'>) => void;
 
   // Link Monitor & Auto-Join Engine
@@ -222,7 +223,8 @@ interface TelegramContextType {
   setMessageContextMenu: (menu: MessageContextMenu | null) => void;
   
   // Toast
-  showToast: (text: string, icon?: string) => void;
+  showToast: (text: string, icon?: string, action?: { label: string; onClick: () => void }, duration?: number) => void;
+  dismissToast: (id: string) => void;
   
   // Messages & Interactions
   sendMessage: (text: string, media?: MessageMedia) => void;
@@ -2224,6 +2226,10 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     notificationEngine.dismissNotification(id);
   };
 
+  const restoreNotification = (notif: InAppNotification) => {
+    notificationEngine.restoreNotification(notif);
+  };
+
   const triggerNotification = (notif: Omit<InAppNotification, 'id' | 'timestamp'>) => {
     notificationEngine.showNotification({
       category: notif.category,
@@ -2254,15 +2260,24 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [chats]);
 
-  // Toast Helper with Strict Deduplication & Overflow Protection
-  const showToast = (text: string, icon?: string) => {
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // Toast Helper with Strict Deduplication & Action/Undo Support
+  const showToast = (
+    text: string,
+    icon?: string,
+    action?: { label: string; onClick: () => void },
+    duration?: number
+  ) => {
     if (!text) return;
     const cleanText = text.trim();
     const now = Date.now();
     const lastShown = recentToastsRef.current.get(cleanText) || 0;
 
-    // Suppress duplicate toasts shown within 4000ms
-    if (now - lastShown < 4000) {
+    // Suppress duplicate non-action toasts shown within 4000ms
+    if (!action && now - lastShown < 4000) {
       return;
     }
     recentToastsRef.current.set(cleanText, now);
@@ -2275,19 +2290,21 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const id = `toast_${now}_${Math.random().toString(36).substring(2, 6)}`;
+    const effectiveDuration = action ? (duration || 5500) : (duration || 3200);
+
     setToasts((prev) => {
-      // Don't append if already in current queue
-      if (prev.some((t) => t.text === cleanText)) {
+      // Don't append if already in current queue without action
+      if (prev.some((t) => t.text === cleanText && !t.action)) {
         return prev;
       }
       // Keep at most 2 items
       const trimmed = prev.slice(-1);
-      return [...trimmed, { id, text: cleanText, icon }];
+      return [...trimmed, { id, text: cleanText, icon, action, duration: effectiveDuration }];
     });
 
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3200);
+    }, effectiveDuration);
   };
 
   // Close context menus on global click
@@ -6085,6 +6102,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         toasts,
         inAppNotifications,
         dismissNotification,
+        restoreNotification,
         triggerNotification,
         capturedLinks,
         autoJoinLinksEnabled,
@@ -6123,6 +6141,7 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setChatContextMenu,
         setMessageContextMenu,
         showToast,
+        dismissToast,
         sendMessage,
         sendMediaMessage,
         editMessageText,

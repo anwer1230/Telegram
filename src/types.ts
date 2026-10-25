@@ -379,6 +379,11 @@ export interface ToastItem {
   id: string;
   text: string;
   icon?: string;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
+  duration?: number;
 }
 
 export interface ChatContextMenu {

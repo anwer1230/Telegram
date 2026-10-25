@@ -1,27 +1,30 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import QRCode from 'qrcode';
 import {
   Phone,
   QrCode,
-  ShieldCheck,
-  Sparkles,
+  Shield,
   ArrowRight,
   ArrowLeft,
   Check,
   Lock,
   Eye,
   EyeOff,
-  Radio,
-  Server,
-  Key,
-  RefreshCw,
   User as UserIcon,
   X,
+  MoreVertical,
+  ChevronRight,
+  Search,
+  Moon,
+  Sun,
+  Delete,
+  HelpCircle,
+  RotateCw,
 } from 'lucide-react';
 import { useTelegram } from '../../context/TelegramContext';
-import { loginController, AuthTokensHelper, UserConfig, NotificationCenter } from '../../core/messenger';
+import { loginController } from '../../core/messenger';
 
 const normalizeFullPhone = (val: string): string => {
   let clean = (val || '').trim().replace(/[\s\-\(\)]/g, '');
@@ -29,6 +32,161 @@ const normalizeFullPhone = (val: string): string => {
   else if (clean && !clean.startsWith('+')) clean = '+' + clean;
   return clean;
 };
+
+interface CountryItem {
+  nameAr: string;
+  nameEn: string;
+  code: string;
+  callingCode: string;
+  flag: string;
+}
+
+const COUNTRIES_LIST: CountryItem[] = [
+  { nameAr: 'اليمن', nameEn: 'Yemen', code: 'YE', callingCode: '+967', flag: '🇾🇪' },
+  { nameAr: 'المملكة العربية السعودية', nameEn: 'Saudi Arabia', code: 'SA', callingCode: '+966', flag: '🇸🇦' },
+  { nameAr: 'مصر', nameEn: 'Egypt', code: 'EG', callingCode: '+20', flag: '🇪🇬' },
+  { nameAr: 'الإمارات العربية المتحدة', nameEn: 'United Arab Emirates', code: 'AE', callingCode: '+971', flag: '🇦🇪' },
+  { nameAr: 'العراق', nameEn: 'Iraq', code: 'IQ', callingCode: '+964', flag: '🇮🇶' },
+  { nameAr: 'الأردن', nameEn: 'Jordan', code: 'JO', callingCode: '+962', flag: '🇯🇴' },
+  { nameAr: 'سوريا', nameEn: 'Syria', code: 'SY', callingCode: '+963', flag: '🇸🇾' },
+  { nameAr: 'الكويت', nameEn: 'Kuwait', code: 'KW', callingCode: '+965', flag: '🇰🇼' },
+  { nameAr: 'عمان', nameEn: 'Oman', code: 'OM', callingCode: '+968', flag: '🇴🇲' },
+  { nameAr: 'قطر', nameEn: 'Qatar', code: 'QA', callingCode: '+974', flag: '🇶🇦' },
+  { nameAr: 'البحرين', nameEn: 'Bahrain', code: 'BH', callingCode: '+973', flag: '🇧🇭' },
+  { nameAr: 'لبنان', nameEn: 'Lebanon', code: 'LB', callingCode: '+961', flag: '🇱🇧' },
+  { nameAr: 'فلسطين', nameEn: 'Palestine', code: 'PS', callingCode: '+970', flag: '🇵🇸' },
+  { nameAr: 'السودان', nameEn: 'Sudan', code: 'SD', callingCode: '+249', flag: '🇸🇩' },
+  { nameAr: 'ليبيا', nameEn: 'Libya', code: 'LY', callingCode: '+218', flag: '🇱🇾' },
+  { nameAr: 'تونس', nameEn: 'Tunisia', code: 'TN', callingCode: '+216', flag: '🇹🇳' },
+  { nameAr: 'الجزائر', nameEn: 'Algeria', code: 'DZ', callingCode: '+213', flag: '🇩🇿' },
+  { nameAr: 'المغرب', nameEn: 'Morocco', code: 'MA', callingCode: '+212', flag: '🇲🇦' },
+  { nameAr: 'موريتانيا', nameEn: 'Mauritania', code: 'MR', callingCode: '+222', flag: '🇲🇷' },
+  { nameAr: 'الصومال', nameEn: 'Somalia', code: 'SO', callingCode: '+252', flag: '🇸🇴' },
+  { nameAr: 'تركيا', nameEn: 'Turkey', code: 'TR', callingCode: '+90', flag: '🇹🇷' },
+  { nameAr: 'الولايات المتحدة', nameEn: 'United States', code: 'US', callingCode: '+1', flag: '🇺🇸' },
+  { nameAr: 'المملكة المتحدة', nameEn: 'United Kingdom', code: 'GB', callingCode: '+44', flag: '🇬🇧' },
+  { nameAr: 'ألمانيا', nameEn: 'Germany', code: 'DE', callingCode: '+49', flag: '🇩🇪' },
+  { nameAr: 'فرنسا', nameEn: 'France', code: 'FR', callingCode: '+33', flag: '🇫🇷' },
+  { nameAr: 'روسيا', nameEn: 'Russia', code: 'RU', callingCode: '+7', flag: '🇷🇺' },
+  { nameAr: 'كندا', nameEn: 'Canada', code: 'CA', callingCode: '+1', flag: '🇨🇦' },
+  { nameAr: 'ماليزيا', nameEn: 'Malaysia', code: 'MY', callingCode: '+60', flag: '🇲🇾' },
+  { nameAr: 'إندونيسيا', nameEn: 'Indonesia', code: 'ID', callingCode: '+62', flag: '🇮🇩' },
+  { nameAr: 'الهند', nameEn: 'India', code: 'IN', callingCode: '+91', flag: '🇮🇳' },
+  { nameAr: 'الصين', nameEn: 'China', code: 'CN', callingCode: '+86', flag: '🇨🇳' },
+  { nameAr: 'إسبانيا', nameEn: 'Spain', code: 'ES', callingCode: '+34', flag: '🇪🇸' },
+  { nameAr: 'إيطاليا', nameEn: 'Italy', code: 'IT', callingCode: '+39', flag: '🇮🇹' },
+  { nameAr: 'البرازيل', nameEn: 'Brazil', code: 'BR', callingCode: '+55', flag: '🇧🇷' },
+];
+
+const CAROUSEL_SLIDES = [
+  {
+    titleAr: 'تيليجرام',
+    titleEn: 'Telegram',
+    descAr: 'تطبيق المراسلة الأسرع في العالم. إنه مجاني وآمن.',
+    descEn: "The world's fastest messaging app. It is free and secure.",
+  },
+  {
+    titleAr: 'سريع',
+    titleEn: 'Fast',
+    descAr: 'تيليجرام يوصل الرسائل أسرع من أي تطبيق آخر.',
+    descEn: 'Telegram delivers messages faster than any other application.',
+  },
+  {
+    titleAr: 'مجاني',
+    titleEn: 'Free',
+    descAr: 'تيليجرام مجاني للأبد. لا إعلانات. لا اشتراكات.',
+    descEn: 'Telegram is free forever. No ads. No subscription fees.',
+  },
+  {
+    titleAr: 'قوي',
+    titleEn: 'Powerful',
+    descAr: 'لا توجد أي قيود على أحجام وسائطك ومحادثاتك.',
+    descEn: 'Telegram has no limits on the size of your media and chats.',
+  },
+  {
+    titleAr: 'آمن',
+    titleEn: 'Secure',
+    descAr: 'يحافظ تيليجرام على رسائلك آمنة من هجمات المخترقين.',
+    descEn: 'Telegram keeps your messages safe from hacker attacks.',
+  },
+  {
+    titleAr: 'تخزين سحابي',
+    titleEn: 'Cloud-Based',
+    descAr: 'تيليجرام يتيح لك الوصول لرسائلك من أجهزة متعددة.',
+    descEn: 'Telegram lets you access your messages from multiple devices.',
+  },
+];
+
+const NUMPAD_KEYS = [
+  { digit: '1', letters: '' },
+  { digit: '2', letters: 'ABC' },
+  { digit: '3', letters: 'DEF' },
+  { digit: '4', letters: 'GHI' },
+  { digit: '5', letters: 'JKL' },
+  { digit: '6', letters: 'MNO' },
+  { digit: '7', letters: 'PQRS' },
+  { digit: '8', letters: 'TUV' },
+  { digit: '9', letters: 'WXYZ' },
+  { digit: '', letters: '', isEmpty: true },
+  { digit: '0', letters: '+', isZeroPlus: true },
+  { digit: 'backspace', letters: '', isBackspace: true },
+];
+
+/**
+ * Illustrated Telegram Cloud graphic with soft messaging icons
+ * exactly matching Screenshot 1.
+ */
+const TelegramCloudGraphic: React.FC = () => (
+  <div className="relative w-64 h-44 sm:w-72 sm:h-48 mx-auto my-6 flex items-center justify-center select-none">
+    <svg
+      viewBox="0 0 280 180"
+      className="w-full h-full drop-shadow-md"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <linearGradient id="cloud-gradient" x1="20" y1="20" x2="260" y2="182" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#2AB0EB" />
+          <stop offset="1" stopColor="#1E96D3" />
+        </linearGradient>
+      </defs>
+      {/* Cloud Main Organic Shape */}
+      <path
+        d="M216 154H70C42 154 20 131.5 20 104C20 78 40 57 66 54.5C72.5 31 93.5 14 118 14C144 14 165.5 31.5 171.5 56C176 54 181 53 186 53C207 53 224 70 224 91C224 92.5 223.8 94 223.5 95.5C243.5 98.5 259 115.5 259 136.5C259 158 241.5 175 220 175H70"
+        fill="url(#cloud-gradient)"
+      />
+      {/* 1. Camera (center-left) */}
+      <g transform="translate(108, 48) scale(1.15)" fill="#ffffff" opacity="0.4">
+        <path d="M4 11C4 8.79 5.79 7 8 7H9.5L11.2 4.5H16.8L18.5 7H20C22.21 7 24 8.79 24 11V19C24 21.21 22.21 23 20 23H8C5.79 23 4 21.21 4 19V11Z" />
+        <circle cx="14" cy="15" r="4.5" fill="#1E96D3" />
+        <circle cx="14" cy="15" r="2.5" fill="#ffffff" />
+      </g>
+      {/* 2. Video camera (bottom-left) */}
+      <g transform="translate(82, 98) scale(1.15)" fill="#ffffff" opacity="0.4">
+        <rect x="2" y="5" width="16" height="13" rx="3.5" />
+        <path d="M19 8.5L25 5V18L19 14.5V8.5Z" />
+      </g>
+      {/* 3. Smiley face (center) */}
+      <g transform="translate(140, 84) scale(1.25)" stroke="#ffffff" strokeWidth="2.4" fill="none" opacity="0.4">
+        <circle cx="14" cy="14" r="11" />
+        <circle cx="10" cy="11" r="1.3" fill="#ffffff" stroke="none" />
+        <circle cx="18" cy="11" r="1.3" fill="#ffffff" stroke="none" />
+        <path d="M9 16C10.5 19 14 20 15 20C16 20 19.5 19 21 16" strokeLinecap="round" />
+      </g>
+      {/* 4. Speech bubble with chat dots (top-right) */}
+      <g transform="translate(148, 30) scale(1.1)" fill="#ffffff" opacity="0.4">
+        <path d="M4 4C4 1.79 5.79 0 8 0H18C20.21 0 22 1.79 22 4V12C22 14.21 20.21 16 18 16H10L5 19V16H8C5.79 16 4 14.21 4 12V4Z" />
+        <circle cx="9" cy="8" r="1.2" fill="#1E96D3" />
+        <circle cx="13" cy="8" r="1.2" fill="#1E96D3" />
+        <circle cx="17" cy="8" r="1.2" fill="#1E96D3" />
+      </g>
+      {/* 5. Pencil (bottom-right) */}
+      <g transform="translate(182, 92) rotate(35) scale(1.1)" fill="#ffffff" opacity="0.4">
+        <path d="M2 3L14 3L18 0L20 2L16 6L16 18L14 20L2 20C0.9 20 0 19.1 0 18L0 5C0 3.9 0.9 3 2 3Z" />
+      </g>
+    </svg>
+  </div>
+);
 
 interface TelegramAuthScreenProps {
   isAddingAccount?: boolean;
@@ -39,50 +197,36 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
   isAddingAccount = false,
   onCancelAdd,
 }) => {
-  const { login, apiConfig, settings, showToast } = useTelegram();
-  const isArabic = settings.language === 'ar';
+  const { login, apiConfig, settings, showToast, setActiveModal } = useTelegram();
+  const [isArabic, setIsArabic] = useState<boolean>(settings.language === 'ar');
 
-  // Login Mode: 'phone' | 'qr'
-  const [authMode, setAuthMode] = useState<'phone' | 'qr'>('phone');
+  // Dark/Light Theme State for Auth Screen
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
-  // Step: 1 = Phone Input, 2 = SMS/Telegram Code, 3 = 2FA Password (optional), 4 = Name Setup (if new user)
+  // Active Screen View: 'intro' | 'phone' | 'qr'
+  const [currentView, setCurrentView] = useState<'intro' | 'phone' | 'qr'>(() => {
+    return isAddingAccount ? 'phone' : 'intro';
+  });
+
+  // Carousel Slide Index (0 to 5, default to 5 "Cloud Storage" like Screenshot 1)
+  const [activeSlide, setActiveSlide] = useState<number>(5);
+
+  // Auth Step: 1 = Phone Input, 2 = SMS Code, 3 = 2FA Password, 4 = Sign-up Name
   const [authStep, setAuthStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Phone Step State
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [keepSignedIn, setKeepSignedIn] = useState(true);
+  const [selectedCountry, setSelectedCountry] = useState<CountryItem>(COUNTRIES_LIST[0]); // Yemen default
+  const [isCountryModalOpen, setIsCountryModalOpen] = useState(false);
+  const [countrySearchQuery, setCountrySearchQuery] = useState('');
+  const [compatibilityMode, setCompatibilityMode] = useState(false);
 
-  // Detect Country in Real-Time via libphonenumber-js
-  const detectedCountry = useMemo(() => {
-    if (!phoneNumber.trim() || phoneNumber.trim().length < 3) return null;
-    const normalized = normalizeFullPhone(phoneNumber);
-    try {
-      const parsed = parsePhoneNumberFromString(normalized);
-      if (parsed && parsed.country) {
-        const iso: string = parsed.country;
-        const codePoints = iso
-          .toUpperCase()
-          .split('')
-          .map((c) => 127397 + c.charCodeAt(0));
-        const flag = String.fromCodePoint(...codePoints);
-        let name: string = iso;
-        try {
-          const regionNames = new Intl.DisplayNames([isArabic ? 'ar' : 'en'], { type: 'region' });
-          name = regionNames.of(iso) || iso;
-        } catch (_) {}
+  // Three dots more options popover
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
 
-        return {
-          countryCode: iso,
-          callingCode: parsed.countryCallingCode ? `+${parsed.countryCallingCode}` : '',
-          nationalNumber: parsed.nationalNumber || '',
-          flag,
-          name,
-          internationalFormatted: parsed.formatInternational() || normalized,
-        };
-      }
-    } catch (_) {}
-    return null;
-  }, [phoneNumber, isArabic]);
+  // Confirmation Dialog ("هل هذا هو الرقم الصحيح؟" - Screenshot 4)
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
 
   // Code Step State
   const [verificationCode, setVerificationCode] = useState(['', '', '', '', '']);
@@ -94,70 +238,119 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
   const [cloudPassword, setCloudPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Profile Setup Step State (for new registrations)
+  // Profile Setup Step State
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [username, setUsername] = useState('');
 
   // Status & Loading
   const [isLoading, setIsLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
+  const [isConfirmedSuccess, setIsConfirmedSuccess] = useState(false);
 
-  // App Logo Tooltip ('Telegram_Anwer') on Hover & Long Press
-  const [showLogoTooltip, setShowLogoTooltip] = useState(false);
-  const longPressTimerRef = React.useRef<any>(null);
-  const tooltipDismissTimerRef = React.useRef<any>(null);
-
-  const handleLogoPressStart = () => {
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    longPressTimerRef.current = setTimeout(() => {
-      setShowLogoTooltip(true);
-      // Auto dismiss after 2.5s if triggered by long press
-      if (tooltipDismissTimerRef.current) clearTimeout(tooltipDismissTimerRef.current);
-      tooltipDismissTimerRef.current = setTimeout(() => {
-        setShowLogoTooltip(false);
-      }, 2500);
-    }, 350);
-  };
-
-  const handleLogoPressEnd = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
+  // Close more menu on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setIsMoreMenuOpen(false);
+      }
+    };
+    if (isMoreMenuOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
     }
-  };
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isMoreMenuOpen]);
 
-  // Countdown timer for SMS code
+  // Real-time Country detection as user enters digits
+  useEffect(() => {
+    if (!phoneNumber) return;
+    const clean = normalizeFullPhone(phoneNumber);
+    const matched = COUNTRIES_LIST.find((c) => clean.startsWith(c.callingCode));
+    if (matched && matched.code !== selectedCountry.code) {
+      setSelectedCountry(matched);
+    }
+  }, [phoneNumber, selectedCountry.code]);
+
+  // Code resend timer countdown
   useEffect(() => {
     let interval: any;
     if (authStep === 2 && resendTimer > 0) {
-      interval = setInterval(() => {
-        setResendTimer((prev) => prev - 1);
-      }, 1000);
+      interval = setInterval(() => setResendTimer((prev) => prev - 1), 1000);
     } else if (resendTimer === 0) {
       setIsResendActive(true);
     }
     return () => clearInterval(interval);
   }, [authStep, resendTimer]);
 
-  useEffect(() => {
-    return () => {
-      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-      if (tooltipDismissTimerRef.current) clearTimeout(tooltipDismissTimerRef.current);
-    };
-  }, []);
+  // Filtered countries for search modal
+  const filteredCountries = useMemo(() => {
+    if (!countrySearchQuery.trim()) return COUNTRIES_LIST;
+    const q = countrySearchQuery.toLowerCase().trim();
+    return COUNTRIES_LIST.filter(
+      (c) =>
+        c.nameAr.toLowerCase().includes(q) ||
+        c.nameEn.toLowerCase().includes(q) ||
+        c.callingCode.includes(q) ||
+        c.code.toLowerCase().includes(q)
+    );
+  }, [countrySearchQuery]);
 
-  // 1. Submit Phone Number -> Send Code (MTProto auth.sendCode)
-  const handleSendCode = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!phoneNumber.trim()) {
-      showToast(isArabic ? 'يرجى إدخال رقم الهاتف مع مفتاح الدولة' : 'Please enter your phone number with country code', '⚠️');
+  // Numpad button click handler
+  const handleNumpadPress = (key: typeof NUMPAD_KEYS[0]) => {
+    if (key.isEmpty) return;
+
+    if (key.isBackspace) {
+      if (authStep === 1) {
+        setPhoneNumber((prev) => prev.slice(0, -1));
+      } else if (authStep === 2) {
+        // Find last filled code index and clear it
+        const next = [...verificationCode];
+        for (let i = 4; i >= 0; i--) {
+          if (next[i]) {
+            next[i] = '';
+            break;
+          }
+        }
+        setVerificationCode(next);
+      }
       return;
     }
 
-    const fullPhone = normalizeFullPhone(phoneNumber);
+    const val = key.isZeroPlus ? '0' : key.digit;
+
+    if (authStep === 1) {
+      setPhoneNumber((prev) => prev + val);
+    } else if (authStep === 2) {
+      // Find first empty code slot
+      const next = [...verificationCode];
+      const emptyIdx = next.findIndex((d) => !d);
+      if (emptyIdx !== -1) {
+        next[emptyIdx] = val;
+        setVerificationCode(next);
+        if (emptyIdx === 4 && next.every((d) => d !== '')) {
+          verifyCode(next.join(''));
+        }
+      }
+    }
+  };
+
+  // Open confirmation modal when clicking the arrow button on phone screen
+  const handleProceedPhone = () => {
+    if (!phoneNumber.trim() || phoneNumber.replace(/\D/g, '').length < 6) {
+      showToast(
+        isArabic ? 'يرجى إدخال رقم هاتف صالح' : 'Please enter a valid phone number',
+        '⚠️'
+      );
+      return;
+    }
+    setIsConfirmModalOpen(true);
+  };
+
+  // 1. Submit Phone Number -> Send Code (MTProto auth.sendCode)
+  const handleSendCode = async () => {
+    setIsConfirmModalOpen(false);
     setIsLoading(true);
-    setStatusMessage(isArabic ? 'جارٍ الاتصال بسحابة تيليجرام (MTProto 2.0)...' : 'Connecting to Telegram MTProto...');
+    setIsConfirmedSuccess(true);
+
+    const fullPhone = normalizeFullPhone(phoneNumber);
 
     try {
       const result = await loginController.sendCode(
@@ -173,110 +366,64 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
         setResendTimer(result.timeout || 60);
         setIsResendActive(false);
         showToast(
-          result.message || (isArabic ? `تم إرسال رمز التحقق إلى ${result.formattedPhone || fullPhone}` : `Code sent to ${result.formattedPhone || fullPhone}`),
+          result.message || (isArabic ? `تم إرسال رمز التحقق إلى ${fullPhone}` : `Code sent to ${fullPhone}`),
           '📩'
         );
       } else {
         showToast(result.message || (isArabic ? 'فشل إرسال رمز التحقق' : 'Failed to send code'), '❌');
+        setIsConfirmedSuccess(false);
       }
     } catch {
       showToast(isArabic ? 'خطأ في الاتصال بالخادم' : 'Connection error', '❌');
+      setIsConfirmedSuccess(false);
     } finally {
       setIsLoading(false);
-      setStatusMessage('');
     }
   };
 
-  // 2. Handle Code Input & Auto Submit (MTProto auth.signIn)
-  const handleCodeChange = (index: number, val: string) => {
-    if (val.length > 1) {
-      // Pasted multi-character code
-      const digits = val.replace(/\D/g, '').slice(0, 5).split('');
-      const newCode = [...verificationCode];
-      digits.forEach((d, idx) => {
-        newCode[idx] = d;
-      });
-      setVerificationCode(newCode);
-      if (digits.length === 5) {
-        verifyCode(newCode.join(''));
-      }
-      return;
-    }
-
-    const newCode = [...verificationCode];
-    newCode[index] = val;
-    setVerificationCode(newCode);
-
-    // Auto-focus next input
-    if (val && index < 4) {
-      const nextInput = document.getElementById(`tg-code-input-${index + 1}`);
-      nextInput?.focus();
-    }
-
-    // If 5 digits completed, verify automatically
-    if (newCode.every((digit) => digit !== '')) {
-      verifyCode(newCode.join(''));
-    }
-  };
-
-  const handleCodeKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace' && !verificationCode[index] && index > 0) {
-      const prevInput = document.getElementById(`tg-code-input-${index - 1}`);
-      prevInput?.focus();
-    }
-  };
-
+  // 2. Verify SMS Code
   const verifyCode = async (code: string) => {
     const fullPhone = normalizeFullPhone(phoneNumber);
     setIsLoading(true);
-    setStatusMessage(isArabic ? 'جارٍ التحقق من الرمز وفك التشفير عبر MTProto...' : 'Verifying MTProto AuthKey...');
 
     try {
-      const result = await loginController.signIn(
-        fullPhone,
-        phoneCodeHash,
-        code
-      );
+      const result = await loginController.signIn(fullPhone, phoneCodeHash, code);
 
       if (result.success && result.user) {
         const u = result.user;
         login({
           name: [u.firstName, u.lastName].filter(Boolean).join(' ') || (firstName.trim() ? `${firstName.trim()} ${lastName.trim()}`.trim() : 'مستخدم تيليجرام'),
           phone: fullPhone,
-          username: u.username || username.trim() || undefined,
+          username: u.username || undefined,
           avatar: u.avatar || '',
-          bio: 'Telegram Official Client (Native MTProto 2.0 Layer 184)',
+          bio: 'Telegram MTProto Layer 184 Authenticated Session',
           sessionString: result.sessionString,
         });
-        showToast(isArabic ? 'تم تسجيل الدخول بنجاح! مرحباً بك' : 'Successfully logged in!', '🚀');
+        showToast(isArabic ? 'تم تسجيل الدخول بنجاح!' : 'Logged in successfully!', '🎉');
       } else if (result.requiresPassword) {
         setAuthStep(3);
-        showToast(isArabic ? 'يتطلب الحساب كلمة مرور التحقق بخطوتين (2FA)' : '2FA Cloud Password required', '🔒');
+        showToast(isArabic ? 'هذا الحساب محمي بالتحقق بخطوتين (2FA)' : '2FA Password Required', '🔐');
       } else if (result.signUpRequired) {
         setAuthStep(4);
-        showToast(isArabic ? 'هذا الرقم غير مسجل، يرجى إدخال اسمك لإنشاء الحساب' : 'Please enter your name to register', '📝');
+        showToast(isArabic ? 'حساب جديد، يرجى إدخال اسمك' : 'New account, enter your name', '👤');
       } else {
         showToast(result.message || (isArabic ? 'رمز التحقق غير صحيح' : 'Invalid code'), '❌');
+        setVerificationCode(['', '', '', '', '']);
       }
     } catch {
       showToast(isArabic ? 'خطأ أثناء التحقق' : 'Verification error', '❌');
     } finally {
       setIsLoading(false);
-      setStatusMessage('');
     }
   };
 
-  // 3. Handle 2FA Password Submission
-  const handleVerify2FAPassword = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!cloudPassword.trim()) {
-      showToast(isArabic ? 'يرجى إدخال كلمة مرور 2FA' : 'Please enter 2FA password', '⚠️');
-      return;
-    }
+  // 3. Verify 2FA Password
+  const handleVerify2FAPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cloudPassword.trim()) return;
 
-    const fullPhone = normalizeFullPhone(phoneNumber);
     setIsLoading(true);
-    setStatusMessage(isArabic ? 'جارٍ التحقق من كلمة المرور وفك التشفير السحابي...' : 'Verifying 2FA password...');
+    const fullPhone = normalizeFullPhone(phoneNumber);
 
     try {
       const result = await loginController.signIn(
@@ -285,700 +432,718 @@ export const TelegramAuthScreen: React.FC<TelegramAuthScreenProps> = ({
         verificationCode.join(''),
         cloudPassword.trim()
       );
-
       if (result.success && result.user) {
         const u = result.user;
         login({
-          name: [u.firstName, u.lastName].filter(Boolean).join(' ') || (firstName.trim() ? `${firstName.trim()} ${lastName.trim()}`.trim() : 'مستخدم تيليجرام'),
+          name: [u.firstName, u.lastName].filter(Boolean).join(' ') || 'مستخدم تيليجرام',
           phone: fullPhone,
-          username: u.username || username.trim() || undefined,
+          username: u.username || undefined,
           avatar: u.avatar || '',
-          bio: 'Telegram Official Client (Native MTProto 2.0 Layer 184)',
+          bio: 'Telegram MTProto Layer 184 Authenticated Session',
           sessionString: result.sessionString,
         });
-        showToast(isArabic ? 'تم توثيق الحساب وتسجيل الدخول بنجاح!' : 'Successfully authenticated!', '🚀');
+        showToast(isArabic ? 'تم تأكيد كلمة المرور وتسجيل الدخول!' : '2FA Verified Successfully!', '🎉');
       } else {
-        showToast(result.message || (isArabic ? 'كلمة المرور غير صحيحة' : 'Invalid 2FA password'), '❌');
+        showToast(result.message || (isArabic ? 'كلمة المرور غير صحيحة' : 'Incorrect password'), '❌');
       }
     } catch {
-      showToast(isArabic ? 'خطأ أثناء التحقق من كلمة المرور' : 'Password verification error', '❌');
+      showToast(isArabic ? 'خطأ في التحقق من كلمة المرور' : 'Password verification error', '❌');
     } finally {
       setIsLoading(false);
-      setStatusMessage('');
     }
   };
 
-  // 3.5 Handle SignUp Submission (auth.signUp)
-  const handleSignUpSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!firstName.trim()) {
-      showToast(isArabic ? 'يرجى إدخال الاسم الأول على الأقل' : 'Please enter your first name', '⚠️');
-      return;
-    }
+  // 4. Submit Sign-up Name
+  const handleSignUpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firstName.trim()) return;
 
-    const fullPhone = normalizeFullPhone(phoneNumber);
     setIsLoading(true);
-    setStatusMessage(isArabic ? 'جارٍ إنشاء الحساب الجديد في سحابة تيليجرام...' : 'Creating new Telegram account...');
+    const fullPhone = normalizeFullPhone(phoneNumber);
 
     try {
-      const result = await loginController.signUp(
-        fullPhone,
-        phoneCodeHash,
-        firstName.trim(),
-        lastName.trim()
-      );
-
+      const result = await loginController.signUp(fullPhone, phoneCodeHash, firstName.trim(), lastName.trim());
       if (result.success && result.user) {
         const u = result.user;
         login({
-          name: `${firstName.trim()} ${lastName.trim()}`.trim() || 'مستخدم تيليجرام',
+          name: `${firstName.trim()} ${lastName.trim()}`.trim(),
           phone: fullPhone,
-          username: username.trim() || undefined,
-          avatar: u.avatar || '',
-          bio: 'Telegram Official Client (Native MTProto 2.0 Layer 184)',
+          username: u.username || undefined,
+          avatar: '',
+          bio: 'New Telegram Account',
           sessionString: result.sessionString,
         });
-        showToast(isArabic ? 'تم إنشاء الحساب وتسجيل الدخول بنجاح! أهلاً بك' : 'Account created successfully!', '🎉');
+        showToast(isArabic ? 'تم إنشاء الحساب وتسجيل الدخول بنجاح!' : 'Account created successfully!', '🎉');
       } else {
-        showToast(result.message || (isArabic ? 'فشل إنشاء الحساب' : 'Registration failed'), '❌');
+        showToast(result.message || (isArabic ? 'فشل إنشاء الحساب' : 'Failed to sign up'), '❌');
       }
     } catch {
-      showToast(isArabic ? 'خطأ في إنشاء الحساب' : 'Registration error', '❌');
+      showToast(isArabic ? 'خطأ في إنشاء الحساب' : 'Sign up error', '❌');
     } finally {
       setIsLoading(false);
-      setStatusMessage('');
     }
   };
 
-
-
-  // 5. Official Telegram MTProto QR Code Login Subsystem
+  // QR Code Generation state
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [qrSessionId, setQrSessionId] = useState<string>('');
-  const [qrDataUrl, setQrDataUrl] = useState<string>('');
-  const [qrUrl, setQrUrl] = useState<string>('');
-  const [isQrLoading, setIsQrLoading] = useState<boolean>(false);
-  const [qrError, setQrError] = useState<string | null>(null);
 
   const loadQrCode = useCallback(async () => {
-    setIsQrLoading(true);
-    setQrError(null);
     try {
-      const res = await fetch('/api/telegram/auth/qr/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const res = await fetch('/api/telegram/auth/qr/export', { method: 'POST' });
       const data = await res.json();
-      if (data.success && data.qrUrl) {
-        setQrSessionId(data.qrSessionId);
-        setQrUrl(data.qrUrl);
-        const dataUrl = await QRCode.toDataURL(data.qrUrl, {
-          width: 240,
+      if (data.success && data.token) {
+        const tgLink = `tg://login?token=${data.token}`;
+        const url = await QRCode.toDataURL(tgLink, {
+          width: 260,
           margin: 1,
-          color: {
-            dark: '#000000',
-            light: '#ffffff',
-          },
+          color: { dark: '#000000', light: '#ffffff' },
         });
-        setQrDataUrl(dataUrl);
-      } else {
-        setQrError(data.message || (isArabic ? 'فشل استخراج رمز الاستجابة السريعة' : 'Failed to generate QR code'));
+        setQrCodeUrl(url);
+        setQrSessionId(data.sessionId || data.token);
       }
-    } catch (err: any) {
-      setQrError(err.message || (isArabic ? 'تعذر الاتصال بخادم تيليجرام' : 'Connection error'));
-    } finally {
-      setIsQrLoading(false);
-    }
-  }, [isArabic]);
+    } catch (_) {}
+  }, []);
 
   useEffect(() => {
-    if (authMode === 'qr') {
+    if (currentView === 'qr') {
       loadQrCode();
     }
-  }, [authMode, loadQrCode]);
-
-  useEffect(() => {
-    if (authMode !== 'qr' || !qrSessionId) return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch('/api/telegram/auth/qr/check', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ qrSessionId }),
-        });
-        const data = await res.json();
-        if (data.success && data.authenticated && data.user) {
-          clearInterval(interval);
-          login({
-            name: `${data.user.firstName || ''} ${data.user.lastName || ''}`.trim() || 'مستخدم تيليجرام',
-            phone: data.user.phone || '',
-            username: data.user.username,
-            avatar: '',
-            bio: 'Telegram MTProto Layer 184 Authenticated Session',
-            sessionString: data.sessionString,
-          });
-          showToast(isArabic ? 'تم توثيق الحساب وتسجيل الدخول عبر رمز QR بنجاح!' : 'QR Login Successful!', '🎉');
-        } else if (data.requires2FA) {
-          clearInterval(interval);
-          setAuthStep(3);
-          setAuthMode('phone');
-          showToast(isArabic ? 'هذا الحساب محمي بكلمة مرور التحقق بخطوتين (2FA)' : '2FA Password Required', '🔐');
-        }
-      } catch (_) {}
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [authMode, qrSessionId, isArabic, login, showToast]);
+  }, [currentView, loadQrCode]);
 
   return (
     <div
-      id="tg-auth-screen-root"
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 select-none font-sans overflow-y-auto bg-[#0e1621] text-white"
+      id="tg-official-auth-root"
+      className={`fixed inset-0 z-50 flex flex-col items-center justify-between overflow-y-auto select-none font-sans transition-colors duration-200 ${
+        isDarkMode ? 'bg-[#0e1621] text-white' : 'bg-white text-gray-900'
+      }`}
       dir={isArabic ? 'rtl' : 'ltr'}
     >
-      {/* Top Background Ambient Glow */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-64 bg-[#2481cc]/15 rounded-full blur-3xl pointer-events-none" />
-
-      {/* Main Auth Container Card */}
-      <div
-        className="relative w-full max-w-[440px] bg-[#17212b] border border-[#242f3d] rounded-3xl shadow-2xl overflow-hidden p-6 sm:p-8 flex flex-col items-center text-center my-auto transition-all duration-300 animate-in fade-in zoom-in-95"
-      >
-        {/* Cancel Button if adding account */}
-        {isAddingAccount && onCancelAdd && (
-          <button
-            onClick={onCancelAdd}
-            className="absolute top-4 end-4 p-2 text-gray-400 hover:text-white rounded-full hover:bg-white/5 transition-colors"
-            title={isArabic ? 'إلغاء' : 'Cancel'}
-          >
-            <X size={20} />
-          </button>
-        )}
-
-        {/* Telegram Paper Airplane Logo - Multi-color animated gradient with Telegram_Anwer tooltip */}
-        <div
-          id="telegram-app-logo"
-          title="Telegram_Anwer"
-          className="relative w-20 h-20 rounded-full tg-multicolor-gradient flex items-center justify-center shadow-xl shadow-sky-500/25 mb-5 cursor-pointer hover:scale-105 active:scale-95 transition-transform select-none"
-          onClick={() => {
-            if (authMode === 'phone') setAuthMode('qr');
-            else setAuthMode('phone');
-          }}
-          onMouseEnter={() => setShowLogoTooltip(true)}
-          onMouseLeave={() => {
-            setShowLogoTooltip(false);
-            handleLogoPressEnd();
-          }}
-          onTouchStart={handleLogoPressStart}
-          onTouchEnd={() => {
-            handleLogoPressEnd();
-            setTimeout(() => setShowLogoTooltip(false), 2000);
-          }}
-          onTouchCancel={() => {
-            handleLogoPressEnd();
-            setShowLogoTooltip(false);
-          }}
-          onMouseDown={handleLogoPressStart}
-          onMouseUp={handleLogoPressEnd}
-        >
-          {/* Tooltip on Hover & Long Press */}
-          <AnimatePresence>
-            {showLogoTooltip && (
-              <motion.div
-                initial={{ opacity: 0, y: 6, scale: 0.88 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 4, scale: 0.9 }}
-                transition={{ duration: 0.18, ease: 'easeOut' }}
-                className="absolute -top-10 left-1/2 -translate-x-1/2 z-40 pointer-events-none whitespace-nowrap px-3 py-1.5 bg-[#17212b]/95 border border-[#2481cc]/60 backdrop-blur-md rounded-xl shadow-2xl shadow-black/80 text-white text-[12px] font-bold tracking-wide flex items-center gap-1.5"
-              >
-                <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-                <span className="text-white drop-shadow">Telegram_Anwer</span>
-                {/* Arrow pointing down */}
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#17212b] border-b border-r border-[#2481cc]/60 rotate-45" />
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <div className="tg-multicolor-glow" />
-          <svg className="w-11 h-11 text-white -translate-x-0.5 relative z-10 drop-shadow-md" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.77-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z" />
-          </svg>
-
-          {/* Glowing Ring */}
-          <div className="absolute inset-0 rounded-full border-2 border-white/40 animate-pulse pointer-events-none" />
-        </div>
-
-        {/* Title and Subtitle */}
-        <h1 className="text-2xl font-bold text-white tracking-tight mb-1.5">
-          {isAddingAccount
-            ? isArabic ? 'إضافة حساب تيليجرام' : 'Add Telegram Account'
-            : isArabic ? 'تسجيل الدخول إلى تيليجرام' : 'Log in to Telegram'}
-        </h1>
-
-        <p className="text-xs text-gray-400 max-w-xs mb-6">
-          {authMode === 'phone'
-            ? authStep === 1
-              ? isArabic
-                ? 'يرجى تأكيد رمز الدولة وإدخال رقم هاتفك لتسجيل الدخول بأمان'
-                : 'Please confirm your country code and enter your phone number'
-              : authStep === 2
-              ? isArabic
-                ? `أدخل رمز التحقق المكون من 5 أرقام المُرسل إلى هاتفك`
-                : `Enter the 5-digit code sent to your phone`
-              : isArabic
-              ? 'أدخل كلمة مرور التحقق بخطوتين (2FA)'
-              : 'Enter your 2FA Cloud Password'
-            : isArabic
-            ? 'امسح رمز الاستجابة السريعة (QR) من تطبيق تيليجرام على هاتفك'
-            : 'Scan this QR code with your mobile Telegram app'}
-        </p>
-
-        {/* Mode Switcher Tabs */}
-        <div className="w-full grid grid-cols-2 p-1 bg-[#0e1621] rounded-2xl border border-white/5 mb-6">
-          <button
-            type="button"
-            onClick={() => {
-              setAuthMode('phone');
-              setAuthStep(1);
-            }}
-            className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold transition-all ${
-              authMode === 'phone'
-                ? 'bg-[#2481cc] text-white shadow-md'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <Phone size={15} />
-            <span>{isArabic ? 'رقم الهاتف' : 'Phone Number'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setAuthMode('qr')}
-            className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold transition-all ${
-              authMode === 'qr'
-                ? 'bg-[#2481cc] text-white shadow-md'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <QrCode size={15} />
-            <span>{isArabic ? 'رمز QR السريع' : 'Quick QR Code'}</span>
-          </button>
-        </div>
-
-        {/* ======================================================== */}
-        {/* TAB 1: PHONE NUMBER AUTH FLOW */}
-        {/* ======================================================== */}
-        {authMode === 'phone' && (
-          <div className="w-full">
-            {/* STEP 1: Single Phone Input with Auto Country Detection */}
-            {authStep === 1 && (
-              <form onSubmit={handleSendCode} className="w-full space-y-4">
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-gray-200 text-start">
-                      {isArabic ? 'رقم الهاتف مع رمز الدولة' : 'Phone Number (with Country Code)'}
-                    </label>
-                    {detectedCountry && (
-                      <div className="flex items-center gap-1.5 text-xs text-sky-400 font-medium">
-                        <span>{detectedCountry.flag}</span>
-                        <span>{detectedCountry.name}</span>
-                        <span className="font-mono text-gray-400 text-[11px]">({detectedCountry.callingCode})</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative flex items-center" dir="ltr">
-                    <div className="absolute start-3.5 flex items-center gap-1.5 text-gray-400 pointer-events-none select-none">
-                      {detectedCountry ? (
-                        <span className="text-lg leading-none">{detectedCountry.flag}</span>
-                      ) : (
-                        <Phone size={18} className="text-[#5288c1]" />
-                      )}
-                    </div>
-                    <input
-                      id="tg-auth-phone-input"
-                      type="tel"
-                      required
-                      autoFocus
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value)}
-                      placeholder={
-                        isArabic
-                          ? '+967 777 777 777 (رمز الدولة + الرقم)'
-                          : '+1 555 123 4567 (Country code + Phone)'
-                      }
-                      className="w-full bg-[#0e1621] border border-[#2b394a] focus:border-[#2481cc] text-white text-base font-mono rounded-2xl ps-12 pe-4 py-3 outline-none transition-all placeholder:text-gray-500 tracking-wide focus:ring-2 focus:ring-[#2481cc]/25"
-                    />
-                  </div>
-
-                  {/* Dynamic Country Status & Hint */}
-                  <div className="mt-2 text-start">
-                    {detectedCountry ? (
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0e1621] border border-[#2481cc]/30 rounded-xl text-xs text-sky-400">
-                        <span className="text-base">{detectedCountry.flag}</span>
-                        <span className="text-white font-medium">{detectedCountry.name}</span>
-                        <span className="text-gray-400 font-mono text-[11px]">({detectedCountry.callingCode})</span>
-                        <span className="ms-auto text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                          {isArabic ? 'الدولة مكتشفة تلقائياً' : 'Auto-detected'}
-                        </span>
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-gray-400 px-1">
-                        {isArabic
-                          ? '💡 الصق أو اكتب الرقم كاملاً مع مفتاح الدولة (مثال: +967777777777 أو +966555555555)'
-                          : '💡 Enter or paste your full number with country code (e.g., +1..., +967..., +966...)'}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Keep Signed In Checkbox */}
-                <label className="flex items-center gap-2.5 cursor-pointer text-xs text-gray-300 select-none text-start pt-1">
-                  <input
-                    type="checkbox"
-                    checked={keepSignedIn}
-                    onChange={(e) => setKeepSignedIn(e.target.checked)}
-                    className="w-4 h-4 rounded text-[#2481cc] bg-[#0e1621] border-gray-600 focus:ring-0 cursor-pointer"
-                  />
-                  <span>{isArabic ? 'البقاء قيد تسجيل الدخول (حفظ الجلسة سحابياً)' : 'Keep me signed in'}</span>
-                </label>
-
-                {/* Next / Submit Button */}
-                <button
-                  type="submit"
-                  disabled={isLoading || !phoneNumber.trim()}
-                  className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] active:scale-[0.99] disabled:opacity-50 text-white text-sm font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 flex items-center justify-center gap-2 transition-all mt-2 cursor-pointer"
-                >
-                  {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <span>{isArabic ? 'التالي (طلب رمز التحقق)' : 'Next (Request Code)'}</span>
-                      {isArabic ? <ArrowLeft size={16} /> : <ArrowRight size={16} />}
-                    </>
-                  )}
-                </button>
-
-
-              </form>
-            )}
-
-            {/* STEP 2: Verification Code Entry */}
-            {authStep === 2 && (
-              <div className="w-full space-y-5">
-                <div className="flex items-center justify-center gap-2 text-sm font-mono text-[#5288c1] bg-[#0e1621] p-2.5 rounded-2xl border border-white/5">
-                  <Phone size={14} />
-                  <span>{detectedCountry?.internationalFormatted || normalizeFullPhone(phoneNumber)}</span>
-                  {detectedCountry && (
-                    <span className="text-xs text-gray-400">({detectedCountry.name})</span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setAuthStep(1)}
-                    className="text-xs text-gray-400 hover:text-white underline ms-2 cursor-pointer"
-                  >
-                    {isArabic ? 'تعديل' : 'Edit'}
-                  </button>
-                </div>
-
-                {/* 5-Digit Inputs */}
-                <div className="flex items-center justify-center gap-2.5" dir="ltr">
-                  {verificationCode.map((digit, idx) => (
-                    <input
-                      key={idx}
-                      id={`tg-code-input-${idx}`}
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={1}
-                      value={digit}
-                      onChange={(e) => handleCodeChange(idx, e.target.value)}
-                      onKeyDown={(e) => handleCodeKeyDown(idx, e)}
-                      autoFocus={idx === 0}
-                      className="w-12 h-14 bg-[#0e1621] border border-[#2b394a] focus:border-[#2481cc] text-white text-xl font-mono font-bold text-center rounded-2xl outline-none focus:ring-2 focus:ring-[#2481cc]/40 transition-all"
-                    />
-                  ))}
-                </div>
-
-                {/* Countdown & Resend Code */}
-                <div className="text-center">
-                  {resendTimer > 0 ? (
-                    <p className="text-xs text-gray-400 font-mono">
-                      {isArabic
-                        ? `إعادة إرسال الرمز بعد ${resendTimer} ثانية`
-                        : `Resend code in ${resendTimer}s`}
-                    </p>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setResendTimer(60);
-                        setIsResendActive(false);
-                        showToast(isArabic ? 'تمت إعادة إرسال رمز التحقق' : 'Code resent', '📩');
-                      }}
-                      className="text-xs font-semibold text-[#2481cc] hover:underline"
-                    >
-                      {isArabic ? 'إعادة إرسال الرمز عبر رسالة SMS' : 'Resend code via SMS'}
-                    </button>
-                  )}
-                </div>
-
-                {/* Manual Verify Button */}
-                <button
-                  type="button"
-                  disabled={isLoading || verificationCode.some((d) => !d)}
-                  onClick={() => verifyCode(verificationCode.join(''))}
-                  className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] disabled:opacity-50 text-white text-sm font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 flex items-center justify-center gap-2 transition-all"
-                >
-                  {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <Check size={16} />
-                      <span>{isArabic ? 'تأكيد الرمز والدخول' : 'Confirm Code & Log In'}</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-
-            {/* STEP 3: 2FA Cloud Password Entry */}
-            {authStep === 3 && (
-              <form onSubmit={handleVerify2FAPassword} className="w-full space-y-4">
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-start">
-                  <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs mb-1">
-                    <Lock size={14} />
-                    <span>{isArabic ? 'التحقق بخطوتين (2FA) مفعل' : 'Two-Step Verification Enabled'}</span>
-                  </div>
-                  <p className="text-[11px] text-gray-300">
-                    {isArabic
-                      ? 'هذا الحساب محمي بكلمة مرور سحابية إضافية على تيليجرام. يرجى إدخالها للمتابعة.'
-                      : 'This account is protected by an additional cloud password. Please enter it to continue.'}
-                  </p>
-                </div>
-
-                <div className="space-y-1 text-start">
-                  <label className="text-xs text-gray-400 font-medium">
-                    {isArabic ? 'كلمة المرور السحابية (2FA Password)' : 'Cloud Password'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={cloudPassword}
-                      onChange={(e) => setCloudPassword(e.target.value)}
-                      placeholder={isArabic ? 'أدخل كلمة المرور السحابية' : 'Enter your 2FA password'}
-                      autoFocus
-                      className="w-full px-4 py-3 bg-[#0e1621] border border-[#2b394a] focus:border-[#2481cc] text-white text-sm rounded-2xl outline-none focus:ring-2 focus:ring-[#2481cc]/40 transition-all pe-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute end-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                    >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isLoading || !cloudPassword.trim()}
-                  className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] disabled:opacity-50 text-white text-sm font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 flex items-center justify-center gap-2 transition-all"
-                >
-                  {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <Lock size={16} />
-                      <span>{isArabic ? 'تأكيد كلمة المرور وتسجيل الدخول' : 'Confirm Password & Sign In'}</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setAuthStep(2)}
-                  className="text-xs text-gray-400 hover:text-white underline w-full text-center"
-                >
-                  {isArabic ? 'العودة لرمز التحقق' : 'Back to Code'}
-                </button>
-              </form>
-            )}
-
-            {/* STEP 4: Profile Sign-up (New User Registration) */}
-            {authStep === 4 && (
-              <form onSubmit={handleSignUpSubmit} className="w-full space-y-4">
-                <div className="p-3 bg-[#2481cc]/10 border border-[#2481cc]/20 rounded-2xl text-start">
-                  <div className="flex items-center gap-2 text-[#5288c1] font-semibold text-xs mb-1">
-                    <UserIcon size={14} />
-                    <span>{isArabic ? 'إنشاء حساب تيليجرام جديد' : 'New Telegram Registration'}</span>
-                  </div>
-                  <p className="text-[11px] text-gray-300">
-                    {isArabic
-                      ? 'هذا الرقم جديد في تيليجرام. يرجى إدخال اسمك لإكمال التسجيل والتفعيل.'
-                      : 'This number is new to Telegram. Please enter your name to complete registration.'}
-                  </p>
-                </div>
-
-                <div className="space-y-3 text-start">
-                  <div className="space-y-1">
-                    <label className="text-xs text-gray-400 font-medium">
-                      {isArabic ? 'الاسم الأول (مطلوب)' : 'First Name (Required)'}
-                    </label>
-                    <input
-                      type="text"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder={isArabic ? 'الاسم الأول' : 'First Name'}
-                      autoFocus
-                      required
-                      className="w-full px-4 py-2.5 bg-[#0e1621] border border-[#2b394a] focus:border-[#2481cc] text-white text-sm rounded-2xl outline-none focus:ring-2 focus:ring-[#2481cc]/40 transition-all"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs text-gray-400 font-medium">
-                      {isArabic ? 'اسم العائلة (اختياري)' : 'Last Name (Optional)'}
-                    </label>
-                    <input
-                      type="text"
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      placeholder={isArabic ? 'اسم العائلة' : 'Last Name'}
-                      className="w-full px-4 py-2.5 bg-[#0e1621] border border-[#2b394a] focus:border-[#2481cc] text-white text-sm rounded-2xl outline-none focus:ring-2 focus:ring-[#2481cc]/40 transition-all"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isLoading || !firstName.trim()}
-                  className="w-full py-3 bg-[#2481cc] hover:bg-[#1f6fa8] disabled:opacity-50 text-white text-sm font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 flex items-center justify-center gap-2 transition-all"
-                >
-                  {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <Check size={16} />
-                      <span>{isArabic ? 'إتمام التسجيل والدخول' : 'Complete Registration'}</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setAuthStep(1)}
-                  className="text-xs text-gray-400 hover:text-white underline w-full text-center"
-                >
-                  {isArabic ? 'إلغاء والعودة للبداية' : 'Cancel & Start Over'}
-                </button>
-              </form>
-            )}
-          </div>
-        )}
-
-        {/* ======================================================== */}
-        {/* TAB 2: QR CODE SCANNER FLOW (REAL MTPROTO 2.0 LAYER 184) */}
-        {/* ======================================================== */}
-        {authMode === 'qr' && (
-          <div className="w-full flex flex-col items-center space-y-4">
-            {/* QR Visual Container */}
-            <div
-              className="relative w-60 h-60 bg-white p-3 rounded-3xl shadow-xl flex items-center justify-center overflow-hidden border-4 border-[#2481cc]/30"
+      {/* ======================================================== */}
+      {/* SCREEN 1: WELCOME INTRO & CAROUSEL (Screenshot 1) */}
+      {/* ======================================================== */}
+      {currentView === 'intro' && (
+        <div className="w-full max-w-md mx-auto min-h-full flex flex-col justify-between p-6 sm:p-8 animate-in fade-in duration-200">
+          {/* Top Right: Theme Toggle Icon (Moon/Stars) */}
+          <div className="flex items-center justify-end w-full pt-2">
+            <button
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className="p-2.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-sky-500 transition-colors"
+              title={isDarkMode ? 'الوضع النهاري' : 'الوضع الليلي'}
             >
-              {isQrLoading ? (
-                <div className="flex flex-col items-center justify-center space-y-2 text-slate-800">
-                  <RefreshCw className="w-8 h-8 animate-spin text-[#2481cc]" />
-                  <span className="text-xs font-semibold text-gray-600">
-                    {isArabic ? 'جارٍ توليد الرمز الآمن من تيليجرام...' : 'Connecting to MTProto...'}
-                  </span>
-                </div>
-              ) : qrError ? (
-                <div className="flex flex-col items-center justify-center p-3 text-center space-y-2 text-red-600">
-                  <span className="text-xs font-semibold">{qrError}</span>
-                  <button
-                    type="button"
-                    onClick={loadQrCode}
-                    className="px-3 py-1 bg-[#2481cc] text-white text-xs font-bold rounded-lg hover:bg-[#1f6fa8] transition-colors"
-                  >
-                    {isArabic ? 'إعادة المحاولة' : 'Retry'}
-                  </button>
-                </div>
-              ) : qrDataUrl ? (
-                <div className="relative w-full h-full flex items-center justify-center">
-                  <img
-                    src={qrDataUrl}
-                    alt="Telegram MTProto Login QR"
-                    className="w-full h-full object-contain rounded-xl select-none pointer-events-none"
-                  />
-                  {/* Telegram Paper Airplane Center Badge */}
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-[#2481cc] border-2 border-white flex items-center justify-center shadow-lg pointer-events-none">
-                    <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.77-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z" />
-                    </svg>
-                  </div>
-                  {/* Animated Laser Scanning Line */}
-                  <motion.div
-                    animate={{ y: [-90, 90, -90] }}
-                    transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-                    className="absolute left-1 right-1 h-0.5 bg-gradient-to-r from-transparent via-[#2481cc] to-transparent shadow-[0_0_8px_#2481cc] pointer-events-none"
-                  />
-                </div>
-              ) : null}
-            </div>
+              {isDarkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6 fill-current" />}
+            </button>
+          </div>
 
-            {/* Step instructions */}
-            <div className="w-full bg-[#0e1621] p-3 rounded-2xl border border-white/5 text-start space-y-1.5">
-              <div className="text-xs text-gray-300 font-semibold mb-1">
-                {isArabic ? 'طريقة تسجيل الدخول بالرمز الرسمي:' : 'How to log in with official QR:'}
-              </div>
-              <ol className="text-[11px] text-gray-400 space-y-1 list-decimal list-inside">
-                <li>{isArabic ? 'افتح تطبيق تيليجرام على هاتفك الجوال' : 'Open Telegram on your mobile device'}</li>
-                <li>{isArabic ? 'انتقل إلى الإعدادات > الأجهزة > ربط جهاز بالحاسوب' : 'Go to Settings > Devices > Link Desktop Device'}</li>
-                <li>{isArabic ? 'وجه الكاميرا نحو هذه الشاشة لتسجيل الدخول فورياً' : 'Scan this code to log in instantly'}</li>
-              </ol>
-            </div>
+          {/* Center Content: Animated Cloud Graphic, Title, Description, Dots */}
+          <div className="flex-1 flex flex-col items-center justify-center text-center my-auto">
+            {/* Illustrated Telegram Cloud with inside icons */}
+            <TelegramCloudGraphic />
 
-            {/* Quick Actions */}
-            <div className="w-full flex gap-2">
+            {/* Slide Title */}
+            <h1 className="text-2xl sm:text-[26px] font-bold tracking-tight mb-2">
+              {isArabic ? CAROUSEL_SLIDES[activeSlide].titleAr : CAROUSEL_SLIDES[activeSlide].titleEn}
+            </h1>
+
+            {/* Slide Description */}
+            <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 max-w-xs leading-relaxed mb-6">
+              {isArabic ? CAROUSEL_SLIDES[activeSlide].descAr : CAROUSEL_SLIDES[activeSlide].descEn}
+            </p>
+
+            {/* Carousel Pagination Dots (6 Dots) */}
+            <div className="flex items-center justify-center gap-2 mb-8">
+              {CAROUSEL_SLIDES.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setActiveSlide(idx)}
+                  className={`transition-all rounded-full ${
+                    activeSlide === idx
+                      ? 'w-2 h-2 bg-[#3390ec]'
+                      : 'w-1.5 h-1.5 bg-gray-300 dark:bg-gray-600 hover:bg-gray-400'
+                  }`}
+                  aria-label={`Slide ${idx + 1}`}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Bottom Area: Language Switch Link & Start Messaging Pill Button */}
+          <div className="w-full flex flex-col items-center gap-4 pb-4">
+            {/* Language Toggle Link */}
+            <button
+              onClick={() => setIsArabic(!isArabic)}
+              className="text-sm font-semibold text-[#3390ec] hover:underline transition-colors"
+            >
+              {isArabic ? 'Continue in English' : 'المتابعة باللغة العربية'}
+            </button>
+
+            {/* Start Messaging Main Button */}
+            <button
+              id="tg-start-messaging-btn"
+              onClick={() => {
+                setCurrentView('phone');
+                setPhoneNumber(selectedCountry.callingCode);
+              }}
+              className="w-full py-3.5 px-6 rounded-full font-bold text-white text-base shadow-lg bg-gradient-to-r from-[#2AABEE] to-[#229ED9] hover:from-[#249bd4] hover:to-[#1e8bc2] active:scale-[0.99] transition-all cursor-pointer"
+            >
+              {isArabic ? 'بدء المراسلة' : 'Start Messaging'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* SCREEN 2: PHONE NUMBER ENTRY SCREEN (Screenshot 2) */}
+      {/* ======================================================== */}
+      {currentView === 'phone' && authStep === 1 && (
+        <div className="w-full max-w-md mx-auto min-h-full flex flex-col justify-between p-4 sm:p-6 animate-in fade-in duration-200">
+          {/* Top Bar: Back Arrow & Three Dots More Menu */}
+          <div className="flex items-center justify-between w-full h-12 relative">
+            <button
+              onClick={() => {
+                if (isAddingAccount && onCancelAdd) onCancelAdd();
+                else setCurrentView('intro');
+              }}
+              className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-gray-600 dark:text-gray-300 transition-colors"
+              title={isArabic ? 'رجوع' : 'Back'}
+            >
+              <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
+            </button>
+
+            {/* Three Dots More Menu (Screenshot 3) */}
+            <div className="relative" ref={moreMenuRef}>
               <button
-                type="button"
-                onClick={loadQrCode}
-                disabled={isQrLoading}
-                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold rounded-2xl transition-all flex items-center justify-center gap-1.5"
+                onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-gray-700 dark:text-gray-200 transition-colors"
+                title={isArabic ? 'خيارات إضافية' : 'More options'}
               >
-                <RefreshCw size={14} className={isQrLoading ? 'animate-spin' : ''} />
-                <span>{isArabic ? 'تحديث الرمز' : 'Refresh QR'}</span>
+                <MoreVertical className="w-5 h-5" />
               </button>
 
-              {qrUrl && (
+              {/* Popover Menu matching Screenshot 3 */}
+              <AnimatePresence>
+                {isMoreMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute end-0 top-11 w-64 rounded-2xl shadow-2xl py-2 z-50 border bg-white dark:bg-[#1f2c3a] border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100"
+                  >
+                    {/* Item 1: Proxy Settings */}
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setActiveModal('api-config' as any);
+                      }}
+                      className="w-full px-4 py-3 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-sm font-medium text-start"
+                    >
+                      <span className="truncate">{isArabic ? 'إعدادات الخادم الوسيط' : 'Proxy Settings'}</span>
+                      <Shield className="w-5 h-5 text-gray-600 dark:text-gray-300 shrink-0 ms-2" />
+                    </button>
+
+                    {/* Item 2: Log in by QR code */}
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setCurrentView('qr');
+                      }}
+                      className="w-full px-4 py-3 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-sm font-medium text-start"
+                    >
+                      <span className="truncate">{isArabic ? 'تسجيل الدخول برمز QR' : 'Log in by QR code'}</span>
+                      <QrCode className="w-5 h-5 text-gray-600 dark:text-gray-300 shrink-0 ms-2" />
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+
+          {/* Center Form: Title, Subtitle, Country Box, Phone Box, Compatibility Mode */}
+          <div className="flex-1 flex flex-col justify-center max-w-sm w-full mx-auto my-auto text-center">
+            {/* Title */}
+            <h1 className="text-2xl font-bold mb-2">
+              {isArabic ? 'رقم هاتفك' : 'Your phone number'}
+            </h1>
+
+            {/* Subtitle */}
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-6 px-4 leading-relaxed">
+              {isArabic
+                ? 'يرجى تأكيد مفتاح بلدك وإدخال رقم هاتفك.'
+                : 'Please confirm your country code and enter your phone number.'}
+            </p>
+
+            {/* 1. Country Selector Box */}
+            <button
+              type="button"
+              onClick={() => setIsCountryModalOpen(true)}
+              className="w-full mb-4 px-4 py-3.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#17212b] hover:border-[#3390ec] flex items-center justify-between text-start transition-colors"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="text-xl">{selectedCountry.flag}</span>
+                <span className="text-sm font-medium truncate text-gray-800 dark:text-gray-100">
+                  {isArabic ? selectedCountry.nameAr : selectedCountry.nameEn}
+                </span>
+                <span className="text-xs text-gray-400 font-mono">({selectedCountry.callingCode})</span>
+              </div>
+              <ChevronRight className="w-5 h-5 text-gray-400 rtl:rotate-180 shrink-0" />
+            </button>
+
+            {/* 2. Floating Label Phone Input Box */}
+            <div className="relative w-full mb-4">
+              <div className="relative rounded-xl border-2 border-[#3390ec] bg-white dark:bg-[#17212b] px-4 py-3 text-start flex items-center">
+                {/* Floating Label Cutout on Top */}
+                <span className="absolute -top-2.5 start-3 px-1 text-[11px] font-semibold text-[#3390ec] bg-white dark:bg-[#17212b]">
+                  {isArabic ? 'رقم الهاتف' : 'Phone number'}
+                </span>
+                <span className="text-base font-bold text-gray-800 dark:text-gray-100 me-1.5 select-none font-mono">
+                  +
+                </span>
+                <input
+                  id="tg-official-phone-input"
+                  type="tel"
+                  autoFocus
+                  dir="ltr"
+                  value={phoneNumber.replace(/^\+/, '')}
+                  onChange={(e) => {
+                    const cleanVal = e.target.value.replace(/[^\d]/g, '');
+                    setPhoneNumber(cleanVal ? `+${cleanVal}` : '');
+                  }}
+                  placeholder=""
+                  className="w-full bg-transparent text-base font-bold text-gray-900 dark:text-white font-mono outline-none tracking-wide"
+                />
+              </div>
+            </div>
+
+            {/* 3. Compatibility Mode Checkbox */}
+            <div className="flex items-center justify-start gap-2 mb-6 px-1">
+              <label className="flex items-center gap-2 cursor-pointer text-xs sm:text-sm text-gray-600 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={compatibilityMode}
+                  onChange={(e) => setCompatibilityMode(e.target.checked)}
+                  className="w-4 h-4 rounded text-[#3390ec] border-gray-300 dark:border-gray-600 focus:ring-0 cursor-pointer"
+                />
+                <span>Compatibility mode</span>
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  showToast(
+                    isArabic
+                      ? 'وضع التوافق يتيح استخدام بروتوكول بديل للاتصال بشبكة تيليجرام'
+                      : 'Compatibility mode uses an alternative transport for restricted networks',
+                    'ℹ️'
+                  )
+                }
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <HelpCircle className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Floating Action Button (Arrow / Checkmark FAB - Screenshot 2 & 4) */}
+          <div className="w-full max-w-sm mx-auto flex justify-start mb-3">
+            <button
+              id="tg-auth-next-fab"
+              onClick={handleProceedPhone}
+              disabled={isLoading || !phoneNumber.replace(/\D/g, '').length}
+              className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-xl transition-all cursor-pointer ${
+                isConfirmedSuccess
+                  ? 'bg-emerald-500'
+                  : 'bg-[#3390ec] hover:bg-[#2884df] active:scale-95 disabled:opacity-50'
+              }`}
+              title={isArabic ? 'متابعة' : 'Continue'}
+            >
+              {isLoading ? (
+                <RotateCw className="w-6 h-6 animate-spin text-white" />
+              ) : isConfirmedSuccess ? (
+                <Check className="w-7 h-7 text-white stroke-[3]" />
+              ) : (
+                <ArrowRight className="w-6 h-6 rtl:rotate-180" />
+              )}
+            </button>
+          </div>
+
+          {/* Bottom On-Screen Numpad matching Screenshot 2 exactly */}
+          <div className="w-full max-w-sm mx-auto grid grid-cols-3 gap-2 pb-2">
+            {NUMPAD_KEYS.map((k, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleNumpadPress(k)}
+                disabled={k.isEmpty}
+                className={`h-14 rounded-xl flex flex-col items-center justify-center transition-all select-none ${
+                  k.isEmpty
+                    ? 'invisible'
+                    : 'bg-[#f4f4f5] dark:bg-[#232e3c] hover:bg-[#e4e4e7] dark:hover:bg-[#2c394b] active:scale-95 text-gray-800 dark:text-gray-100 shadow-sm cursor-pointer'
+                }`}
+              >
+                {k.isBackspace ? (
+                  <Delete className="w-6 h-6 text-gray-700 dark:text-gray-200" />
+                ) : (
+                  <>
+                    <span className="text-xl font-bold leading-tight">{k.digit}</span>
+                    {k.letters && (
+                      <span className="text-[10px] text-gray-400 font-semibold tracking-wider">
+                        {k.letters}
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* SCREEN 4: CONFIRMATION DIALOG (Screenshot 4) */}
+      {/* ======================================================== */}
+      <AnimatePresence>
+        {isConfirmModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+              className="bg-white dark:bg-[#17212b] rounded-3xl p-6 shadow-2xl max-w-xs w-full text-start border border-black/5 dark:border-white/10"
+              dir={isArabic ? 'rtl' : 'ltr'}
+            >
+              <h2 className="text-base font-bold text-gray-900 dark:text-white mb-2">
+                {isArabic ? 'هل هذا هو الرقم الصحيح؟' : 'Is this the correct number?'}
+              </h2>
+
+              <p className="text-lg font-bold text-[#3390ec] font-mono tracking-wider mb-6" dir="ltr">
+                {normalizeFullPhone(phoneNumber)}
+              </p>
+
+              <div className="flex items-center justify-between gap-4 pt-2">
+                <button
+                  onClick={() => setIsConfirmModalOpen(false)}
+                  className="text-sm font-bold text-[#3390ec] hover:underline cursor-pointer"
+                >
+                  {isArabic ? 'تعديل' : 'Edit'}
+                </button>
+                <button
+                  onClick={handleSendCode}
+                  className="text-sm font-bold text-[#3390ec] hover:underline cursor-pointer"
+                >
+                  {isArabic ? 'نعم' : 'Yes'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ======================================================== */}
+      {/* COUNTRY SELECTION MODAL */}
+      {/* ======================================================== */}
+      <AnimatePresence>
+        {isCountryModalOpen && (
+          <div className="fixed inset-0 z-50 flex flex-col bg-white dark:bg-[#17212b] animate-in slide-in-from-bottom duration-200">
+            {/* Modal Header */}
+            <div className="h-14 px-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <span className="font-bold text-base">
+                {isArabic ? 'اختر الدولة' : 'Select Country'}
+              </span>
+              <button
+                onClick={() => setIsCountryModalOpen(false)}
+                className="p-2 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white rounded-full"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+              <div className="relative flex items-center bg-gray-100 dark:bg-[#0e1621] rounded-xl px-3 py-2">
+                <Search className="w-4 h-4 text-gray-400 me-2" />
+                <input
+                  type="text"
+                  autoFocus
+                  value={countrySearchQuery}
+                  onChange={(e) => setCountrySearchQuery(e.target.value)}
+                  placeholder={isArabic ? 'البحث عن دولة أو رمز...' : 'Search country or code...'}
+                  className="w-full bg-transparent outline-none text-sm text-gray-800 dark:text-gray-100 placeholder:text-gray-400"
+                />
+              </div>
+            </div>
+
+            {/* Countries List */}
+            <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
+              {filteredCountries.map((c) => (
+                <button
+                  key={c.code}
+                  onClick={() => {
+                    setSelectedCountry(c);
+                    setPhoneNumber(c.callingCode);
+                    setIsCountryModalOpen(false);
+                    setCountrySearchQuery('');
+                  }}
+                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-start"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{c.flag}</span>
+                    <span className="text-sm font-medium">{isArabic ? c.nameAr : c.nameEn}</span>
+                  </div>
+                  <span className="text-sm font-mono text-gray-400">{c.callingCode}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ======================================================== */}
+      {/* STEP 2: VERIFICATION CODE INPUT */}
+      {/* ======================================================== */}
+      {currentView === 'phone' && authStep === 2 && (
+        <div className="w-full max-w-md mx-auto min-h-full flex flex-col justify-between p-4 sm:p-6 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between w-full h-12">
+            <button
+              onClick={() => {
+                setAuthStep(1);
+                setIsConfirmedSuccess(false);
+              }}
+              className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-gray-600 dark:text-gray-300"
+            >
+              <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
+            </button>
+            <span className="font-bold text-sm">{normalizeFullPhone(phoneNumber)}</span>
+            <div className="w-9" />
+          </div>
+
+          <div className="flex-1 flex flex-col justify-center max-w-sm w-full mx-auto my-auto text-center">
+            <h1 className="text-2xl font-bold mb-2">
+              {normalizeFullPhone(phoneNumber)}
+            </h1>
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-8 px-4 leading-relaxed">
+              {isArabic
+                ? 'أرسلنا الرمز إلى تطبيق تيليجرام على أجهزتك الأخرى.'
+                : "We've sent the code to the Telegram app on your other device."}
+            </p>
+
+            {/* 5 Code Boxes */}
+            <div className="flex items-center justify-center gap-3 mb-6" dir="ltr">
+              {verificationCode.map((digit, idx) => (
+                <div
+                  key={idx}
+                  className={`w-12 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold font-mono border-2 transition-all ${
+                    digit
+                      ? 'border-[#3390ec] text-gray-900 dark:text-white bg-[#3390ec]/5'
+                      : 'border-gray-300 dark:border-gray-700 text-gray-400'
+                  }`}
+                >
+                  {digit || ''}
+                </div>
+              ))}
+            </div>
+
+            {/* Resend Countdown */}
+            <div className="text-center mb-4">
+              {resendTimer > 0 ? (
+                <p className="text-xs text-gray-400 font-mono">
+                  {isArabic ? `إعادة الإرسال بعد ${resendTimer} ثانية` : `Resend code in ${resendTimer}s`}
+                </p>
+              ) : (
                 <button
                   type="button"
                   onClick={() => {
-                    window.location.href = qrUrl;
+                    setResendTimer(60);
+                    setIsResendActive(false);
+                    showToast(isArabic ? 'تمت إعادة إرسال الرمز' : 'Code resent', '📩');
                   }}
-                  className="flex-1 py-2.5 bg-[#2481cc] hover:bg-[#1f6fa8] text-white text-xs font-bold rounded-2xl shadow-lg shadow-[#2481cc]/25 transition-all flex items-center justify-center gap-1.5"
+                  className="text-xs font-semibold text-[#3390ec] hover:underline"
                 >
-                  <span>{isArabic ? 'فتح في تطبيق تيليجرام' : 'Open in Telegram'}</span>
+                  {isArabic ? 'إرسال الرمز عبر رسالة SMS' : 'Send code via SMS'}
                 </button>
               )}
             </div>
           </div>
-        )}
 
-        {/* MTProto 2.0 & API Configuration Footer */}
-        <div className="w-full mt-6 pt-4 border-t border-white/5 flex flex-col items-center gap-2 text-center">
-          <div className="flex items-center gap-2 text-[11px] text-gray-400 font-mono">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            <span>MTProto 2.0 (Layer 184)</span>
-            <span>•</span>
-            <span>API_ID: <strong className="text-white">{apiConfig?.apiId || '34773007'}</strong></span>
-          </div>
-
-          <div className="text-[10px] text-gray-500">
-            {isArabic
-              ? 'تشفير تام من طرف إلى طرف مع حماية الجلسات السحابية المتعددة'
-              : 'End-to-end encrypted with multi-instance cloud session isolation'}
+          {/* On-screen numpad for code entry */}
+          <div className="w-full max-w-sm mx-auto grid grid-cols-3 gap-2 pb-2">
+            {NUMPAD_KEYS.map((k, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleNumpadPress(k)}
+                disabled={k.isEmpty}
+                className={`h-14 rounded-xl flex flex-col items-center justify-center transition-all select-none ${
+                  k.isEmpty
+                    ? 'invisible'
+                    : 'bg-[#f4f4f5] dark:bg-[#232e3c] hover:bg-[#e4e4e7] dark:hover:bg-[#2c394b] active:scale-95 text-gray-800 dark:text-gray-100 shadow-sm cursor-pointer'
+                }`}
+              >
+                {k.isBackspace ? (
+                  <Delete className="w-6 h-6 text-gray-700 dark:text-gray-200" />
+                ) : (
+                  <>
+                    <span className="text-xl font-bold leading-tight">{k.digit}</span>
+                    {k.letters && (
+                      <span className="text-[10px] text-gray-400 font-semibold tracking-wider">
+                        {k.letters}
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+            ))}
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* STEP 3: 2FA PASSWORD INPUT */}
+      {/* ======================================================== */}
+      {currentView === 'phone' && authStep === 3 && (
+        <div className="w-full max-w-md mx-auto min-h-full flex flex-col justify-center p-6 sm:p-8 animate-in fade-in">
+          <form onSubmit={handleVerify2FAPassword} className="space-y-5 text-center">
+            <div className="w-16 h-16 rounded-full bg-[#3390ec]/15 text-[#3390ec] flex items-center justify-center mx-auto mb-2">
+              <Lock className="w-8 h-8" />
+            </div>
+
+            <h1 className="text-2xl font-bold">
+              {isArabic ? 'التحقق بخطوتين' : 'Two-Step Verification'}
+            </h1>
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-4 leading-relaxed">
+              {isArabic
+                ? 'حسابك محمي بكلمة مرور سحابية إضافية. يرجى إدخالها.'
+                : 'Your account is protected by an additional cloud password. Please enter it.'}
+            </p>
+
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={cloudPassword}
+                onChange={(e) => setCloudPassword(e.target.value)}
+                placeholder={isArabic ? 'كلمة المرور' : 'Password'}
+                autoFocus
+                className="w-full px-4 py-3.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#17212b] text-base outline-none focus:border-[#3390ec]"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute end-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading || !cloudPassword.trim()}
+              className="w-full py-3.5 rounded-full font-bold text-white bg-[#3390ec] hover:bg-[#2884df] transition-all disabled:opacity-50"
+            >
+              {isLoading ? '...' : isArabic ? 'تأكيد ودخول' : 'Confirm'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* STEP 4: SIGN UP PROFILE (New Users) */}
+      {/* ======================================================== */}
+      {currentView === 'phone' && authStep === 4 && (
+        <div className="w-full max-w-md mx-auto min-h-full flex flex-col justify-center p-6 sm:p-8 animate-in fade-in">
+          <form onSubmit={handleSignUpSubmit} className="space-y-5 text-center">
+            <div className="w-16 h-16 rounded-full bg-[#3390ec]/15 text-[#3390ec] flex items-center justify-center mx-auto mb-2">
+              <UserIcon className="w-8 h-8" />
+            </div>
+
+            <h1 className="text-2xl font-bold">
+              {isArabic ? 'معلومات حسابك' : 'Your Information'}
+            </h1>
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-4 leading-relaxed">
+              {isArabic
+                ? 'أدخل اسمك وصورة لملفك الشخصي على تيليجرام.'
+                : 'Enter your name and profile info to finish setup.'}
+            </p>
+
+            <input
+              type="text"
+              required
+              autoFocus
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder={isArabic ? 'الاسم الأول (مطلوب)' : 'First Name (required)'}
+              className="w-full px-4 py-3.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#17212b] text-base outline-none focus:border-[#3390ec]"
+            />
+
+            <input
+              type="text"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              placeholder={isArabic ? 'اسم العائلة (اختياري)' : 'Last Name (optional)'}
+              className="w-full px-4 py-3.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#17212b] text-base outline-none focus:border-[#3390ec]"
+            />
+
+            <button
+              type="submit"
+              disabled={isLoading || !firstName.trim()}
+              className="w-full py-3.5 rounded-full font-bold text-white bg-[#3390ec] hover:bg-[#2884df] transition-all disabled:opacity-50"
+            >
+              {isLoading ? '...' : isArabic ? 'إنهاء والتسجيل' : 'Finish'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* QR CODE LOGIN SCREEN */}
+      {/* ======================================================== */}
+      {currentView === 'qr' && (
+        <div className="w-full max-w-md mx-auto min-h-full flex flex-col justify-between p-6 sm:p-8 animate-in fade-in">
+          <div className="flex items-center justify-between w-full h-12">
+            <button
+              onClick={() => setCurrentView('phone')}
+              className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-gray-600 dark:text-gray-300"
+            >
+              <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
+            </button>
+            <span className="font-bold text-sm">
+              {isArabic ? 'تسجيل الدخول برمز QR' : 'Log in by QR code'}
+            </span>
+            <div className="w-9" />
+          </div>
+
+          <div className="flex-1 flex flex-col items-center justify-center text-center my-auto">
+            {qrCodeUrl ? (
+              <div className="p-4 bg-white rounded-3xl shadow-xl border border-gray-200 mb-6">
+                <img src={qrCodeUrl} alt="QR Code" className="w-56 h-56" />
+              </div>
+            ) : (
+              <div className="w-56 h-56 bg-gray-100 dark:bg-gray-800 rounded-3xl animate-pulse flex items-center justify-center mb-6">
+                <QrCode className="w-16 h-16 text-gray-400" />
+              </div>
+            )}
+
+            <h2 className="text-xl font-bold mb-3">
+              {isArabic ? 'تسجيل الدخول السريع عبر QR' : 'Log in to Telegram by QR Code'}
+            </h2>
+
+            <ol className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 max-w-xs space-y-1.5 text-start px-2 mb-6">
+              <li>1. {isArabic ? 'افتح تطبيق تيليجرام على هاتفك' : 'Open Telegram on your phone'}</li>
+              <li>
+                2. {isArabic ? 'اذهب إلى الإعدادات > الأجهزة > ربط جهاز' : 'Go to Settings > Devices > Link Desktop Device'}
+              </li>
+              <li>3. {isArabic ? 'وجه كاميرا هاتفك نحو هذا الرمز' : 'Point your phone at this screen to confirm'}</li>
+            </ol>
+          </div>
+
+          <div className="w-full pb-4">
+            <button
+              onClick={() => setCurrentView('phone')}
+              className="w-full py-3.5 rounded-full font-bold text-[#3390ec] hover:bg-[#3390ec]/10 transition-colors"
+            >
+              {isArabic ? 'تسجيل الدخول برقم الهاتف' : 'Log in by phone number'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

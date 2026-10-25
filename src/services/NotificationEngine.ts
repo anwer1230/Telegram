@@ -338,6 +338,18 @@ export class NotificationEngine {
   }
 
   /**
+   * Restores a previously dismissed in-app notification banner (for Undo)
+   */
+  public restoreNotification(notification: InAppNotification): void {
+    if (!notification || !notification.id) return;
+    if (!this.activeNotifications.some((n) => n.id === notification.id)) {
+      this.activeNotifications = [...this.activeNotifications, notification];
+      this.notifyListeners();
+      NotificationCenter.getGlobalInstance().postNotificationName('notificationsCountUpdated');
+    }
+  }
+
+  /**
    * Removes all active notifications for a specific dialog/chat ID (e.g. when chat is opened)
    */
   public removeNotificationsForDialog(chatId: string): void {
