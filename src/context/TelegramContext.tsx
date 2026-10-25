@@ -4801,6 +4801,29 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
 
+      // Helper to match chats across canonical prefixes (-100, -, chat_) and aliases
+      const isChatIdEquivalent = (idA?: string, idB?: string): boolean => {
+        if (!idA || !idB) return false;
+        if (idA === idB) return true;
+        const cleanA = String(idA).replace(/^chat_/, '');
+        const cleanB = String(idB).replace(/^chat_/, '');
+        if (cleanA === cleanB) return true;
+
+        const rawA = cleanA.replace(/^-100/, '').replace(/^-/, '');
+        const rawB = cleanB.replace(/^-100/, '').replace(/^-/, '');
+        if (rawA && rawA === rawB) return true;
+
+        const myId = String(currentUser.id || '');
+        if (
+          (idA === 'chat_saved_messages' || idB === 'chat_saved_messages') &&
+          (cleanA === 'me' || cleanB === 'me' || (myId && (cleanA === myId || cleanB === myId)))
+        ) {
+          return true;
+        }
+
+        return false;
+      };
+
       if (
         update.type === 'edit_message' ||
         update.type === 'delete_messages' ||
@@ -4816,56 +4839,71 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const editChatId = update.chatId || editedMsg.chatId;
           if (editChatId) {
             setMessages((prev) => {
-              const currentList = prev[editChatId] || [];
-              const updatedList = currentList.map((m) => m.id === editedMsg.id ? { ...m, ...editedMsg } : m);
-              return { ...prev, [editChatId]: updatedList };
+              const next = { ...prev };
+              let updated = false;
+              for (const [k, msgList] of Object.entries(next)) {
+                if (k === editChatId || isChatIdEquivalent(k, editChatId)) {
+                  next[k] = msgList.map((m) => (String(m.id) === String(editedMsg.id) ? { ...m, ...editedMsg } : m));
+                  updated = true;
+                }
+              }
+              if (!updated && next[editChatId]) {
+                next[editChatId] = (next[editChatId] || []).map((m) =>
+                  String(m.id) === String(editedMsg.id) ? { ...m, ...editedMsg } : m
+                );
+              }
+              return next;
             });
           }
         } else if (update.type === 'delete_messages') {
           const deletedIds = new Set((update.messages || []).map(String));
+          const targetChannelId = update.channelId || update.chatId;
           setMessages((prev) => {
             const next = { ...prev };
             Object.keys(next).forEach((cId) => {
-              if (update.channelId && cId !== update.channelId) return;
+              if (targetChannelId && cId !== targetChannelId && !isChatIdEquivalent(cId, targetChannelId)) return;
               next[cId] = next[cId].filter((m) => !deletedIds.has(String(m.id)));
             });
             return next;
           });
         } else if (update.type === 'read_history_outbox') {
-          const targetChatId = update.chatId;
+          const targetChatId = update.chatId || update.channelId;
           const maxIdNum = Number(update.maxId || 0);
           if (targetChatId) {
             setMessages((prev) => {
-              const currentList = prev[targetChatId] || [];
-              if (currentList.length === 0) return prev;
-              const updatedList = currentList.map((m) => {
-                if (m.isOutgoing && m.status !== 'read') {
-                  const mIdNum = Number(m.id);
-                  if (!isNaN(mIdNum) && !isNaN(maxIdNum) && mIdNum <= maxIdNum) {
-                    return { ...m, status: 'read' as const };
-                  } else if (isNaN(mIdNum)) {
-                    return { ...m, status: 'read' as const };
-                  }
+              const next = { ...prev };
+              for (const [k, msgList] of Object.entries(next)) {
+                if (k === targetChatId || isChatIdEquivalent(k, targetChatId)) {
+                  next[k] = msgList.map((m) => {
+                    if (m.isOutgoing && m.status !== 'read') {
+                      const mIdNum = Number(m.id);
+                      if (!isNaN(mIdNum) && !isNaN(maxIdNum) && mIdNum <= maxIdNum) {
+                        return { ...m, status: 'read' as const };
+                      } else if (isNaN(mIdNum)) {
+                        return { ...m, status: 'read' as const };
+                      }
+                    }
+                    return m;
+                  });
                 }
-                return m;
-              });
-              return { ...prev, [targetChatId]: updatedList };
+              }
+              return next;
             });
 
             setChats((prev) =>
               prev.map((c) =>
-                c.id === targetChatId && c.lastMessage?.isOutgoing
+                (c.id === targetChatId || isChatIdEquivalent(c.id, targetChatId)) && c.lastMessage?.isOutgoing
                   ? { ...c, lastMessage: { ...c.lastMessage, status: 'read' } }
                   : c
               )
             );
           }
         } else if (update.type === 'read_history_inbox') {
-          const targetChatId = update.chatId;
+          const targetChatId = update.chatId || update.channelId;
           if (targetChatId) {
             setChats((prev) =>
               prev.map((c) =>
-                c.id === targetChatId
+                c.id === targetChatId || isChatIdEquivalent(c.id, targetChatId)
                   ? { ...c, unreadCount: 0 }
                   : c
               )
@@ -4892,81 +4930,83 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       lastUpdateEpoch = Math.max(lastUpdateEpoch, update.epoch || Date.now());
 
-      const isCurrentChat = Boolean(
-        activeChatId && (
-          targetChatId === activeChatId ||
-          targetChatId.replace(/^chat_/, '') === activeChatId.replace(/^chat_/, '')
-        )
-      );
+      // Helper to check if a chat item matches targetChatId or peerIdStr
+      const findMatchingChat = (chatList: Chat[]): Chat | undefined => {
+        const cleanTarget = String(targetChatId).replace(/^chat_/, '');
+        const cleanPeer = peerIdStr ? String(peerIdStr).replace(/^chat_/, '') : '';
+        const rawTarget = cleanTarget.replace(/^-100/, '').replace(/^-/, '');
+        const rawPeer = cleanPeer.replace(/^-100/, '').replace(/^-/, '');
+        const myId = String(currentUser.id || '');
 
-      // Clear typing indicator for this chat when a new message arrives from it
-      setTypingStatus((prev) => {
-        if (!prev[targetChatId]) return prev;
-        const next = { ...prev };
-        delete next[targetChatId];
-        return next;
-      });
-      setTypingChatId((cur) => (cur === targetChatId ? null : cur));
+        return chatList.find((c) => {
+          if (!c) return false;
+          if (c.id === targetChatId) return true;
+          if (c.peerId && (String(c.peerId) === peerIdStr || String(c.peerId) === cleanTarget || String(c.peerId) === cleanPeer)) {
+            return true;
+          }
 
-      // 1. Update messages state STRICTLY for targetChatId only (preventing cross-chat leakage)
-      setMessages((prev) => {
-        const existing = prev[targetChatId] || [];
-        if (existing.some((m) => m.id === msg.id)) {
-          // Already present, update status/fields if changed
-          return {
-            ...prev,
-            [targetChatId]: existing.map((m) =>
-              m.id === msg.id ? { ...m, ...msg, isOutgoing: isOut, chatId: targetChatId } : m
-            ),
-          };
-        }
+          const cleanCId = String(c.id || '').replace(/^chat_/, '');
+          const rawC = cleanCId.replace(/^-100/, '').replace(/^-/, '');
+          if (rawC && (rawC === rawTarget || (rawPeer && rawC === rawPeer))) {
+            return true;
+          }
 
-        const merged = [...existing, { ...msg, isOutgoing: isOut, chatId: targetChatId }].sort((a, b) => {
-          const epochA = getTelegramEpoch(a);
-          const epochB = getTelegramEpoch(b);
-          if (epochA !== epochB) return epochA - epochB;
-          const numA = Number(String(a.id).replace(/\D/g, '')) || 0;
-          const numB = Number(String(b.id).replace(/\D/g, '')) || 0;
-          if (numA !== numB) return numA - numB;
-          return String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true });
+          if (
+            (c.id === 'chat_saved_messages' || c.type === 'saved') &&
+            (cleanTarget === 'me' || cleanPeer === 'me' || (myId && (cleanTarget === myId || cleanPeer === myId)))
+          ) {
+            return true;
+          }
+
+          return false;
         });
+      };
 
-        return {
-          ...prev,
-          [targetChatId]: merged,
-        };
-      });
+      // 1. Identify matching chat and update sidebar in real-time
+      let matchedChat: Chat | undefined = undefined;
 
-      // Persist incoming message to IndexedDB cache
-      messageCache.putMessage(targetChatId, { ...msg, isOutgoing: isOut, chatId: targetChatId }, update).catch(() => {});
-
-      // Update lastReadMessageId if user is viewing this chat and at the bottom
-      if (isCurrentChat && msg.id) {
-        checkAndUpdateLastReadIfAtBottom(targetChatId, msg.id);
-      }
-
-      // 2. Update chat item in chats list and reorder to top
       setChats((prev) => {
-        const matchingChat = prev.find(
-          (c) =>
-            c.id === targetChatId ||
-            (peerIdStr && String(c.peerId) === peerIdStr) ||
-            (isCurrentChat && c.id === activeChatId)
+        matchedChat = findMatchingChat(prev);
+        const resolvedChatId = matchedChat ? matchedChat.id : targetChatId;
+        const isChatOpen = Boolean(
+          activeChatId && (
+            activeChatId === resolvedChatId ||
+            isChatIdEquivalent(activeChatId, resolvedChatId) ||
+            isChatIdEquivalent(activeChatId, targetChatId)
+          )
         );
 
-        if (!matchingChat) {
+        if (!matchedChat) {
+          // Chat stub for immediate appearance on brand new or cold chats
+          const cleanP = peerIdStr || targetChatId.replace(/^chat_/, '');
+          const isChannel = cleanP.startsWith('-100');
+          const isGroup = !isChannel && cleanP.startsWith('-');
+          const newStub: Chat = {
+            id: targetChatId,
+            peerId: cleanP,
+            type: (isChannel ? 'channel' : isGroup ? 'group' : 'private') as any,
+            title: msg.senderName && msg.senderName !== 'أنت' ? msg.senderName : 'محادثة',
+            avatar: `/api/avatar/${cleanP}`,
+            unreadCount: isChatOpen || isOut ? 0 : 1,
+            lastMessage: {
+              id: msg.id,
+              senderName: msg.senderName || (isOut ? 'أنت' : 'مستخدم'),
+              text: msg.text,
+              timestamp: msg.timestamp,
+              isOutgoing: isOut,
+              status: msg.status || (isOut ? 'sent' : 'read'),
+              mediaType: msg.media?.type,
+            },
+          };
           syncInitializationRoutine().catch(() => {});
-          return prev;
+          return [newStub, ...prev];
         }
 
-        const resolvedChatId = matchingChat.id;
-        const isChatOpen = activeChatId === resolvedChatId;
-
         return reorderChatsWithUpdate(prev, resolvedChatId, {
-          unreadCount: isChatOpen || isOut ? matchingChat.unreadCount : (matchingChat.unreadCount || 0) + 1,
+          unreadCount: isChatOpen || isOut ? matchedChat.unreadCount : (matchedChat.unreadCount || 0) + 1,
           lastMessage: {
             id: msg.id,
-            senderName: msg.senderName || (isOut ? 'أنت' : matchingChat.title),
+            senderName: msg.senderName || (isOut ? 'أنت' : matchedChat.title),
             text: msg.text,
             timestamp: msg.timestamp,
             isOutgoing: isOut,
@@ -4975,6 +5015,73 @@ export const TelegramProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           },
         });
       });
+
+      const resolvedChatId = matchedChat ? (matchedChat as Chat).id : targetChatId;
+      const isCurrentChat = Boolean(
+        activeChatId && (
+          activeChatId === targetChatId ||
+          activeChatId === resolvedChatId ||
+          isChatIdEquivalent(activeChatId, targetChatId) ||
+          isChatIdEquivalent(activeChatId, resolvedChatId)
+        )
+      );
+
+      // Clear typing indicator for this chat when a new message arrives from it
+      setTypingStatus((prev) => {
+        if (!prev[targetChatId] && !prev[resolvedChatId]) return prev;
+        const next = { ...prev };
+        delete next[targetChatId];
+        delete next[resolvedChatId];
+        return next;
+      });
+      setTypingChatId((cur) => (cur === targetChatId || cur === resolvedChatId ? null : cur));
+
+      // 2. Update messages state for all equivalent chat ID keys to guarantee instant display
+      setMessages((prev) => {
+        const keysToUpdate = new Set<string>([targetChatId, resolvedChatId]);
+        if (isCurrentChat && activeChatId) {
+          keysToUpdate.add(activeChatId);
+        }
+
+        const next = { ...prev };
+        for (const k of keysToUpdate) {
+          const existing = next[k] || [];
+          if (existing.some((m) => String(m.id) === String(msg.id))) {
+            next[k] = existing.map((m) =>
+              String(m.id) === String(msg.id) ? { ...m, ...msg, isOutgoing: isOut, chatId: k } : m
+            );
+          } else {
+            const merged = [...existing, { ...msg, isOutgoing: isOut, chatId: k }].sort((a, b) => {
+              const epochA = getTelegramEpoch(a);
+              const epochB = getTelegramEpoch(b);
+              if (epochA !== epochB) return epochA - epochB;
+              const numA = Number(String(a.id).replace(/\D/g, '')) || 0;
+              const numB = Number(String(b.id).replace(/\D/g, '')) || 0;
+              if (numA !== numB) return numA - numB;
+              return String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true });
+            });
+            next[k] = merged;
+          }
+        }
+        return next;
+      });
+
+      // Persist incoming message to IndexedDB cache
+      messageCache.putMessage(targetChatId, { ...msg, isOutgoing: isOut, chatId: targetChatId }, update).catch(() => {});
+      if (resolvedChatId !== targetChatId) {
+        messageCache.putMessage(resolvedChatId, { ...msg, isOutgoing: isOut, chatId: resolvedChatId }, update).catch(() => {});
+      }
+      if (isCurrentChat && activeChatId && activeChatId !== targetChatId && activeChatId !== resolvedChatId) {
+        messageCache.putMessage(activeChatId, { ...msg, isOutgoing: isOut, chatId: activeChatId }, update).catch(() => {});
+      }
+
+      // Update lastReadMessageId if user is viewing this chat and at the bottom
+      if (isCurrentChat && msg.id) {
+        checkAndUpdateLastReadIfAtBottom(targetChatId, msg.id);
+        if (resolvedChatId !== targetChatId) {
+          checkAndUpdateLastReadIfAtBottom(resolvedChatId, msg.id);
+        }
+      }
 
       // 3. If incoming (not sent by us), trigger audio, notifications, and private auto-reply evaluation
       if (!isOut) {

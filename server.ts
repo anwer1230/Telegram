@@ -2151,6 +2151,61 @@ async function startServer() {
     }
   }
 
+  // Canonical MTProto Peer & Chat ID Resolver
+  // Correctly formats canonical peer IDs for all Telegram entity types:
+  // - Channel / Supergroup: -100${channelId} -> chat_-100${channelId}
+  // - Basic Group Chat: -${chatId} -> chat_-${chatId}
+  // - Private User: ${userId} -> chat_${userId}
+  // - GramJS Unified ID: Preserves negative and positive IDs as returned by getPeerId
+  const getCanonicalPeerId = (peerOrUpdate: any, fallback?: any): string => {
+    if (!peerOrUpdate) return fallback ? String(fallback) : '';
+
+    if (typeof peerOrUpdate === 'number' || typeof peerOrUpdate === 'bigint') {
+      return String(peerOrUpdate);
+    }
+
+    if (typeof peerOrUpdate === 'string') {
+      const clean = peerOrUpdate.replace(/^chat_/, '');
+      return clean;
+    }
+
+    // 1. GramJS event.chatId or msg.chatId property
+    if (peerOrUpdate.chatId !== undefined && peerOrUpdate.chatId !== null) {
+      const s = String(peerOrUpdate.chatId);
+      if (s.startsWith('-')) return s;
+      const cls = peerOrUpdate.className || peerOrUpdate._ || '';
+      if (cls === 'PeerChat' || cls === 'Chat' || cls === 'ChatForbidden') {
+        return `-${s}`;
+      }
+      return s;
+    }
+
+    // 2. Channel ID property (Supergroups and Channels require -100 prefix)
+    if (peerOrUpdate.channelId !== undefined && peerOrUpdate.channelId !== null) {
+      const clean = String(peerOrUpdate.channelId).replace(/^-100/, '').replace(/^-/, '');
+      return `-100${clean}`;
+    }
+
+    // 3. User ID property
+    if (peerOrUpdate.userId !== undefined && peerOrUpdate.userId !== null) {
+      return String(peerOrUpdate.userId);
+    }
+
+    // 4. Inspect nested peerId, peer, or fromId
+    const nested = peerOrUpdate.peerId || peerOrUpdate.peer || peerOrUpdate.fromId;
+    if (nested && typeof nested === 'object' && nested !== peerOrUpdate) {
+      return getCanonicalPeerId(nested, fallback);
+    }
+
+    return fallback ? String(fallback) : '';
+  };
+
+  const getCanonicalChatId = (peerOrUpdate: any, fallback?: any): string => {
+    const peerId = getCanonicalPeerId(peerOrUpdate, fallback);
+    if (!peerId) return '';
+    return peerId.startsWith('chat_') ? peerId : `chat_${peerId}`;
+  };
+
   // Helper to safely configure TelegramClient with log level, error boundary, and updates listeners
   const configureTelegramClient = (client: TelegramClient, sessionKey?: string): TelegramClient => {
     try {
@@ -2185,30 +2240,60 @@ async function startServer() {
           const msg = event?.message;
           if (!msg) return;
 
-          const peerId = msg.peerId
-            ? msg.peerId.channelId || msg.peerId.chatId || msg.peerId.userId || msg.chatId
-            : msg.chatId;
-          const peerIdStr = peerId ? String(peerId) : '';
-          const chatId = `chat_${peerIdStr}`;
+          const myIdStr = String(USERS.get(currentAccount)?.id || (client as any)?._selfInputPeer?.userId || '');
+
+          // Compute canonical peer ID and chat ID
+          const canonicalPeerId = getCanonicalPeerId(msg, event.chatId);
+          const rawPeerIdClean = canonicalPeerId.replace(/^-100/, '').replace(/^-/, '');
+          const isMeMsg = Boolean((canonicalPeerId && myIdStr && canonicalPeerId === myIdStr) || msg.isSaved || (msg.out && canonicalPeerId === myIdStr));
+          const chatId = isMeMsg ? 'chat_saved_messages' : getCanonicalChatId(msg, event.chatId);
+          const peerIdStr = isMeMsg ? (myIdStr || 'me') : canonicalPeerId;
+
           const senderId = msg.fromId
-            ? String(msg.fromId.userId || msg.fromId.channelId || msg.senderId || '')
+            ? getCanonicalPeerId(msg.fromId, msg.senderId)
             : msg.senderId
             ? String(msg.senderId)
             : '';
 
+          const altChatIds = [
+            chatId,
+            `chat_${canonicalPeerId}`,
+            `chat_${rawPeerIdClean}`,
+            canonicalPeerId.startsWith('-100') ? `chat_${canonicalPeerId.replace(/^-100/, '')}` : '',
+            canonicalPeerId.startsWith('-') ? `chat_${canonicalPeerId.replace(/^-/, '')}` : '',
+            isMeMsg ? 'chat_saved_messages' : '',
+          ].filter(Boolean);
+
           let senderName = 'Telegram User';
-          try {
-            const sender = await msg.getSender();
-            if (sender) {
-              senderName =
-                [sender.firstName || sender.first_name, sender.lastName || sender.last_name]
-                  .filter(Boolean)
-                  .join(' ') ||
-                sender.username ||
-                sender.title ||
-                senderName;
-            }
-          } catch (_) {}
+          // Instant synchronous resolution from event entities / local cache to prevent network blocking
+          const cachedSender =
+            (event as any)?._entities?.get?.(String(msg.senderId)) ||
+            (event as any)?._entities?.get?.(senderId) ||
+            peerEntityCache.get(senderId) ||
+            peerEntityCache.get(String(msg.senderId));
+
+          if (cachedSender) {
+            senderName =
+              [cachedSender.firstName || cachedSender.first_name, cachedSender.lastName || cachedSender.last_name]
+                .filter(Boolean)
+                .join(' ') ||
+              cachedSender.username ||
+              cachedSender.title ||
+              senderName;
+          } else {
+            try {
+              const sender = await withTimeout(msg.getSender().catch(() => null), 300, null);
+              if (sender) {
+                senderName =
+                  [sender.firstName || sender.first_name, sender.lastName || sender.last_name]
+                    .filter(Boolean)
+                    .join(' ') ||
+                  sender.username ||
+                  sender.title ||
+                  senderName;
+              }
+            } catch (_) {}
+          }
 
           let textSnippet = msg.message || '';
           let mediaType = undefined;
@@ -2232,6 +2317,8 @@ async function startServer() {
             id: String(msg.id),
             chatId,
             peerId: peerIdStr,
+            rawPeerId: rawPeerIdClean,
+            altChatIds,
             senderId,
             senderName: isOut ? 'أنت' : senderName,
             text: textSnippet,
@@ -2245,38 +2332,27 @@ async function startServer() {
             mediaType,
           };
 
-          // Immediate real-time broadcast via Socket.IO raw_update
+          const newMsgPayload = {
+            type: 'new_message',
+            chatId,
+            peerId: peerIdStr,
+            rawPeerId: rawPeerIdClean,
+            altChatIds,
+            out: isOut,
+            message: formattedMsg,
+            epoch: Date.now(),
+            pts: (event as any)?.pts || (msg as any)?.pts || (event as any)?.originalUpdate?.pts,
+          };
+
+          // Immediate real-time broadcast via Socket.IO
           try {
-            io.emit('new_message', {
-              type: 'new_message',
-              chatId,
-              peerId: peerIdStr,
-              out: isOut,
-              message: formattedMsg,
-              epoch: Date.now(),
-              pts: (event as any)?.pts || (msg as any)?.pts || (event as any)?.originalUpdate?.pts,
-            });
-            io.emit('raw_update', {
-              type: 'new_message',
-              chatId,
-              peerId: peerIdStr,
-              out: isOut,
-              message: formattedMsg,
-              epoch: Date.now(),
-              pts: (event as any)?.pts || (msg as any)?.pts || (event as any)?.originalUpdate?.pts,
-            });
+            io.emit('new_message', newMsgPayload);
+            io.emit('raw_update', newMsgPayload);
           } catch (_) {}
 
           telegramDataCache.clear();
 
-          broadcastTelegramUpdate({
-            type: 'new_message',
-            chatId,
-            peerId: peerIdStr,
-            out: isOut,
-            message: formattedMsg,
-            epoch: Date.now(),
-          });
+          broadcastTelegramUpdate(newMsgPayload);
 
           // Persist PTS, SEQ, QTS after each message into sessions/account_X.json so no event is lost
           const msgPts = (event as any)?.pts || (msg as any)?.pts || (event as any)?.originalUpdate?.pts;
@@ -2337,7 +2413,7 @@ async function startServer() {
               if (targetUserId && !sentWelcomeUsers.has(targetUserId)) {
                 sentWelcomeUsers.add(targetUserId);
                 if (peerIdStr) sentWelcomeUsers.add(peerIdStr);
-                const welcomePeer = event.message?.peerId || peerId || targetUserId;
+                const welcomePeer = event.message?.peerId || peerIdStr || targetUserId;
                 const welcomeMessage = 'مرحباً بك! شكراً لتواصلك معنا 🌸\nنسعد بخدمتك، تفضل بإرسال تفاصيل طلبك أو استفسارك وسنقوم بالرد عليك في أقرب وقت إن شاء الله ✨';
                 client.sendMessage(welcomePeer, {
                   message: welcomeMessage,
@@ -2777,13 +2853,11 @@ async function startServer() {
           ) {
             const msg = update.message;
             if (msg) {
-              const peerId = msg.peerId
-                ? msg.peerId.channelId || msg.peerId.chatId || msg.peerId.userId || msg.chatId
-                : msg.chatId;
-              const peerIdStr = peerId ? String(peerId) : '';
-              const chatId = `chat_${peerIdStr}`;
+              const canonicalPeerId = getCanonicalPeerId(msg, update.channelId);
+              const chatId = getCanonicalChatId(msg, update.channelId);
+              const peerIdStr = canonicalPeerId;
               const senderId = msg.fromId
-                ? String(msg.fromId.userId || msg.fromId.channelId || msg.senderId || '')
+                ? getCanonicalPeerId(msg.fromId, msg.senderId)
                 : msg.senderId
                 ? String(msg.senderId)
                 : '';
@@ -2796,6 +2870,7 @@ async function startServer() {
                 className: update.className || update._,
                 chatId,
                 peerId: peerIdStr,
+                altChatIds: [chatId, `chat_${peerIdStr}`],
                 messageId: String(msg.id),
                 message: {
                   id: String(msg.id),
@@ -2829,12 +2904,13 @@ async function startServer() {
             update.className === 'UpdateDeleteChannelMessages' ||
             update._ === 'updateDeleteChannelMessages'
           ) {
-            const channelId = update.channelId ? `chat_${update.channelId}` : undefined;
+            const canonicalChatId = update.channelId ? getCanonicalChatId(update.channelId) : undefined;
             const messages = (update.messages || []).map(String);
             const deletePayload = {
               type: 'delete_messages',
               className: update.className || update._,
-              channelId,
+              channelId: canonicalChatId,
+              chatId: canonicalChatId,
               messages,
               pts: update.pts,
               pts_count: update.pts_count,
@@ -2852,15 +2928,13 @@ async function startServer() {
             update.className === 'UpdateReadChannelInbox' ||
             update._ === 'updateReadChannelInbox'
           ) {
-            const peerId = update.peer
-              ? update.peer.channelId || update.peer.chatId || update.peer.userId
-              : update.channelId;
-            const chatId = peerId ? `chat_${peerId}` : '';
+            const chatId = getCanonicalChatId(update.peer || update.channelId);
             const maxId = update.maxId || update.max_id;
             const readPayload = {
               type: 'read_history_inbox',
               className: update.className || update._,
               chatId,
+              channelId: chatId,
               maxId: maxId ? String(maxId) : undefined,
               stillUnreadCount: update.stillUnreadCount || update.still_unread_count || 0,
               pts: update.pts,
@@ -2879,15 +2953,13 @@ async function startServer() {
             update.className === 'UpdateReadChannelOutbox' ||
             update._ === 'updateReadChannelOutbox'
           ) {
-            const peerId = update.peer
-              ? update.peer.channelId || update.peer.chatId || update.peer.userId
-              : update.channelId;
-            const chatId = peerId ? `chat_${peerId}` : '';
+            const chatId = getCanonicalChatId(update.peer || update.channelId);
             const maxId = update.maxId || update.max_id;
             const readPayload = {
               type: 'read_history_outbox',
               className: update.className || update._,
               chatId,
+              channelId: chatId,
               maxId: maxId ? String(maxId) : undefined,
               pts: update.pts,
               pts_count: update.pts_count,
@@ -2968,10 +3040,9 @@ async function startServer() {
             update.className === 'UpdateUserTyping' ||
             update._ === 'updateUserTyping'
           ) {
-            const rawChatId = update.channelId || update.chatId || update.userId;
-            const chatId = rawChatId ? (String(rawChatId).startsWith('chat_') ? String(rawChatId) : `chat_${rawChatId}`) : '';
+            const chatId = getCanonicalChatId(update);
             const userId = update.fromId
-              ? String(update.fromId.userId || update.fromId.channelId || update.fromId)
+              ? getCanonicalPeerId(update.fromId)
               : update.userId ? String(update.userId) : '';
             let actionType = 'typing';
             if (update.action) {
@@ -3004,8 +3075,7 @@ async function startServer() {
             update.className === 'UpdateChatParticipants' ||
             update._ === 'updateChatParticipants'
           ) {
-            const rawChatId = update.channelId || update.chatId;
-            const chatId = rawChatId ? (String(rawChatId).startsWith('chat_') ? String(rawChatId) : `chat_${rawChatId}`) : '';
+            const chatId = getCanonicalChatId(update);
             const onlineCount = update.onlineCount || update.online_count || 0;
             const onlinePayload = {
               type: 'chat_online_count',
